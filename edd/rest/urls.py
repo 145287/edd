@@ -40,11 +40,11 @@ strain_nested_resources_router = (
                                       lookup='strain'))
 strain_nested_resources_router.register(r'studies', StrainStudiesView, base_name='strain-studies')
 
-# TODO: consider re-jiggering urlpatterns to make nested resources visible in the browseable API
 urlpatterns = [
 #   url(r'docs/$', include('rest_framework_swagger.urls')),
     url(r'', include(base_rest_api_router.urls)),
     url(r'', include(study_nested_resources_router.urls)),
     url(r'', include(strain_nested_resources_router.urls)),
     url(r'', include('rest_framework.urls', namespace='rest_framework')),
+    url(r'docs/', include('rest_framework_swagger.urls')),
 ]

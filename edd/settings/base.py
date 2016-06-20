@@ -85,6 +85,7 @@ INSTALLED_APPS = (
     'django.contrib.postgres',
     'django_extensions',  # django-extensions in pip
     'rest_framework',  # djangorestframework in pip
+    'rest_framework_swagger',
     'form_utils',  # django-form-utils in pip
     # django-allauth in pip; separate apps for each provider
     'allauth',
@@ -185,19 +186,22 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.DjangoModelPermissions',
     ),
 
-    # TODO: disable the browsable API to prevent access until we've had time to do a more careful
-    # design / testing of the API. See issues linked to SYNBIO-1299.
-    # 'DEFAULT_RENDERER_CLASSES': (
-    #     'rest_framework.renderers.JSONRenderer',
-    # ),
+    # disable DRF's built in HTML browsable API in favor of using the more fully-featured Swagger
+    # instead
+    'DEFAULT_RENDERER_CLASSES': (
+        'rest_framework.renderers.JSONRenderer',
+    ),
     # allow default client-configurable pagination for REST API result size
     'DEFAULT_PAGINATION_CLASS': 'edd.rest.paginators.ClientConfigurablePagination',
 }
 
+# rest API documentation
 SWAGGER_SETTINGS = {
-    'api_version': '0.1',
+    'api_version': '0.3',
     'api_path': '/rest/',
-    'base_path': '/docs/',
+    'base_path': '/rest/docs',
+    'is_authenticated': True,
+    'permission_denied_handler': 'edd.rest.views.permission_denied_handler'
 
 }
 
