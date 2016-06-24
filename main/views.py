@@ -72,7 +72,7 @@ def formula(molecular_formula):
         )
 
 
-def load_study(request, study_id, permission_type=['R', 'W', ]):
+def load_study(request, study_id, permission_type=['R', 'W',]):
     """ Loads a study as a request user; throws a 404 if the study does not exist OR if no valid
         permissions are set for the user on the study. """
     if request.user.is_superuser:

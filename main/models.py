@@ -27,6 +27,8 @@ from jbei.edd.rest.constants import (METADATA_CONTEXT_ASSAY, METADATA_CONTEXT_LI
                                      METADATA_CONTEXT_STUDY)
 from .export import table
 
+UNIT_TEST_FIXTURE_USERNAME = 'unit_test_user'
+
 
 logger = logging.getLogger(__name__)
 
@@ -89,9 +91,54 @@ class Update(models.Model, EDDSerialize):
         return '%s by %s' % (time, self.mod_by)
 
     @classmethod
-    def load_update(cls, user=None, path=None):
+    def is_unit_test_update(cls):
+        """
+        Tests whether the current data change originated in a well-formed unit test.
+        :return:
+        """
         request = get_current_request()
+
+        if request is not None:
+            return False
+
+        return User.objects.filter(username=UNIT_TEST_FIXTURE_USERNAME).count() == 1
+
+
+    @classmethod
+    def load_update(cls, user=None, path=None):
+        """
+        Creates a new Update attributed to the request's current user, or to the specified user when
+        called from outside the context of an HttpRequest.
+        :param user: the User to attribute the update to (ignored when a request is found)
+        :param path:
+        :return:
+        """
+        request = get_current_request()
+
+        # gracefully handle updates made via the command line or via the ORM (e.g. in unit tests),
+        # where no request / user credentials are present
         if request is None:
+            logger.debug('Update.load_update(): request is None')  # TODO: remove debug stmt
+            if user is None:
+
+                # first check for the 'system' user, which should only exist externally to the unit
+                # tests (so it's the normal case in production)
+                system_username = 'system'
+                user = User.objects.filter(username=system_username)
+                if user:
+                    logger.warn(
+                        'No request or user was associated with this model creation/update. '
+                        'Attributing it to the "%s" user on the assumption the change was made'
+                        'from the Python shell.' % system_username)
+                else:
+                    user = User.objects.get(username=UNIT_TEST_FIXTURE_USERNAME)
+                    logger.warn(
+                        'No request or user was associated with this model creation/update. '
+                        'Attributing it to the %s user on the assumption the change was made'
+                        'in unit test code.' % UNIT_TEST_FIXTURE_USERNAME)
+            else:  # TODO: remove debug block
+                logger.debug('Update.load_update(): user parameter is %s ' % str(user))
+
             update = cls(mod_time=arrow.utcnow(),
                          mod_by=user,
                          path=path,
@@ -99,6 +146,7 @@ class Update(models.Model, EDDSerialize):
             # TODO this save may be too early?
             update.save()
         else:
+            logger.debug('Update.load_update(): request is NOT None')  # TODO: remove debug stmt
             update = cls.load_request_update(request)
         return update
 
@@ -555,7 +603,11 @@ class EDDObject(EDDMetadata, EDDSerialize):
     def save(self, *args, **kwargs):
         update = kwargs.get('update', None)
         if update is None:
+            logger.debug('EDDObject.save(): update is None')  # TODO: remove debug stmt
             update = Update.load_update()
+        else:
+            logger.debug('EDDObject.save(): update is NOT None. Update initiated by user %s' %
+                         str(update.user))  # TODO: remove debug stmt
         if self.created_id is None:
             self.created = update
         self.updated = update
@@ -586,7 +638,7 @@ class EDDObject(EDDMetadata, EDDSerialize):
         }
 
     def user_can_read(self, user):
-        return True
+        return Trueh
 
     def user_can_write(self, user):
         return user and user.is_superuser
@@ -652,12 +704,12 @@ class Study(EDDObject):
     def user_permission_q(user, permission, keyword_prefix=''):
         """
         Constructs a django Q object for testing whether the specified user has the
-        required permission for a study as part of a Study-related Django model query. It's
+        required permission for a study as part of a Study-related Django ORM query. It's
         important to note that the provided Q object will return one row for each user/group
         permission that gives the user access to the study, so clients will often want to use
         distinct() to limit the returned results. Note that
         this only tests whether the user or group has specific permissions granted on the Study,
-        not whether the user's role (e.g. 'staff', 'admin') gives him/her access to it.  See
+        not whether the user's role (e.g. 'staff', 'superuser') gives him/her access to it.  See
         user_role_has_read_access( user), user_can_read(self, user).
         :param user: the user
         :param permission: the study permission type to test (e.g. StudyPermission.READ)
@@ -675,7 +727,12 @@ class Study(EDDObject):
 
     @staticmethod
     def user_role_can_read(user):
-        return user.is_superuser or user.is_staff
+        """
+        Tests whether the user's role alone is sufficient to grant read access to this study.
+        :param user: the user
+        :return: True if the user role has read access, false otherwise
+        """
+        return user.is_superuser
 
     def user_can_read(self, user):
         """ Utility method testing if a user has read access to a Study. """

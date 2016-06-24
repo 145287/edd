@@ -15,8 +15,7 @@ ALPHANUM_REGEX = '[0-9a-fA-F]'
 
 DOCKER_HOST_ENV_VARIABLE = 'DOCKER_HOST'
 
-# for best UUID results, use UUID(string) in a try/catch. TODO: confirm whether try/catch is
-# significantly slower, then delete this if possible.
+# for best UUID results, prefer using UUID(string) in a try/catch when possible
 TYPICAL_UUID_REGEX = (
     r'%(alphanum)s8}\-%(alphanum)s{4}\-%(alphanum)s{4}\-%(alphanum)s{4}\-%(alphanum)s{12}' % {
         'alphanum': ALPHANUM_REGEX})

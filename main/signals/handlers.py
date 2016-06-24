@@ -15,7 +15,7 @@ from django.core.mail import mail_managers
 
 from jbei.ice.rest.ice import parse_entry_id, HmacAuth, IceHmacAuth
 from . import study_modified, study_removed, user_modified
-from ..models import Line, Strain, Study, Update
+from ..models import Line, Strain, Study, UNIT_TEST_FIXTURE_USERNAME, Update
 from ..solr import StudySearch, UserSearch
 from ..utilities import get_absolute_url
 from requests.exceptions import ConnectionError
@@ -51,16 +51,35 @@ def study_delete(sender, instance, using, **kwargs):
 
 @receiver(study_modified)
 def index_study(sender, study, **kwargs):
+    # return early if this change was triggered during a unit test
+    if Update.is_unit_test_update():
+        logger.info('Skipping solr updates for study pk=%(pk)s (name="%(name)s"). Changes were '
+                    'detected to be part of a unit test.' % {
+            'pk': str(study.pk),  # may be None!?
+            'name': study.name,
+        })
+        return
     solr.update([study, ])
 
 
 @receiver(study_removed)
 def unindex_study(sender, study, **kwargs):
+    # return early if this change was triggered during a unit test
+    if Update.is_unit_test_update():
+        logger.info('Skipping solr updates for study pk=%(pk)s (name="%(name)s"). Changes were '
+                    'detected to be part of a unit test.' % {
+                        'pk': str(study.pk),  # may be None!?
+                        'name': study.name,
+                    })
     solr.remove([study, ])
 
 
 @receiver(user_modified)
 def index_user(sender, user, **kwargs):
+    # return early if this change was triggered during a unit test
+    if Update.is_unit_test_update():
+        return
+
     try:
         users.update([user, ])
     except ConnectionError as e:
@@ -381,11 +400,6 @@ def _is_strain_linkable(registry_url, registry_id):
     return registry_url and registry_id
 
 
-class ChangeFromFixture(Exception):
-    """ Exception to use when change from fixture is detected. """
-    pass
-
-
 @receiver(m2m_changed, sender=Line.strains.through, dispatch_uid=("%s.handle_line_strain_changed"
                                                                   % __name__))
 @transaction.atomic(savepoint=False)
@@ -425,6 +439,25 @@ def handle_line_strain_changed(sender, instance, action, reverse, model, pk_set,
 
     line = instance  # just call it a line for clarity now that we've verified that it is one
 
+    # find which user made the update that caused this signal
+    update = Update.load_update()
+    if update.mod_by and (update.mod_by.username == UNIT_TEST_FIXTURE_USERNAME):
+        logger.warning("Detected line/strain relationship changes that originated from "
+                       "unit test code. Skipping ICE notifications.")
+        return
+
+    # detect changes made by improper unit test configuration and/or another integration error
+    if update.mod_by is None:
+        logger.error("Detected improper unit test configuration or another integration "
+                     "error. Unable to attribute line/strain relationship changes to a "
+                     "user, so ICE notifications that require a username will be skipped. "
+                     "As a result, manual curation of ICE link(s) for be required for "
+                     "study with pk %d" % line.study_id)
+        return
+
+    user_email = update.mod_by.email
+    logger.debug("update performed by user " + user_email)
+
     if "pre_clear" == action:
         # save contents of the relation before Django clears it in preparation to re-add
         # everything (including new items). This is the (seemingly very
@@ -452,12 +485,6 @@ def handle_line_strain_changed(sender, instance, action, reverse, model, pk_set,
 
         strain_pk = 0
         try:
-            # find which user made the update that caused this signal
-            update = Update.load_update()
-            if update.mod_by is None:
-                raise ChangeFromFixture("No user initiated change, aborting ICE update.")
-            user_email = update.mod_by.email
-            logger.debug("update performed by user " + user_email)
 
             add_on_commit_strains = []
             for strain in added_strains:
@@ -496,8 +523,7 @@ def handle_line_strain_changed(sender, instance, action, reverse, model, pk_set,
                     "Done scheduling post-commit work for direct HTTP request(s) to ICE: "
                     "requested a job to sequentially create links for %d of %d added "
                     "strains via direct HTTP request(s)." % (linkable_count, exp_add_count))
-        except ChangeFromFixture:
-            logger.warning("Detected changes from fixtures, skipping ICE signal handling.")
+
         # if an error occurs, print a helpful log message, then re-raise it so Django will email
         # administrators
         except RuntimeError:
@@ -512,10 +538,6 @@ def handle_line_strain_changed(sender, instance, action, reverse, model, pk_set,
         removed_strains = line.removed_strains
         logger.debug("removed_strains = %s" % (removed_strains, ))
 
-        # find which user made the update that caused this signal
-        update = Update.load_update()
-        user_email = update.mod_by.email
-        logger.debug("update performed by user " + user_email)
 
         # schedule asynchronous work to maintain ICE strain links to this study, failing if any
         # job submission fails (probably because our link to Celery or RabbitMQ is down, and
@@ -564,8 +586,6 @@ def handle_line_strain_changed(sender, instance, action, reverse, model, pk_set,
                     lambda: _post_commit_unlink_ice_entry_from_study(user_email, study.pk,
                                                                      study.created.mod_time,
                                                                      remove_on_commit))
-        except ChangeFromFixture:
-            logger.warning("Detected changes from fixtures, skipping ICE signal handling.")
         # if an error occurs, print a helpful log message, then re-raise it so Django will email
         # administrators
         except RuntimeError:

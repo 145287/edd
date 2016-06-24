@@ -181,9 +181,9 @@ REST_FRAMEWORK = {
     # Note: in addition to requiring authentication for access, EDD uses custom study-level
     # permissions that should be enforced by custom code at the REST API implementation level. We
     # could also optionally override our model managers for more safety at the cost of
-    # convenience for developers.
+    # convenience for developers (e.g. while using the Django ORM via the command line).
     'DEFAULT_PERMISSION_CLASSES': (
-        'rest_framework.permissions.DjangoModelPermissions',
+        'rest_framework.permissions.IsAuthenticated',
     ),
 
     # disable DRF's built in HTML browsable API in favor of using the more fully-featured Swagger
@@ -193,15 +193,25 @@ REST_FRAMEWORK = {
     ),
     # allow default client-configurable pagination for REST API result size
     'DEFAULT_PAGINATION_CLASS': 'edd.rest.paginators.ClientConfigurablePagination',
+
+    'TEST_REQUEST_DEFAULT_FORMAT': 'json',
 }
 
 # rest API documentation
 SWAGGER_SETTINGS = {
     'api_version': '0.3',
-    'api_path': '/rest/',
+    'api_path': '/',
     'base_path': '/rest/docs',
     'is_authenticated': True,
-    'permission_denied_handler': 'edd.rest.views.permission_denied_handler'
+    'permission_denied_handler': 'edd.rest.views.permission_denied_handler',
+    'info': {
+        'contact': 'jbei-edd-admin@lists.lbl.gov',
+        'description': "The work-in-progress documentation for the Experiment Data Depot's (EDD's) "
+                       "REST API. Both the REST API and this documentation are works-in-progress. ",
+        # TODO: update once EDD's OSS license is decided
+        # 'license': 'Apache 2.0', 'licenseUrl': 'http://www.apache.org/licenses/LICENSE-2.0.html',
+        'title': 'EDD REST API',
+    },
 
 }
 
@@ -234,12 +244,21 @@ LOGGING = {
         # specify formatting for Django log messages, and also force tracebacks for uncaught
         # exceptions to be logged. Without this, django only logs cryptic 1-liners for uncaught
         # exceptions...see SYNBIO-1262 for an example where this was very misleading.
+        '': {
+            'level': 'DEBUG', 'handlers': ['console', ],
+        },
+        'root': {
+            'level': 'DEBUG', 'handlers': ['console', ],
+        },
+        'jbei': {
+            'level': 'DEBUG', 'handlers': ['console', ],
+        },
         'django': {
             'level': 'DEBUG',
             'handlers': ['console', ],
         },
         'django.db.backends': {
-            'level': 'WARNING',
+            'level': 'DEBUG',
             'handlers': ['console', ],
         },
         'main': {

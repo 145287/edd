@@ -30,6 +30,8 @@ from .solr import StudySearch
 
 
 class UserTests(TestCase):
+    fixtures = ['unit_test_user', ]  # prevents ICE notifications
+
     def setUp(self):
         TestCase.setUp(self)
         user1 = User.objects.create_user(
@@ -57,6 +59,7 @@ class UserTests(TestCase):
 
 
 class StudyTests(TestCase):
+    fixtures = ['unit_test_user', ]  # prevents ICE notifications
 
     def setUp(self):
         TestCase.setUp(self)
@@ -155,6 +158,7 @@ class StudyTests(TestCase):
 
 
 class SolrTests(TestCase):
+    # fixtures = ['unit_test_user', ]  # prevents ICE/SOLR notifications
 
     def setUp(self):
         TestCase.setUp(self)
@@ -186,6 +190,8 @@ class SolrTests(TestCase):
 
 
 class LineTests (TestCase):  # XXX also Strain, CarbonSource
+    fixtures = ['unit_test_user', ]  # prevents ICE notifications
+
     def setUp(self):
         TestCase.setUp(self)
         user1 = User.objects.create_user(
@@ -304,6 +310,7 @@ class LineTests (TestCase):  # XXX also Strain, CarbonSource
 #
 # TODO also test MeasurementVector
 class AssayDataTests(TestCase):
+    fixtures = ['unit_test_user', ]  # prevents ICE notifications
 
     def setUp(self):
         TestCase.setUp(self)
@@ -459,6 +466,8 @@ class AssayDataTests(TestCase):
 
 
 class ImportTests(TestCase):
+    fixtures = ['unit_test_user', ]  # prevents ICE notifications
+
     """ Test import of assay measurement data. """
     def setUp(self):
         TestCase.setUp(self)
@@ -768,6 +777,8 @@ b0006                     5683            6459           183.9             565  
 
 
 class SBMLUtilTests(TestCase):
+    fixtures = ['unit_test_user', ]  # prevents ICE notifications
+
     """ Unit tests for various utilities used in SBML export """
     def setUp(self):
         SBMLTemplate.objects.create(
@@ -821,7 +832,8 @@ class SBMLUtilTests(TestCase):
 
 class ExportTests(TestCase):
     """ Test export of assay measurement data, either as simple tables or SBML. """
-    fixtures = ['export_data_1', ]
+    fixtures = ['unit_test_user',  # prevents ICE notifications
+                'export_data_1', ]
 
     def test_data_export(self):
         # TODO tests using main.forms.ExportSelectionForm, main.forms.ExportOptionForm, and
@@ -926,7 +938,8 @@ class ExportTests(TestCase):
 
 
 class UtilityTests(TestCase):
-    fixtures = ['export_data_1', ]
+    fixtures = ['unit_test_user',  # prevents ICE notifications
+                'export_data_1', ]
 
     def test_get_edddata(self):
         utilities.get_edddata_users()
@@ -994,6 +1007,7 @@ class UtilityTests(TestCase):
 
 
 class IceTests(TestCase):
+    fixtures = ['unit_test_user', ]  # prevents ICE notifications
 
     def test_entry_uri_pattern(self):
         from jbei.ice.rest.ice import ICE_ENTRY_URL_PATTERN

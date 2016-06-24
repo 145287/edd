@@ -9,11 +9,13 @@ from allauth.account.models import EmailAddress
 from allauth.exceptions import ImmediateHttpResponse
 from allauth.socialaccount import providers
 from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
+from django.contrib.auth.backends import ModelBackend
 from django_auth_ldap.backend import LDAPBackend
 from django.contrib import messages
 from django.shortcuts import redirect
 from django.utils.translation import ugettext_lazy as _
 
+from main.models import User
 
 logger = logging.getLogger(__name__)
 
@@ -81,3 +83,10 @@ class AllauthLDAPBackend(LDAPBackend):
             except Exception:
                 logger.exception('Failed to check or update email verification from LDAP!')
         return user
+
+
+class LocalTestBackend(ModelBackend):
+
+    def authenticate(self, username=None, password=None, **kwargs):
+        queryset = User.objects.filter(username=username)
+        return queryset.first()
