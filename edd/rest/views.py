@@ -408,14 +408,14 @@ class StrainViewSet(viewsets.ModelViewSet):
         if self.kwargs:
             strain_id_filter = self.kwargs.get(self.lookup_url_kwarg)
             if is_numeric_pk(strain_id_filter):
-                query = Strain.objects.filter(pk=strain_id_filter)
+                query = query.filter(pk=strain_id_filter)
             else:
-                query = Strain.objects.filter(registry_id=strain_id_filter)
+                query = query.filter(registry_id=strain_id_filter)
         # otherwise, we're searching strains, so filter them according to the provided params
         else:
             # parse optional query parameters
             query_params = self.request.query_params
-            strain_id_filter = query_params.get(self.lookup_url_kwarg)
+            strain_id_filter = query_params.get(self.lookup_url_kwarg)  # TODO: remove?
             local_pk_filter = query_params.get('pk')
             registry_id_filter = query_params.get(STRAIN_REGISTRY_ID)
             registry_url_regex_filter = query_params.get(STRAIN_REGISTRY_URL_REGEX)
@@ -450,7 +450,7 @@ class StrainViewSet(viewsets.ModelViewSet):
 
             query = _do_optional_regex_filter(query_params, query, 'name', STRAIN_NAME_REGEX, None)
 
-        query = query.select_related('object_ref')
+        query = query.select_related('object_ref')  # TODO: remove -- unneccessary
 
         # filter results to ONLY the strains accessible by this user. Note that this may
         # prevent some users from accessing strains, depending on how EDD's permissions are set up,
