@@ -99,16 +99,17 @@ class ModelImplicitViewOrResultImpliedPermissions(BasePermission):
     A custom permissions class similar DjangoModelPermissions that allows permissions to a REST
     resource based on the following:
      1) Unauthenticated users are always denied access
-     2) A user who has class-level add/change/delete permissions explicitly granted using
+     2) A user who has class-level add/change/delete permissions explicitly granted
      django.contrib.auth permissions may exercise those capabilities
-     2) A user who has any add/change/delete class-level permission explicitly granted may also
-     have class-level view access (though view isn't explicitly defined as an auth permission)
-     3) If inferred_permissins is defined / non-empty, the existence of one or more results in the
-     queryset implies that the user has a level of inferred permission only on the objects
-     returned by queryset. This inference should align with DRF's pattern of queryset filtering
-     based on only the objects a user has access to. In most cases, this feature will probably
-     only be used to infer view access to queryset results while avoiding a separate DB query in
-     this class to check user permissions that are already checked as part of queryset filtering.
+     2) A user who has any add/change/delete class-level permission explicitly granted also has
+     implied class-level view access (though view isn't explicitly defined as an auth permission)
+     3) If the inferred_permissions property is defined / non-empty, the existence of one or more
+     results  in the queryset implies that the user has a level of inferred permission only on
+     the objects returned by queryset. This inference should align with DRF's pattern of queryset
+     filtering based on only the objects a user has access to. In most cases, this feature will
+     probably only be used to infer view access to queryset results while avoiding a separate DB
+     query in this class to check user permissions that are already checked as part of queryset
+     result filtering.
     """
 
     # django.contrib.auth permissions explicitly respected or used as the basis for interring view
@@ -387,21 +388,20 @@ class StrainViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         """
         Overrides the default implementation to provide:
-        * flexible filtering based on a number of useful input parameters
-        * flexible strain lookup by local numeric pk OR by UUID from ICE
-        :return:
+        * flexible list view filtering based on a number of useful input parameters
+        * flexible strain detail lookup by local numeric pk OR by UUID from ICE
         """
 
         logger.debug('in %(class)s.%(method)s' % {
             'class': self.__class__.__name__,
             'method': self.get_queryset.__name__})
 
-        # we can't test permission for un-authenticated users
+        # never show anything to un-authenticated users
         user = self.request.user
         if (not user) or not user.is_authenticated():
             return Strain.objects.none()
 
-        # build a query, filtering by the provided user inputs
+        # build a query, filtering by the provided user inputs (starting out unfiltered)
         query = Strain.objects.all()
 
         # if a strain UUID or local numeric pk was provided, get it
@@ -467,7 +467,7 @@ class StrainViewSet(viewsets.ModelViewSet):
                                                         keyword_prefix='line__study__')
             query = query.filter(user_permission_q).distinct()
 
-        result_count = len(query)  # more efficient for this purpose than qs.count()
+        result_count = len(query)  # Note: more efficient for logging than qs.count()
         logger.debug('StrainViewSet query count=%d' % len(query))
         if result_count < 10:
             logger.debug(query)

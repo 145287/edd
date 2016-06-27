@@ -206,8 +206,10 @@ SWAGGER_SETTINGS = {
     'permission_denied_handler': 'edd.rest.views.permission_denied_handler',
     'info': {
         'contact': 'jbei-edd-admin@lists.lbl.gov',
-        'description': "The work-in-progress documentation for the Experiment Data Depot's (EDD's) "
-                       "REST API. Both the REST API and this documentation are works-in-progress. ",
+        'description': "Documentation for the Experiment Data Depot's (EDD's) "
+                       "REST API. Both the REST API and this documentation are evolving "
+                       "works-in-progress. This initial API isn't mature, so use / create "
+                       "dependencies at your own risk!",
         # TODO: update once EDD's OSS license is decided
         # 'license': 'Apache 2.0', 'licenseUrl': 'http://www.apache.org/licenses/LICENSE-2.0.html',
         'title': 'EDD REST API',
