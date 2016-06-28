@@ -2,46 +2,49 @@
 from django.conf.urls import include, url
 import rest_framework.routers as rest_routers
 
+from jbei.edd.rest.constants import STRAINS_RESOURCE_NAME, STUDIES_RESOURCE_NAME, \
+    METADATA_TYPES_RESOURCE_NAME, METADATA_GROUPS_RESOURCE_NAME, LINES_RESOURCE_NAME
 from .views import (LineViewSet, MetadataGroupViewSet, MetadataTypeViewSet,
                     STRAIN_NESTED_RESOURCE_PARENT_PREFIX, StrainStudiesView, StrainViewSet,
                     StudyLineView, StudyStrainsView, StudyViewSet)
 import rest_framework_nested.routers as nested_routers
 
 
-# define a router for plain REST API methods & views
+
+####################################################################################################
+# Define a router for base REST API methods & views
+####################################################################################################
 base_rest_api_router = rest_routers.DefaultRouter()
-base_rest_api_router.register(r'line', LineViewSet)
-base_rest_api_router.register(r'study', StudyViewSet, 'study')
-base_rest_api_router.register(r'strain', StrainViewSet, 'strain')
-base_rest_api_router.register(r'metadata_type', MetadataTypeViewSet)
-base_rest_api_router.register(r'metadata_group', MetadataGroupViewSet)
+base_rest_api_router.register(LINES_RESOURCE_NAME, LineViewSet)
+base_rest_api_router.register(STUDIES_RESOURCE_NAME, StudyViewSet, 'studies')
+base_rest_api_router.register(STRAINS_RESOURCE_NAME, StrainViewSet, 'strains')
+base_rest_api_router.register(METADATA_TYPES_RESOURCE_NAME, MetadataTypeViewSet)
+base_rest_api_router.register(METADATA_GROUPS_RESOURCE_NAME, MetadataGroupViewSet)
 
-# non-working dev code...maybe useful as an example for further work later on.
-# this was the first attempt to create nested resources based on some misleading docs on the django
-# rest framework
-# rest_api_router.register(r'study/(?P<study>\d+)/lines', views.StudyLineView,
-#                         "StudyLine")
-# rest_api_router.register(r'study/(?P<study>\d+)/lines(/(?P<line>\d+))?',
-#                          views.StudyListLinesView.as_view(),
-#                          "StudyListLinesView1")
-# rest_api_router.register(r'study/(?P<study>\d+)/lines',
-#                        views.StudyListLinesView.as_view(),
-#                        "StudyListLinesView")
+####################################################################################################
+# /rest/studies nested router
+####################################################################################################
+study_nested_resources_router = nested_routers.NestedSimpleRouter(base_rest_api_router,
+                                                                  STUDIES_RESOURCE_NAME,
+                                                                  lookup='studies')
+study_nested_resources_router.register(LINES_RESOURCE_NAME, StudyLineView,
+                                       base_name='study-lines')
+study_nested_resources_router.register(STRAINS_RESOURCE_NAME, StudyStrainsView,
+                                       base_name='study-strains')
 
-# define a separate router for nested resources under /study (not clearly supported by normal
-# django rest framework routers)
-# TODO: for consistency, adjust pluralization to always plural
-study_nested_resources_router = nested_routers.NestedSimpleRouter(base_rest_api_router, r'study',
-                                                                  lookup='study')
-study_nested_resources_router.register(r'lines', StudyLineView, base_name='study-lines')
-study_nested_resources_router.register(r'strains', StudyStrainsView, base_name='study-strains')
+####################################################################################################
+# /rest/strains nested router
+####################################################################################################
 strain_nested_resources_router = (
     nested_routers.NestedSimpleRouter(base_rest_api_router, STRAIN_NESTED_RESOURCE_PARENT_PREFIX,
-                                      lookup='strain'))
-strain_nested_resources_router.register(r'studies', StrainStudiesView, base_name='strain-studies')
+                                      lookup='strains'))
+strain_nested_resources_router.register(STUDIES_RESOURCE_NAME, StrainStudiesView,
+                                        base_name='strain-studies')
 
+####################################################################################################
+# Use routers & supporting frameworks to construct URL patterns
+####################################################################################################
 urlpatterns = [
-#   url(r'docs/$', include('rest_framework_swagger.urls')),
     url(r'', include(base_rest_api_router.urls)),
     url(r'', include(study_nested_resources_router.urls)),
     url(r'', include(strain_nested_resources_router.urls)),

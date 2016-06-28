@@ -27,7 +27,8 @@ from jbei.edd.rest.constants import (QUERY_ACTIVE_OBJECTS_ONLY, QUERY_ALL_OBJECT
                                      METADATA_TYPE_I18N, METADATA_TYPE_LOCALE,
                                      METADATA_TYPE_NAME_REGEX,
                                      STRAIN_CASE_SENSITIVE, STRAIN_NAME, STRAIN_NAME_REGEX,
-                                     STRAIN_REGISTRY_ID, STRAIN_REGISTRY_URL_REGEX)
+                                     STRAIN_REGISTRY_ID, STRAIN_REGISTRY_URL_REGEX,
+                                     STUDIES_RESOURCE_NAME)
 from jbei.rest.utils import is_numeric_pk
 from jbei.utils import PK_OR_TYPICAL_UUID_PATTERN, PK_OR_TYPICAL_UUID_REGEX
 from main.models import Line, MetadataType, Strain, Study, StudyPermission, User, MetadataGroup
@@ -55,9 +56,8 @@ logger = logging.getLogger(__name__)
 #         # studies are only available to users who have read permissions on them
 #         return study.user_can_read(request.user)
 
-STRAIN_NESTED_RESOURCE_PARENT_PREFIX = r'strain'
+STRAIN_NESTED_RESOURCE_PARENT_PREFIX = r'strains'
 
-STUDY_URL_KWARG = 'study'
 BASE_STRAIN_URL_KWARG = 'id'  # NOTE: value impacts url kwarg names for nested resources
 HTTP_MUTATOR_METHODS = ('POST', 'PUT', 'PATCH', 'UPDATE', 'DELETE')
 
@@ -824,8 +824,8 @@ class StudyStrainsView(viewsets.ReadOnlyModelViewSet):
         API endpoint that allows read-only viewing the unique strains used within a specific study
     """
     serializer_class = StrainSerializer
-    STUDY_URL_KWARG = 'study_pk'
-    STRAIN_URL_KWARG = 'pk'
+    STUDY_URL_KWARG = '%s_pk' % STUDIES_RESOURCE_NAME
+    lookup_url_kwarg = 'strain_pk'
 
     # override
 
@@ -872,7 +872,7 @@ class StudyStrainsView(viewsets.ReadOnlyModelViewSet):
             logger.error("Non-numeric study IDs aren't supported.")
             return Strain.objects.none()
 
-        strain_id = self.kwargs.get(self.STRAIN_URL_KWARG)
+        strain_id = self.kwargs.get(self.lookup_url_kwarg)
         if strain_id:
             strain_id_is_pk = is_numeric_pk(strain_id)
 
@@ -895,7 +895,8 @@ class StudyLineView(viewsets.ModelViewSet):  # LineView(APIView):
         API endpoint that allows lines to be viewed or edited.
     """
     serializer_class = LineSerializer
-    STUDY_URL_KWARG = 'study_pk'
+    lookup_url_kwarg = 'line_pk'
+    STUDY_URL_KWARG = '%s_pk' % STUDIES_RESOURCE_NAME
 
     def get_queryset(self):
         logger.debug('in %(class)s.%(method)s' % {

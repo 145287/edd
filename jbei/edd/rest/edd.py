@@ -453,7 +453,7 @@ class EddApi(RestApiClient):
         request_generator = self.session_auth.request_generator
 
         # make the HTTP request
-        url = '%(base_url)s/rest/strain/%(strain_id)s/' % {
+        url = '%(base_url)s/rest/strains/%(strain_id)s/' % {
             'base_url': self.base_url,
             'strain_id': strain_id,
         }
@@ -477,7 +477,7 @@ class EddApi(RestApiClient):
         :return: the MetadaDataType, or None
         """
         # make the HTTP request
-        url = '%(base_url)s/rest/metadata_type/%(pk)d' % {
+        url = '%(base_url)s/rest/metadata_types/%(pk)d' % {
             'base_url': self.base_url,
             'pk': local_pk,
         }
@@ -547,7 +547,7 @@ class EddApi(RestApiClient):
                 search_params[PAGE_NUMBER_QUERY_PARAM] = page_number
 
             # make the HTTP request
-            url = '%s/rest/metadata_type' % self.base_url
+            url = '%s/rest/metadata_types' % self.base_url
             response = request_generator.get(url, params=search_params, headers=self._json_header)
 
         # throw an error for unexpected reply
@@ -615,7 +615,7 @@ class EddApi(RestApiClient):
                 search_params[PAGE_NUMBER_QUERY_PARAM] = page_number
 
             # make the HTTP request
-            url = '%s/rest/strain' % self.base_url
+            url = '%s/rest/strains' % self.base_url
             response = request_generator.get(url, params=search_params, headers=self._json_header)
 
         # throw an error for unexpected reply
@@ -670,7 +670,7 @@ class EddApi(RestApiClient):
             if page_number:
                 search_params[PAGE_NUMBER_QUERY_PARAM] = page_number
 
-            url = '%s/rest/strain/%d/studies/' % (self.base_url, local_strain_pk)
+            url = '%s/rest/strains/%d/studies/' % (self.base_url, local_strain_pk)
 
             response = request_generator.get(url, params=search_params)
 
@@ -699,7 +699,7 @@ class EddApi(RestApiClient):
             response = request_generator.get(query_url, headers=self._json_header)
         else:
             # make the HTTP request
-            url = '%s/rest/study/%d/lines/' % (self.base_url, study_pk)
+            url = '%s/rest/studies/%d/lines/' % (self.base_url, study_pk)
 
             params = {}
 
@@ -744,7 +744,7 @@ class EddApi(RestApiClient):
             request_generator.get(query_url, headers=self._json_header)
 
         else:
-            url = '%s/rest/study/%d/strains/%s' % (self.base_url, study_pk, str(strain_id))
+            url = '%s/rest/studies/%d/strains/%s' % (self.base_url, study_pk, str(strain_id))
 
             # add parameters to the request
             params = {}
@@ -776,7 +776,7 @@ class EddApi(RestApiClient):
         """
         self._prevent_write_while_disabled()
 
-        url = '%s/rest/study/%d/lines/' % (self.base_url, study_id)
+        url = '%s/rest/studies/%d/lines/' % (self.base_url, study_id)
 
         new_line = {
             "study": study_id,
@@ -827,7 +827,7 @@ class EddApi(RestApiClient):
         }
 
         # make the HTTP request
-        url = '%s/rest/strain/' % self.base_url
+        url = '%s/rest/strains/' % self.base_url
         request_generator = self.session_auth.request_generator
         response = request_generator.post(url, data=json.dumps(post_data),
                                           headers=self._json_header)
@@ -873,7 +873,7 @@ class EddApi(RestApiClient):
         strain_id = str(local_pk) if local_pk else str(registry_id)
 
         # build the URL for this strain resource
-        url = '%(base_url)s/rest/strain/%(strain_id)s' % {
+        url = '%(base_url)s/rest/strains/%(strain_id)s' % {
             'base_url': self.base_url, 'strain_id': strain_id,
         }
 
@@ -901,7 +901,7 @@ class EddApi(RestApiClient):
         return self._update_strain('PUT', name, description, local_pk, registry_id, registry_url)
 
     def get_study(self, pk):
-        url = '%s/rest/study/%d' % (self.base_url, pk)
+        url = '%s/rest/studies/%d' % (self.base_url, pk)
         request_generator = self.session_auth.request_generator
         response = request_generator.get(url)
 
@@ -931,7 +931,7 @@ class EddApi(RestApiClient):
         # Note: although it's normally best to abstract the URLs away from clients, in this case
         # clients will need the URL to push study link updates to ICE.
         base_url = alternate_base_url if alternate_base_url else self.base_url
-        return "%s/study/%s/" % (base_url, study_pk)
+        return "%s/studies/%s/" % (base_url, study_pk)
 
 
 class DrfPagedResult(PagedResult):

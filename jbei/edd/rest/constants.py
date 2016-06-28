@@ -5,9 +5,17 @@ names used in EDD's the Django Model classes, explicitly capturing them here hel
 maintainability of the API across data member renames in Django's model classes
 """
 
+####################################################################################################
+# String constants for REST resource names
+####################################################################################################
+LINES_RESOURCE_NAME = r'lines'
+STUDIES_RESOURCE_NAME = r'studies'
+STRAINS_RESOURCE_NAME = r'strains'
+METADATA_TYPES_RESOURCE_NAME = r'metadata_types'
+METADATA_GROUPS_RESOURCE_NAME = r'metadata_groups'
 
 ####################################################################################################
-# General paremeter names / values that apply to multiple REST resources. Consistency!! :-)
+# General parameter names / values that apply to multiple REST resources. Consistency!! :-)
 ####################################################################################################
 
 LINE_ACTIVE_STATUS_PARAM = 'lines_active'
@@ -26,7 +34,7 @@ PAGE_NUMBER_QUERY_PARAM = 'page'
 RESULTS_OFFSET_QUERY_PARAM = 'offset'
 
 ####################################################################################################
-# /rest/metadata_type
+# Parameter names & values for /rest/metadata_types
 ####################################################################################################
 METADATA_TYPE_GROUP = 'group'
 METADATA_TYPE_CONTEXT = 'for_context'
@@ -43,7 +51,7 @@ METADATA_CONTEXT_ASSAY = 'A'
 METADATA_CONTEXT_VALUES = (METADATA_CONTEXT_LINE, METADATA_CONTEXT_STUDY, METADATA_CONTEXT_ASSAY)
 
 ####################################################################################################
-# /rest/strain
+# Parameter names & values for /rest/strains
 ####################################################################################################
 STRAIN_REGISTRY_ID = 'registry_id'
 STRAIN_REGISTRY_URL_REGEX = 'registry_url_regex'
