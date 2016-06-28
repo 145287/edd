@@ -21,3 +21,4 @@ edd/settings/local.py
 # and ignore node_modules, each user needing to compile Typescript should `npm install`
 /node_modules
 
+.idea
