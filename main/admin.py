@@ -15,17 +15,17 @@ from django.utils.safestring import mark_safe
 from django.utils.translation import ugettext_lazy as _
 from django_auth_ldap.backend import LDAPBackend
 
+from .export.sbml import validate_sbml_attachment
 from .forms import (
     MeasurementTypeAutocompleteWidget, MetadataTypeAutocompleteWidget, RegistryAutocompleteWidget,
     RegistryValidator, UserAutocompleteWidget
 )
 from .models import (
-    Assay, Attachment, CarbonSource, GeneIdentifier, GroupPermission, Line, MeasurementGroup,
-    Measurement, MeasurementType, Metabolite, MetadataGroup, MetadataType, Phosphor,
+    Assay, Attachment, CarbonSource, GeneIdentifier, GroupPermission, Line, Measurement,
+    MeasurementType, Metabolite, MetadataGroup, MetadataType, Phosphor,
     ProteinIdentifier, Protocol, SBMLTemplate, Strain, Study, Update, UserPermission,
     WorklistColumn, WorklistTemplate,
-    )
-from .sbml_export import validate_sbml_attachment
+)
 from .solr import StudySearch, UserSearch
 
 
@@ -313,7 +313,7 @@ class MeasurementTypeAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         qs = super(MeasurementTypeAdmin, self).get_queryset(request)
         if self.model == MeasurementType:
-            qs = qs.filter(type_group=MeasurementGroup.GENERIC)
+            qs = qs.filter(type_group=MeasurementType.Group.GENERIC)
         qs = qs.annotate(num_studies=Count('measurement__assay__line__study', distinct=True))
         return qs
 

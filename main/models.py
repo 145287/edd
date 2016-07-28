@@ -1225,32 +1225,11 @@ class Line(EDDObject):
             assay_start_id = max(existing_assay_numbers) + 1
         return assay_start_id
 
-
     def user_can_read(self, user):
         return self.study.user_can_read(user)
 
     def user_can_write(self, user):
         return self.study.user_can_write(user)
-
-
-class MeasurementGroup(object):
-    """ Does not need its own table in database, but multiple models will reference measurements
-        that are specific to a specific group category: metabolomics, proteomics, etc.
-        Note that when a new group type is added here, code will need to be updated elsewhere,
-        including the Javascript/Typescript front end.
-        Look for the string 'MeasurementGroupCode' in comments."""
-    GENERIC = '_'
-    METABOLITE = 'm'
-    GENEID = 'g'
-    PROTEINID = 'p'
-    PHOSPHOR = 'h'
-    GROUP_CHOICE = (
-        (GENERIC, 'Generic'),
-        (METABOLITE, 'Metabolite'),
-        (GENEID, 'Gene Identifier'),
-        (PROTEINID, 'Protein Identifer'),
-        (PHOSPHOR, 'Phosphor'),
-    )
 
 
 @python_2_unicode_compatible
@@ -1260,11 +1239,27 @@ class MeasurementType(models.Model, EDDSerialize):
         metabolite info. """
     class Meta:
         db_table = 'measurement_type'
+
+    class Group(object):
+        """ Note that when a new group type is added here, code will need to be updated elsewhere,
+            including the Javascript/Typescript front end.
+            Look for the string 'MeasurementGroupCode' in comments."""
+        GENERIC = '_'
+        METABOLITE = 'm'
+        GENEID = 'g'
+        PROTEINID = 'p'
+        PHOSPHOR = 'h'
+        GROUP_CHOICE = (
+            (GENERIC, 'Generic'),
+            (METABOLITE, 'Metabolite'),
+            (GENEID, 'Gene Identifier'),
+            (PROTEINID, 'Protein Identifer'),
+            (PHOSPHOR, 'Phosphor'),
+        )
+
     type_name = models.CharField(max_length=255)
     short_name = models.CharField(max_length=255, blank=True, null=True)
-    type_group = models.CharField(max_length=8,
-                                  choices=MeasurementGroup.GROUP_CHOICE,
-                                  default=MeasurementGroup.GENERIC)
+    type_group = models.CharField(max_length=8, choices=Group.GROUP_CHOICE, default=Group.GENERIC)
 
     def to_solr_value(self):
         return '%(id)s@%(name)s' % {'id': self.pk, 'name': self.type_name}
@@ -1281,21 +1276,21 @@ class MeasurementType(models.Model, EDDSerialize):
         return self.type_name
 
     def is_metabolite(self):
-        return self.type_group == MeasurementGroup.METABOLITE
+        return self.type_group == MeasurementType.Group.METABOLITE
 
     def is_protein(self):
-        return self.type_group == MeasurementGroup.PROTEINID
+        return self.type_group == MeasurementType.Group.PROTEINID
 
     def is_gene(self):
-        return self.type_group == MeasurementGroup.GENEID
+        return self.type_group == MeasurementType.Group.GENEID
 
     def is_phosphor(self):
-        return self.type_group == MeasurementGroup.PHOSPHOR
+        return self.type_group == MeasurementType.Group.PHOSPHOR
 
     @classmethod
     def proteins(cls):
         """ Return all instances of protein measurements. """
-        return cls.objects.filter(type_group=MeasurementGroup.PROTEINID)
+        return cls.objects.filter(type_group=MeasurementType.Group.PROTEINID)
 
     @classmethod
     def proteins_by_name(cls):
@@ -1307,7 +1302,8 @@ class MeasurementType(models.Model, EDDSerialize):
         return cls.objects.create(
             type_name=type_name,
             short_name=short_name,
-            type_group=MeasurementGroup.PROTEINID)
+            type_group=MeasurementType.Group.PROTEINID
+        )
 
 
 @python_2_unicode_compatible
@@ -1354,7 +1350,7 @@ class Metabolite(MeasurementType):
         if self.carbon_count is None:
             self.carbon_count = self.extract_carbon_count()
         # force METABOLITE group
-        self.type_group = MeasurementGroup.METABOLITE
+        self.type_group = MeasurementType.Group.METABOLITE
         super(Metabolite, self).save(*args, **kwargs)
 
     def extract_carbon_count(self):
@@ -1365,7 +1361,7 @@ class Metabolite(MeasurementType):
         return count
 
 # override the default type_group for metabolites
-Metabolite._meta.get_field('type_group').default = MeasurementGroup.METABOLITE
+Metabolite._meta.get_field('type_group').default = MeasurementType.Group.METABOLITE
 
 
 @python_2_unicode_compatible
@@ -1389,10 +1385,10 @@ class GeneIdentifier(MeasurementType):
 
     def save(self, *args, **kwargs):
         # force GENEID group
-        self.type_group = MeasurementGroup.GENEID
+        self.type_group = MeasurementType.Group.GENEID
         super(GeneIdentifier, self).save(*args, **kwargs)
 
-GeneIdentifier._meta.get_field('type_group').default = MeasurementGroup.GENEID
+GeneIdentifier._meta.get_field('type_group').default = MeasurementType.Group.GENEID
 
 
 @python_2_unicode_compatible
@@ -1429,10 +1425,10 @@ class ProteinIdentifier(MeasurementType):
 
     def save(self, *args, **kwargs):
         # force PROTEINID group
-        self.type_group = MeasurementGroup.PROTEINID
+        self.type_group = MeasurementType.Group.PROTEINID
         super(ProteinIdentifier, self).save(*args, **kwargs)
 
-ProteinIdentifier._meta.get_field('type_group').default = MeasurementGroup.PROTEINID
+ProteinIdentifier._meta.get_field('type_group').default = MeasurementType.Group.PROTEINID
 
 
 @python_2_unicode_compatible
@@ -1452,10 +1448,10 @@ class Phosphor(MeasurementType):
 
     def save(self, *args, **kwargs):
         # force PHOSPHOR group
-        self.type_group = MeasurementGroup.PHOSPHOR
+        self.type_group = MeasurementType.Group.PHOSPHOR
         super(Phosphor, self).save(*args, **kwargs)
 
-Phosphor._meta.get_field('type_group').default = MeasurementGroup.PHOSPHOR
+Phosphor._meta.get_field('type_group').default = MeasurementType.Group.PHOSPHOR
 
 
 @python_2_unicode_compatible
@@ -1467,15 +1463,28 @@ class MeasurementUnit(models.Model):
     display = models.BooleanField(default=True)
     alternate_names = models.CharField(max_length=255, blank=True, null=True)
     type_group = models.CharField(max_length=8,
-                                  choices=MeasurementGroup.GROUP_CHOICE,
-                                  default=MeasurementGroup.GENERIC)
+                                  choices=MeasurementType.Group.GROUP_CHOICE,
+                                  default=MeasurementType.Group.GENERIC)
+
+    # TODO: this should be somehow rolled up into the unit definition
+    conversion_dict = {
+        'g/L': lambda y, metabolite: 1000 * y / metabolite.molar_mass,
+        'mg/L': lambda y, metabolite: y / metabolite.molar_mass,
+        'µg/L': lambda y, metabolite: y / 1000 / metabolite.molar_mass,
+        'Cmol/L': lambda y, metabolite: 1000 * y / metabolite.carbon_count,
+        'mol/L': lambda y, metabolite: 1000 * y,
+        'uM': lambda y, metabolite: y / 1000,
+        'mol/L/hr': lambda y, metabolite: 1000 * y,
+        'mM': lambda y, metabolite: y,
+        'mol/L/hr': lambda y, metabolite: 1000 * y,
+    }
 
     def to_json(self):
         return {"id": self.pk, "name": self.unit_name, }
 
     @property
     def group_name(self):
-        return dict(MeasurementGroup.GROUP_CHOICE)[self.type_group]
+        return dict(MeasurementType.Group.GROUP_CHOICE)[self.type_group]
 
     @classmethod
     def all_sorted(cls):
@@ -1502,15 +1511,15 @@ class Assay(EDDObject):
 
     def get_metabolite_measurements(self):
         return self.measurement_set.filter(
-            measurement_type__type_group=MeasurementGroup.METABOLITE)
+            measurement_type__type_group=MeasurementType.Group.METABOLITE)
 
     def get_protein_measurements(self):
         return self.measurement_set.filter(
-            measurement_type__type_group=MeasurementGroup.PROTEINID)
+            measurement_type__type_group=MeasurementType.Group.PROTEINID)
 
     def get_gene_measurements(self):
         return self.measurement_set.filter(
-            measurement_type__type_group=MeasurementGroup.GENEID)
+            measurement_type__type_group=MeasurementType.Group.GENEID)
 
     @property
     def long_name(self):
@@ -1526,24 +1535,36 @@ class Assay(EDDObject):
         return json_dict
 
 
-class MeasurementCompartment(object):
-    UNKNOWN, INTRACELLULAR, EXTRACELLULAR = range(3)
-    short_names = ["", "IC", "EC"]
-    names = ["N/A", "Intracellular/Cytosol (Cy)", "Extracellular"]
-    GROUP_CHOICE = [('%s' % i, cn) for i, cn in enumerate(names)]
-
-
-class MeasurementFormat(object):
-    SCALAR, VECTOR, GRID, SIGMA, HISTOGRAM = range(5)
-    names = ['scalar', 'vector', 'grid', 'sigma', 'histogram', ]
-    FORMAT_CHOICE = [('%s' % i, n) for i, n in enumerate(names)]
-
-
 @python_2_unicode_compatible
 class Measurement(EDDMetadata, EDDSerialize):
     """ A plot of data points for an (assay, measurement type) pair. """
     class Meta:
         db_table = 'measurement'
+
+    class Compartment(object):
+        """ Enumeration of localized compartments applying to the measurement.
+            UNKNOWN = default; no specific localization
+            INTRACELLULAR = measurement inside of a cell, in cytosol
+            EXTRACELLULAR = measurement outside of a cell
+        """
+        UNKNOWN, INTRACELLULAR, EXTRACELLULAR = map(str, range(3))
+        short_names = ["", "IC", "EC"]
+        names = ["N/A", "Intracellular/Cytosol (Cy)", "Extracellular"]
+        CHOICE = [('%s' % i, cn) for i, cn in enumerate(names)]
+
+    class Format(object):
+        """ Enumeration of formats measurement values can take.
+            SCALAR = single timepoint X value, single measurement Y value (one item array)
+            VECTOR = single timepoint X value, vector measurement Y value (mass-distribution, index
+                by labeled carbon count; interpret each value as ratio with sum of all values)
+            HISTOGRAM = single timepoint X value, vector measurement Y value (bins with counts of
+                population measured within bin value, bin size/range set via y_units)
+            SIGMA = single timepoint X value, 3-item-list Y value (average, variance, sample size)
+        """
+        SCALAR, VECTOR, HISTOGRAM, SIGMA = map(str, range(4))
+        names = ['scalar', 'vector', 'histogram', 'sigma', ]
+        CHOICE = [('%s' % i, n) for i, n in enumerate(names)]
+
     assay = models.ForeignKey(Assay)
     experimenter = models.ForeignKey(
         settings.AUTH_USER_MODEL, blank=True, null=True,
@@ -1554,11 +1575,15 @@ class Measurement(EDDMetadata, EDDSerialize):
     update_ref = models.ForeignKey(Update)
     active = models.BooleanField(default=True)
     compartment = models.CharField(
-        max_length=1, choices=MeasurementCompartment.GROUP_CHOICE,
-        default=MeasurementCompartment.UNKNOWN)
+        choices=Compartment.CHOICE,
+        default=Compartment.UNKNOWN,
+        max_length=1,
+    )
     measurement_format = models.CharField(
-        max_length=2, choices=MeasurementFormat.FORMAT_CHOICE,
-        default=MeasurementFormat.SCALAR)
+        choices=Format.CHOICE,
+        default=Format.SCALAR,
+        max_length=2,
+    )
 
     @classmethod
     def export_columns(cls):
@@ -1595,16 +1620,10 @@ class Measurement(EDDMetadata, EDDSerialize):
     def __str__(self):
         return 'Measurement{%d}{%s}' % (self.assay.id, self.measurement_type)
 
-    def is_gene_measurement(self):
-        return self.measurement_type.type_group == MeasurementGroup.GENEID
-
-    def is_protein_measurement(self):
-        return self.measurement_type.type_group == MeasurementGroup.PROTEINID
-
     # may not be the best method name, if we ever want to support other
     # types of data as vectors in the future
     def is_carbon_ratio(self):
-        return (int(self.measurement_format) == 1)
+        return (int(self.measurement_format) == Measurement.Format.VECTOR)
 
     def valid_data(self):
         """ Data for which the y-value is defined (non-NULL, non-blank). """
@@ -1612,7 +1631,7 @@ class Measurement(EDDMetadata, EDDSerialize):
         return [md for md in mdata if md.is_defined()]
 
     def is_extracellular(self):
-        return self.compartment == '%s' % MeasurementCompartment.EXTRACELLULAR
+        return self.compartment == '%s' % Measurement.Compartment.EXTRACELLULAR
 
     def data(self):
         """ Return the data associated with this measurement. """
@@ -1630,24 +1649,25 @@ class Measurement(EDDMetadata, EDDSerialize):
 
     @property
     def compartment_symbol(self):
-        return MeasurementCompartment.short_names[int(self.compartment)]
+        return Measurement.Compartment.short_names[int(self.compartment)]
 
     @property
     def full_name(self):
         """ measurement compartment plus measurement_type.type_name """
-        return ({"0": "", "1": "IC", "2": "EC"}.get(self.compartment) + " " + self.name).strip()
+        lookup = dict(Measurement.Compartment.CHOICE)
+        return (lookup.get(self.compartment) + " " + self.name).strip()
 
     # TODO also handle vectors
     def extract_data_xvalues(self, defined_only=False):
-        mdata = list(self.data())
+        qs = self.measurementvalue_set.all()
         if defined_only:
-            return [m.x[0] for m in mdata if m.is_defined()]
-        else:
-            return [m.x[0] for m in mdata]
+            qs = qs.exclude(y=None, y__len=0)
+        # first index unpacks single value from tuple; second index unpacks first value from X
+        return map(lambda x: x[0][0], qs.values_list('x'))
 
     # this shouldn't need to handle vectors
     def interpolate_at(self, x):
-        assert (int(self.measurement_format) == 0)
+        assert (int(self.measurement_format) == Measurement.Format.SCALAR)
         from main.utilities import interpolate_at
         return interpolate_at(self.valid_data(), x)
 
@@ -1715,8 +1735,7 @@ class SBMLTemplate(EDDObject):
     class Meta:
         db_table = "sbml_template"
     object_ref = models.OneToOneField(EDDObject, parent_link=True)
-    biomass_calculation = models.DecimalField(
-        default=-1, decimal_places=5, max_digits=16)  # XXX check that these parameters make sense!
+    biomass_calculation = models.DecimalField(default=-1, decimal_places=5, max_digits=16)
     biomass_calculation_info = models.TextField(default='')
     biomass_exchange_name = models.TextField()
     # FIXME would like to limit this to attachments only on parent EDDObject, and remove null=True
@@ -1741,11 +1760,14 @@ class SBMLTemplate(EDDObject):
         return rlist
 
     def parseSBML(self):
-        if not hasattr(self, '_sbml_model'):
+        if not hasattr(self, '_sbml_document'):
+            # self.sbml_file = ForeignKey
+            # self.sbml_file.file = FileField on Attachment
+            # self.sbml_file.file.file = File object on FileField
             contents = self.sbml_file.file.file.read()
             import libsbml
-            self._sbml_model = libsbml.readSBMLFromString(contents)
-        return self._sbml_model
+            self._sbml_document = libsbml.readSBMLFromString(contents)
+        return self._sbml_document
 
     def save(self, *args, **kwargs):
         # may need to do a post-save signal; get sbml attachment and save in sbml_file
@@ -1764,11 +1786,18 @@ class MetaboliteExchange(models.Model):
     """ Mapping for a metabolite to an exchange defined by a SBML template. """
     class Meta:
         db_table = "measurement_type_to_exchange"
-        unique_together = (("sbml_template", "measurement_type"), )
+        index_together = (
+            ("sbml_template", "reactant_name"),  # reactants not unique, but should be searchable
+            ("sbml_template", "exchange_name"),  # index implied by unique, making explicit
+        )
+        unique_together = (
+            ("sbml_template", "exchange_name"),
+            ("sbml_template", "measurement_type"),
+        )
     sbml_template = models.ForeignKey(SBMLTemplate)
-    measurement_type = models.ForeignKey(MeasurementType)
-    reactant_name = models.CharField(max_length=255)
-    exchange_name = models.CharField(max_length=255)
+    measurement_type = models.ForeignKey(MeasurementType, blank=True, null=True)
+    reactant_name = VarCharField()
+    exchange_name = VarCharField()
 
     def __str__(self):
         return self.exchange_name
@@ -1779,10 +1808,16 @@ class MetaboliteSpecies(models.Model):
     """ Mapping for a metabolite to an species defined by a SBML template. """
     class Meta:
         db_table = "measurement_type_to_species"
-        unique_together = (("sbml_template", "measurement_type"), )
+        index_together = (
+            ("sbml_template", "species"),  # index implied by unique, making explicit
+        )
+        unique_together = (
+            ("sbml_template", "species"),
+            ("sbml_template", "measurement_type"),
+        )
     sbml_template = models.ForeignKey(SBMLTemplate)
-    measurement_type = models.ForeignKey(MeasurementType)
-    species = models.TextField()
+    measurement_type = models.ForeignKey(MeasurementType, blank=True, null=True)
+    species = VarCharField()
 
     def __str__(self):
         return self.species
@@ -1794,14 +1829,12 @@ def guess_initials(user):
 
 
 def User_profile(self):
-    if hasattr(self, '_profile'):
-        return self._profile
     try:
         from edd.profile.models import UserProfile
-        (self._profile, created) = UserProfile.objects.get_or_create(
-            user=self, defaults={'initials': guess_initials(self)}
-        )
-        return self._profile
+        try:
+            return self.userprofile
+        except UserProfile.DoesNotExist:
+            return UserProfile.objects.create(user=self, initials=guess_initials(self))
     except:
         logger.exception('Failed to load a profile object for %s', self)
         return None
@@ -1813,7 +1846,7 @@ def User_initials(self):
 
 def User_institution(self):
     if self.profile and self.profile.institutions.count():
-        return self.profile.institutions.values_list('institution_name')[0][0]
+        return self.profile.institutions.all()[:1][0].institution_name
     return None
 
 

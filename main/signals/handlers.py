@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 from __future__ import unicode_literals
 
+import functools
 import logging
 import traceback
 
 from builtins import str
+from collections import namedtuple
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.mail import mail_admins
@@ -13,17 +15,21 @@ from django.db import connection, transaction
 from django.db.models.signals import m2m_changed, post_delete, post_save, pre_save, pre_delete
 from django.dispatch import receiver
 from django.core.mail import mail_managers
-
-from jbei.ice.rest.ice import parse_entry_id, HmacAuth, IceHmacAuth
-from . import study_modified, study_removed, user_modified
-from ..models import Line, Strain, Study, UNIT_TEST_FIXTURE_USERNAME, Update
-from ..solr import StudySearch, UserSearch
-from ..utilities import get_absolute_url
 from requests.exceptions import ConnectionError
 
+from edd.profile.models import UserProfile
+from jbei.rest.auth import HmacAuth
+from jbei.ice.rest.ice import parse_entry_id
+from . import study_modified, user_modified
+from ..models import (
+    Line, MetaboliteExchange, MetaboliteSpecies, SBMLTemplate, Strain, Study, Update,
+    UserPermission, GroupPermission, User, UNIT_TEST_FIXTURE_USERNAME)
+from ..solr import StudySearch, UserSearch
+from ..utilities import get_absolute_url
 
-solr = StudySearch()
-users = UserSearch()
+
+solr_study_index = StudySearch()
+solr_users_index = UserSearch()
 logger = logging.getLogger(__name__)
 
 if settings.USE_CELERY:
@@ -31,23 +37,64 @@ if settings.USE_CELERY:
 else:
     from jbei.ice.rest.ice import IceApi
 
+####################################################################################################
+# Define custom signals
+####################################################################################################
 
-@receiver(post_save, sender=Study)
+
+@receiver(post_save, sender=Study, dispatch_uid="main.signals.handlers.study_saved")
 def study_saved(sender, instance, created, raw, using, **kwargs):
     if not raw and using == 'default':
         study_modified.send(sender=sender, study=instance)
 
 
-@receiver(post_save, sender=get_user_model())
+@receiver(post_save, sender=get_user_model(), dispatch_uid="main.signals.handlers.user_saved")
 def user_saved(sender, instance, created, raw, using, **kwargs):
     if not raw and using == 'default':
         user_modified.send(sender=sender, user=instance)
 
 
-@receiver(pre_delete, sender=Study)
-def study_delete(sender, instance, using, **kwargs):
-    if using == 'default':
-        study_removed.send(sender=sender, study=instance)
+####################################################################################################
+# Maintain study SOLR index based on changes to the study or related user/group permissions
+####################################################################################################
+
+
+@receiver(post_delete, sender=UserPermission,
+          dispatch_uid=("%s.study_user_permission_post_delete" % __name__))
+def study_user_permission_post_delete(sender, instance, using, **kwargs):
+    logger.debug('Post-delete study permissions: %s' % str(instance.study.userpermission_set.all()))
+    _schedule_post_commit_study_permission_index(instance)
+
+
+@receiver(post_save, sender=UserPermission,
+          dispatch_uid=("%s.study_user_permission_post_save" % __name__))
+def study_user_permission_post_save(sender, instance, created, raw, using, **kwargs):
+    logger.debug('Post-save study user permissions: %s' % str(instance.study.userpermission_set.all()))
+    _schedule_post_commit_study_permission_index(instance)
+
+
+@receiver(post_delete, sender=GroupPermission,
+          dispatch_uid=("%s.study_group_permission_post_delete" % __name__))
+def study_group_permission_post_delete(sender, instance, using, **kwargs):
+    _schedule_post_commit_study_permission_index(instance)
+
+
+@receiver(post_save, sender=GroupPermission,
+          dispatch_uid=("%s.study_group_permission_post_save" % __name__))
+def study_group_permission_post_save(sender, instance, created, raw, using, **kwargs):
+    _schedule_post_commit_study_permission_index(instance)
+
+
+def _schedule_post_commit_study_permission_index(study_permission):
+    """
+        Schedules a post-commit update of the SOLR index for the affected study whose permissions
+        are affected
+        """
+    study = study_permission.study
+    # package up work to be performed when the database change commits
+    partial = functools.partial(_post_commit_index_study, study)
+    # schedule the work for after the commit (or immediately if there's no transaction)
+    connection.on_commit(partial)
 
 
 @receiver(study_modified)
@@ -60,11 +107,37 @@ def index_study(sender, study, **kwargs):
             'name': study.name,
         })
         return
-    solr.update([study, ])
+    # package up work to be performed when the database change commits
+    partial = functools.partial(_post_commit_index_study, study)
+    # schedule the work for after the commit (or immediately if there's no transaction)
+    connection.on_commit(partial)
 
 
-@receiver(study_removed)
-def unindex_study(sender, study, **kwargs):
+def _post_commit_index_study(study):
+    try:
+        solr_study_index.update([study, ])
+    except IOError:
+        _handle_post_commit_function_error('Error updating Solr index for study %d' % study.pk)
+
+PrimaryKeyCache = namedtuple('PrimaryKeyCache', ['id'])
+"""
+    Defines a cache for objects to-be-deleted so their primary keys can be available in post-commit
+    hooks
+"""
+
+
+@receiver(pre_delete, sender=Study, dispatch_uid="main.signals.handlers.study_pre_delete")
+def study_pre_delete(sender, instance, **kwargs):
+    # package up work to be performed after the study is deleted / when the database change commits.
+    # Note: we purposefully separate this from study_post_delete, since the study's primary key will
+    # be removed from the Study object itself during deletion. Pre-delete is also too early to
+    # perform the make changes since other issues may cause the deletion to fail.
+    study = instance
+    study.post_remove_pk_cache = PrimaryKeyCache(study.pk)
+
+
+@receiver(post_delete, sender=Study, dispatch_uid="main.signals.handlers.study_post_delete")
+def study_post_delete(sender, instance, **kwargs):
     # return early if this change was triggered during a unit test
     if Update.is_unit_test_update():
         logger.info('Skipping solr updates for study pk=%(pk)s (name="%(name)s"). Changes were '
@@ -72,20 +145,72 @@ def unindex_study(sender, study, **kwargs):
                         'pk': str(study.pk),  # may be None!?
                         'name': study.name,
                     })
-    solr.remove([study, ])
+    # schedule the work for after the commit (or immediately if there's no transaction)
+    study = instance
+    partial = functools.partial(_post_commit_unindex_study, study.post_remove_pk_cache)
+    connection.on_commit(partial)
 
 
+def _post_commit_unindex_study(study_pk):
+    try:
+        solr_study_index.remove([study_pk, ])
+    except IOError:
+        _handle_post_commit_function_error('Error updating Solr index for study %d' % study_pk)
+
+
+####################################################################################################
+# Index user
+####################################################################################################
 @receiver(user_modified)
 def index_user(sender, user, **kwargs):
-    # return early if this change was triggered during a unit test
-    if Update.is_unit_test_update():
-        return
+    # package up work to be performed when the database change commits
+    partial = functools.partial(_post_commit_index_user, user)
+    # schedule the work for after the commit (or immediately if there's no transaction)
+    connection.on_commit(partial)
 
+
+def _post_commit_index_user(user):
+        try:
+            solr_users_index.update([user, ])
+        # catch Solr/connection errors that occur during the user login process / email admins
+        # regarding the error. users may not be able to do much without Solr, but they can still
+        # access existing studies (provided the URL), and create new ones. Solr being down
+        # shouldn't prevent the login process (EDD-201)
+        except IOError as e:
+            _handle_post_commit_function_error("Error updating Solr with user information for "
+                                               "user %s" % user.username)
+
+
+@receiver(pre_delete, sender=get_user_model(),
+          dispatch_uid="main.signals.handlers.user_pre_delete")
+def user_pre_delete(sender, instance, using, **kwargs):
+    # cache the user's primary key for use in post_delete, which will be removed from the User
+    # object itself during deletion
+    user = instance
+    user.post_remove_pk_cache = PrimaryKeyCache(instance.pk)
+
+
+@receiver(post_delete, sender=get_user_model(), dispatch_uid=("%s.user_post_delete" % __name__))
+def user_post_delete(sender, instance, using, **kwargs):
+    user = instance
+    logger.info('Start of user_post_delete(): username=%s' % instance.username)
+
+    # get the user pk we cached in pre_delete (pk data member gets removed during the deletion)
+    post_remove_pk_cache = user.post_remove_pk_cache
+
+    # schedule the Solr update for after the commit (or immediately if there's no transaction)
+    partial = functools.partial(_post_commit_unindex_user, post_remove_pk_cache)
+    connection.on_commit(partial)
+
+
+def _post_commit_unindex_user(user_pk_cache):
     try:
-        users.update([user, ])
-    except ConnectionError as e:
-        mail_managers("Error connecting to Solr at login", "support needed")
-        logger.exception("Error connecting to Solr at login")
+        solr_users_index.remove([user_pk_cache, ])
+    except IOError:
+        _handle_post_commit_function_error(
+                'Error updating Solr index for user %d' % user_pk_cache.id)
+
+####################################################################################################
 
 
 def log_update_warning_msg(study_id):
@@ -155,8 +280,9 @@ def handle_study_post_save(sender, instance, created, raw, using, **kwargs):
                 continue
             strains_to_link.append(strain)
         # schedule ICE updates as soon as the database changes commit
-        connection.on_commit(lambda: _post_commit_link_ice_entry_to_study(user_email, study,
-                                                                          strains_to_link))
+        partial = functools.partial(_post_commit_link_ice_entry_to_study, user_email, study,
+                                                                          strains_to_link)
+        connection.on_commit(partial)
         logger.info("Scheduled post-commit work to update labels for %d of %d strains "
                     "associated with study %d"
                     % (len(strains_to_link), strains.count(), study.pk))
@@ -248,9 +374,9 @@ def handle_line_post_delete(sender, instance, **kwargs):
     # Note that if we don't wait, the Celery task can run before it commits, at which point its
     # initial DB query
     # will indicate an inconsistent database state. This happened repeatably during testing.
-    connection.on_commit(lambda: _post_commit_unlink_ice_entry_from_study(user_email, study_pk,
-                                                                          study_creation_datetime,
-                                                                          removed_strains))
+    partial = functools.partial(_post_commit_unlink_ice_entry_from_study, user_email, study_pk,
+                                study_creation_datetime, removed_strains)
+    connection.on_commit(partial)
 
 
 def _post_commit_unlink_ice_entry_from_study(user_email, study_pk, study_creation_datetime,
@@ -263,7 +389,9 @@ def _post_commit_unlink_ice_entry_from_study(user_email, study_pk, study_creatio
     """
     logger.info('Start ' + _post_commit_unlink_ice_entry_from_study.__name__ + '()')
 
-    ice = IceApi(auth=IceHmacAuth(username=user_email)) if not settings.USE_CELERY else None
+    ice = None
+    if not settings.USE_CELERY:
+        ice = IceApi(auth=HmacAuth(key_id=settings.ICE_KEY_ID, username=user_email))
 
     study_url = get_abs_study_url(study_pk)
     index = 0
@@ -315,9 +443,9 @@ def _post_commit_unlink_ice_entry_from_study(user_email, study_pk, study_creatio
 
     # if an error occurs, print a helpful log message, then re-raise it so Django will email
     # administrators
-    except StandardError as err:
+    except Exception as err:
         strain_pks = [strain.pk for strain in removed_strains]
-        _handle_post_commit_ice_lambda_error(err, 'remove', study_pk, strain_pks, index)
+        _handle_ice_post_commit_error(err, 'remove', study_pk, strain_pks, index)
 
 
 def _post_commit_link_ice_entry_to_study(user_email, study, linked_strains):
@@ -328,7 +456,9 @@ def _post_commit_link_ice_entry_to_study(user_email, study, linked_strains):
     django-commit-hooks limitation that a no-arg method be passed to the post-commit hook.
     :param linked_strains cached strain information
     """
-    ice = IceApi(auth=IceHmacAuth.get(username=user_email)) if not settings.USE_CELERY else None
+    ice = None
+    if not settings.USE_CELERY:
+        ice = IceApi(auth=HmacAuth(key_id=settings.ICE_KEY_ID, username=user_email))
 
     index = 0
 
@@ -364,16 +494,16 @@ def _post_commit_link_ice_entry_to_study(user_email, study, linked_strains):
 
     # if an error occurs, print a helpful log message, then re-raise it so Django will email
     # administrators
-    except StandardError as err:
+    except Exception as err:
         linked_strain_pks = [strain.pk for strain in linked_strains]
-        _handle_post_commit_ice_lambda_error(err, 'add/update', study.pk, linked_strain_pks, index)
+        _handle_ice_post_commit_error(err, 'add/update', study.pk, linked_strain_pks, index)
 
 
-def _handle_post_commit_ice_lambda_error(err, operation, study_pk, strains_to_update, index):
+def _handle_ice_post_commit_error(err, operation, study_pk, strains_to_update, index):
     """
-    Handles exceptions from post-commit lambda's used to communicate with ICE. Note that although
+    Handles exceptions from post-commit functions used to communicate with ICE. Note that although
     Django typically automatically handles uncaught exceptions by emailing admins, it doesn't seem
-    to be handling them in the case of post-commit lambda's (see EDD-178)
+    to be handling them in the case of post-commit functions/lambda's (see EDD-178)
     :param err:
     :return:
     """
@@ -388,18 +518,37 @@ def _handle_post_commit_ice_lambda_error(err, operation, study_pk, strains_to_up
     else:
         error_msg = "Error updating ICE links via direct HTTP request (index=%d)" % index
 
-    logger.exception(error_msg)
-    traceback_str = build_traceback_msg()
-    msg = '%s\n\n%s' % (error_msg, traceback_str)
+    _handle_post_commit_function_error(error_msg)
 
-    # Workaround EDD-176. Django doesn't seem to be picking up errors / emailing admins
-    # for uncaught exceptions in signal handlers. Note that even if Django resolves this,
-    # we *still* won't want to raise the exception since that would cause the EDD user to get an
-    # error message for a process that from their perspective was a success. We can consider
-    # changing this behavior after deploying Celery in production, which will effectively mask
-    # the error from EDD users (EDD-176). At that point, errors generated here will just reflect
-    # errors communicating with Celery, which should probably still be masked from users.
-    mail_admins(error_msg, msg)
+
+def _handle_post_commit_function_error(err_msg, re_raise_error=None):
+    """
+        A workaround for EDD-176: Django doesn't seem to be picking up errors / emailing admins
+        for uncaught exceptions in post-commit signal handler functions.
+        Note that even if Django
+        resolves this we *still* often won't want to raise the exception since that would cause
+        the EDD user to get an error message for a process that from their perspective was a
+        partial/total success. For ICE messaging tasks, we can consider changing this behavior
+        after  deploying Celery in production (EDD-176), which will effectively mask ICE
+        communication / integration errors from EDD users since they'll occur outside the context
+        of the browser's request. At that point, errors generated here will just reflect errors
+        communicating with Celery, which should probably still be masked from users.
+        :param err_msg: a brief string description of the error that will get logged / emailed to
+        admins
+        :param re_raise_error: a reference to the Error/Exception that was thrown if it should be
+        re-raised after being logged / emailed to admins. Often this should only be done if the
+        error is severe enough that it justifies interrupting the users current workflow. Note that
+        a traceback will be logged / emailed even if this parameter isn't included.
+    """
+
+    logger.exception(err_msg)  # Note: purposeful to not pass the error here! Often the cause of
+                               # unicode exceptions! See SYNBIO-1267.
+    traceback_str = build_traceback_msg()
+    msg = '%s\n\n%s' % (err_msg, traceback_str)
+    mail_admins(err_msg, msg)
+
+    if re_raise_error:
+        raise re_raise_error
 
 
 def _is_linkable(strain):
@@ -520,9 +669,9 @@ def handle_line_strain_changed(sender, instance, action, reverse, model, pk_set,
                 # in ICE. Note that if we don't wait, the Celery task can run before it commits,
                 # at which point its initial DB query will indicate an inconsistent database
                 # state. This happened repeatably during testing.
-                connection.on_commit(
-                    lambda: _post_commit_link_ice_entry_to_study(user_email, study,
-                                                                 add_on_commit_strains))
+                partial = functools.partial(_post_commit_link_ice_entry_to_study, user_email, study,
+                                            add_on_commit_strains)
+                connection.on_commit(partial)
 
             exp_add_count = len(pk_set)
             linkable_count = len(add_on_commit_strains)
@@ -539,7 +688,7 @@ def handle_line_strain_changed(sender, instance, action, reverse, model, pk_set,
 
         # if an error occurs, print a helpful log message, then re-raise it so Django will email
         # administrators
-        except StandardError:
+        except Exception:
             logger.exception("Exception scheduling post-commit work. Failed on strain with id %d" %
                              strain_pk)
     elif 'pre_remove' == action:
@@ -595,13 +744,14 @@ def handle_line_strain_changed(sender, instance, action, reverse, model, pk_set,
                 # from ICE. Note that if we don't wait, the Celery task can run before it commits,
                 # at which point its initial DB query will indicate an inconsistent database
                 # state. This happened repeatably during testing.
-                connection.on_commit(
-                    lambda: _post_commit_unlink_ice_entry_from_study(user_email, study.pk,
-                                                                     study.created.mod_time,
-                                                                     remove_on_commit))
+                partial = functools.partial(_post_commit_unlink_ice_entry_from_study,user_email,
+                                            study.pk, study.created.mod_time, remove_on_commit)
+                connection.on_commit(partial)
+        except ChangeFromFixture:
+            logger.warning("Detected changes from fixtures, skipping ICE signal handling.")
         # if an error occurs, print a helpful log message, then re-raise it so Django will email
         # administrators
-        except StandardError:
+        except Exception:
             logger.exception("Exception scheduling post-commit work. Failed on strain with id %d" %
                              strain_pk)
 
@@ -632,6 +782,43 @@ def track_celery_task_submission(async_result):
     """
     logger.warning("TODO: track status of tasks submitted to the Celery library, but maybe not yet "
                    "communicated to the server (SYNBIO-1204)")
+
+
+@receiver(post_save, sender=SBMLTemplate)
+def template_saved(sender, instance, created, raw, using, update_fields, **kwargs):
+    if not raw and (created or update_fields is None or 'sbml_file' in update_fields):
+        # TODO: add celery task for template_sync_species
+        template_sync_species(instance)
+
+
+def template_sync_species(instance):
+    doc = instance.parseSBML()
+    model = doc.getModel()
+    # filter to only those for the updated template
+    species_qs = MetaboliteSpecies.objects.filter(sbml_template=instance)
+    exchange_qs = MetaboliteExchange.objects.filter(sbml_template=instance)
+    # values_list yields a listing of tuples, unwrap the value we want
+    exist_species = {s[0] for s in species_qs.values_list('species')}
+    exist_exchange = {r[0] for r in exchange_qs.values_list('exchange_name')}
+    # creating any records not in the database
+    for species in map(lambda s: s.getId(), model.getListOfSpecies()):
+        if species not in exist_species:
+            MetaboliteSpecies.objects.get_or_create(sbml_template=instance, species=species)
+        else:
+            exist_species.remove(species)
+    reactions = map(lambda r: (r.getId(), r.getListOfReactants()), model.getListOfReactions())
+    for reaction, reactants in reactions:
+        if len(reactants) == 1 and reaction not in exist_exchange:
+            MetaboliteExchange.objects.get_or_create(
+                sbml_template=instance,
+                exchange_name=reaction,
+                reactant_name=reactants[0].getSpecies()
+            )
+        else:
+            exist_exchange.remove(reaction)
+    # removing any records in the database not in the template document
+    species_qs.filter(species__in=exist_species).delete()
+    exchange_qs.filter(exchange_name__in=exist_exchange).delete()
 
 
 def build_traceback_msg():

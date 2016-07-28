@@ -14,6 +14,8 @@ import environ
 from django.conf.global_settings import TEMPLATE_CONTEXT_PROCESSORS as TCP
 from psycopg2.extensions import ISOLATION_LEVEL_SERIALIZABLE
 
+from jbei.rest.auth import HmacAuth
+
 
 root = environ.Path(__file__) - 3  # root is two parents up of directory containing base.py
 BASE_DIR = root()
@@ -28,12 +30,13 @@ if env('SECRET_KEY', default=DOCKER_SENTINEL) is DOCKER_SENTINEL:
 
 
 ###################################################################################################
-# Set ICE configuration used in multiple places, or that we want to be able to override in
-# local_settings.py
+# Set ICE configuration used in multiple places, or that we want to be able to override in local.py
 ###################################################################################################
+ICE_KEY_ID = 'edd'
 ICE_SECRET_HMAC_KEY = env('ICE_HMAC_KEY')
 ICE_URL = 'https://registry-test.jbei.org/'
 ICE_REQUEST_TIMEOUT = (10, 10)  # HTTP request connection and read timeouts, respectively (seconds)
+HmacAuth.register_key(ICE_KEY_ID, ICE_SECRET_HMAC_KEY)
 
 
 ###################################################################################################
@@ -71,6 +74,7 @@ SECRET_KEY = env('SECRET_KEY', default='I was awake and dreaming at the same tim
 
 ALLOWED_HOSTS = []
 SITE_ID = 1
+USE_X_FORWARDED_HOST = True
 LOGIN_REDIRECT_URL = '/'
 
 # Application definition
@@ -168,9 +172,21 @@ DATABASES = {
 DATABASES['default'].update(OPTIONS={'isolation_level': ISOLATION_LEVEL_SERIALIZABLE})
 
 
-####################################################################################################
+###################################################################################################
+# Caches
+###################################################################################################
+# https://docs.djangoproject.com/en/1.9/topics/cache/
+CACHES = {
+    'default': env.cache(),
+}
+
+SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
+SESSION_CACHE_ALIAS = 'default'
+
+
+###################################################################################################
 # REST API Framework
-####################################################################################################
+###################################################################################################
 
 PUBLISH_REST_API = False  # by default, don't publish the API until we can do more testing
 REST_FRAMEWORK = {
@@ -290,9 +306,9 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 ###################################################################################################
 # https://docs.djangoproject.com/en/dev/howto/static-files/
-# Keeping all static files in the static directory of the project
-STATIC_ROOT = root('static')
+STATIC_ROOT = '/var/www/static'
 STATIC_URL = '/static/'
+STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.CachedStaticFilesStorage'
 
 
 ###################################################################################################
