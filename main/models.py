@@ -23,8 +23,9 @@ from itertools import chain
 from six import string_types
 from threadlocals.threadlocals import get_current_request
 
-from jbei.edd.rest.constants import (METADATA_CONTEXT_ASSAY, METADATA_CONTEXT_LINE,
-                                     METADATA_CONTEXT_STUDY)
+from jbei.rest.clients.edd.constants import (
+    METADATA_CONTEXT_ASSAY, METADATA_CONTEXT_LINE, METADATA_CONTEXT_STUDY,
+)
 from .export import table
 
 UNIT_TEST_FIXTURE_USERNAME = 'unit_test_user'
@@ -106,6 +107,14 @@ class Update(models.Model, EDDSerialize):
 
     @classmethod
     def load_update(cls, user=None, path=None):
+        """ Sometimes there will be actions happening outside the context of a request; use this
+            factory to create an Update object in those cases.
+            :param user: the user responsible for the update; None will be replaced with the
+                system user.
+            :param path: the path added to the update; it would be a good idea to put e.g. the
+                script name and arguments here.
+            :return: an Update instance persisted to the database
+        """
         """
         Creates a new Update attributed to the request's current user, or to the specified user when
         called from outside the context of an HttpRequest.
@@ -118,6 +127,9 @@ class Update(models.Model, EDDSerialize):
         # gracefully handle updates made via the command line or via the ORM (e.g. in unit tests),
         # where no request / user credentials are present
         if request is None:
+            mod_by = user
+            if mod_by is None:
+                mod_by = User.system_user()
             logger.debug('Update.load_update(): request is None')  # TODO: remove debug stmt
             if user is None:
 
@@ -140,7 +152,7 @@ class Update(models.Model, EDDSerialize):
                 logger.debug('Update.load_update(): user parameter is %s ' % str(user))
 
             update = cls(mod_time=arrow.utcnow(),
-                         mod_by=user,
+                         mod_by=mod_by,
                          path=path,
                          origin='localhost')
             # TODO this save may be too early?
@@ -152,6 +164,7 @@ class Update(models.Model, EDDSerialize):
 
     @classmethod
     def load_request_update(cls, request):
+        """ Load an existing Update object associated with a request, or create a new one. """
         rhost = '%s; %s' % (
             request.META.get('REMOTE_ADDR', None),
             request.META.get('REMOTE_HOST', ''))
@@ -703,27 +716,45 @@ class Study(EDDObject):
     @staticmethod
     def user_permission_q(user, permission, keyword_prefix=''):
         """
-        Constructs a django Q object for testing whether the specified user has the
-        required permission for a study as part of a Study-related Django ORM query. It's
-        important to note that the provided Q object will return one row for each user/group
-        permission that gives the user access to the study, so clients will often want to use
-        distinct() to limit the returned results. Note that
-        this only tests whether the user or group has specific permissions granted on the Study,
-        not whether the user's role (e.g. 'staff', 'superuser') gives him/her access to it.  See
-        user_role_has_read_access( user), user_can_read(self, user).
+        Constructs a django Q object for testing whether the specified user has the required
+        permission for a study as part of a Study-related Django model query. It's important to
+        note that the provided Q object will return one row for each user/group permission that
+        gives the user access to the study, so clients that aren't already filtering by primary
+        key will probably want to use distinct() to limit the returned results. Note that this
+        only tests whether the user or group has specific
+        permissions granted on the Study, not whether the user's role (e.g. 'staff', 'admin')
+        gives him/her access to it. See:
+            @ user_role_has_read_access(user)
+            @ user_can_read(self, user)
         :param user: the user
-        :param permission: the study permission type to test (e.g. StudyPermission.READ)
-        :param keyword_prefix: an optional keyword prefix to prepend to the query keyword arguments.
-        For example when querying Study, the default value of '' should be used, or when querying
-        for Lines, whose permissions depend on the related Study, use 'study__' similar to other
-        queryset keyword arguments.
-        :return: true if the user has explicit read permission to the study
+        :param permission: the study permission type to test (e.g. StudyPermission.READ); can be
+            any iterable of permissions or a single permission
+        :param keyword_prefix: an optional keyword prefix to prepend to the query keyword
+            arguments. For example when querying Study, the default value of '' should be used,
+            or when querying for Lines, whose permissions depend on the related Study, use
+            'study__' similar to other queryset keyword arguments.
+        :return: true if the user has the specified permission to the study
         """
-
-        return ((Q(**{'%suserpermission__user' % keyword_prefix: user}) &
-                 Q(**{'%suserpermission__permission_type' % keyword_prefix: permission})) |
-                (Q(**{'%sgrouppermission__group__user' % keyword_prefix: user}) &
-                 Q(**{'%sgrouppermission__permission_type' % keyword_prefix: permission})))
+        prefix = keyword_prefix
+        perm = permission
+        if isinstance(permission, string_types):
+            perm = (permission, )
+        user_perm = '%suserpermission' % prefix
+        group_perm = '%sgrouppermission' % prefix
+        all_perm = '%severyonepermission' % prefix
+        return (
+            Q(**{
+                '%s__user' % user_perm: user,
+                '%s__permission_type__in' % user_perm: perm,
+            }) |
+            Q(**{
+                '%s__group__user' % group_perm: user,
+                '%s__permission_type__in' % group_perm: perm,
+            }) |
+            Q(**{
+                '%s__permission_type__in' % all_perm: perm,
+            })
+        )
 
     @staticmethod
     def user_role_can_read(user):
@@ -736,16 +767,18 @@ class Study(EDDObject):
 
     def user_can_read(self, user):
         """ Utility method testing if a user has read access to a Study. """
-        return user and (Study.user_role_can_read(user) or any(p.is_read() for p in chain(
+        return user and (self.user_role_can_read(user) or any(p.is_read() for p in chain(
             self.userpermission_set.filter(user=user),
-            self.grouppermission_set.filter(group__user=user)
+            self.grouppermission_set.filter(group__user=user),
+            self.everyonepermission_set.all(),
         )))
 
     def user_can_write(self, user):
         """ Utility method testing if a user has write access to a Study. """
         return super(Study, self).user_can_write(user) or any(p.is_write() for p in chain(
             self.userpermission_set.filter(user=user),
-            self.grouppermission_set.filter(group__user=user)
+            self.grouppermission_set.filter(group__user=user),
+            self.everyonepermission_set.all(),
         ))
 
     @staticmethod
@@ -756,7 +789,11 @@ class Study(EDDObject):
 
     def get_combined_permission(self):
         """ Returns a chained iterator over all user and group permissions on a Study. """
-        return chain(self.userpermission_set.all(), self.grouppermission_set.all())
+        return chain(
+            self.userpermission_set.all(),
+            self.grouppermission_set.all(),
+            self.everyonepermission_set.all(),
+        )
 
     def get_contact(self):
         """ Returns the contact email, or supplementary contact information if no contact user is
@@ -784,7 +821,8 @@ class Study(EDDObject):
         return Assay.objects.filter(line__study=self)
 
     def get_assays_by_protocol(self):
-        """ Returns a dict mapping Protocol ID to all Assays in Study using that Protocol. """
+        """ Returns a dict mapping Protocol ID to a list of Assays the in Study using that
+        Protocol. """
         assays_by_protocol = defaultdict(list)
         for assay in self.get_assays():
             assays_by_protocol[assay.protocol_id].append(assay.id)
@@ -891,7 +929,7 @@ class GroupPermission(StudyPermission):
 
     def to_json(self):
         return {
-            'user': {
+            'group': {
                 'id': self.group.pk,
                 'name': self.group.name,
             },
@@ -900,6 +938,26 @@ class GroupPermission(StudyPermission):
 
     def __str__(self):
         return 'g:%(group)s' % {'group': self.group.name}
+
+
+@python_2_unicode_compatible
+class EveryonePermission(StudyPermission):
+    class Meta:
+        db_table = 'study_public_permission'
+
+    def applies_to_user(self, user):
+        return True
+
+    def get_who_label(self):
+        return _('Everyone')
+
+    def to_json(self):
+        return {
+            'type': self.permission_type
+        }
+
+    def __str__(self):
+        return 'g:__Everyone__'
 
 
 @python_2_unicode_compatible
@@ -1360,9 +1418,6 @@ class Metabolite(MeasurementType):
             count = count + (int(c) if c else 1)
         return count
 
-# override the default type_group for metabolites
-Metabolite._meta.get_field('type_group').default = MeasurementType.Group.METABOLITE
-
 
 @python_2_unicode_compatible
 class GeneIdentifier(MeasurementType):
@@ -1387,8 +1442,6 @@ class GeneIdentifier(MeasurementType):
         # force GENEID group
         self.type_group = MeasurementType.Group.GENEID
         super(GeneIdentifier, self).save(*args, **kwargs)
-
-GeneIdentifier._meta.get_field('type_group').default = MeasurementType.Group.GENEID
 
 
 @python_2_unicode_compatible
@@ -1415,6 +1468,14 @@ class ProteinIdentifier(MeasurementType):
 
     @classmethod
     def match_accession_id(cls, text):
+        """
+        Tests whether the input text matches the pattern of a Uniprot accession id, and if so,
+        extracts & returns the required identifier portion of the text, less optional prefix/suffix
+        allowed by the pattern.
+        :param text: the text to match
+        :return: the Uniprot identifier if the input text matched the accession id pattern,
+        or the entire input string if not
+        """
         match = cls.accession_pattern.match(text)
         if match:
             return match.group(1)
@@ -1427,8 +1488,6 @@ class ProteinIdentifier(MeasurementType):
         # force PROTEINID group
         self.type_group = MeasurementType.Group.PROTEINID
         super(ProteinIdentifier, self).save(*args, **kwargs)
-
-ProteinIdentifier._meta.get_field('type_group').default = MeasurementType.Group.PROTEINID
 
 
 @python_2_unicode_compatible
@@ -1450,8 +1509,6 @@ class Phosphor(MeasurementType):
         # force PHOSPHOR group
         self.type_group = MeasurementType.Group.PHOSPHOR
         super(Phosphor, self).save(*args, **kwargs)
-
-Phosphor._meta.get_field('type_group').default = MeasurementType.Group.PHOSPHOR
 
 
 @python_2_unicode_compatible
@@ -1508,18 +1565,6 @@ class Assay(EDDObject):
 
     def __str__(self):
         return self.name
-
-    def get_metabolite_measurements(self):
-        return self.measurement_set.filter(
-            measurement_type__type_group=MeasurementType.Group.METABOLITE)
-
-    def get_protein_measurements(self):
-        return self.measurement_set.filter(
-            measurement_type__type_group=MeasurementType.Group.PROTEINID)
-
-    def get_gene_measurements(self):
-        return self.measurement_set.filter(
-            measurement_type__type_group=MeasurementType.Group.GENEID)
 
     @property
     def long_name(self):
@@ -1623,7 +1668,7 @@ class Measurement(EDDMetadata, EDDSerialize):
     # may not be the best method name, if we ever want to support other
     # types of data as vectors in the future
     def is_carbon_ratio(self):
-        return (int(self.measurement_format) == Measurement.Format.VECTOR)
+        return (self.measurement_format == Measurement.Format.VECTOR)
 
     def valid_data(self):
         """ Data for which the y-value is defined (non-NULL, non-blank). """
@@ -1631,7 +1676,7 @@ class Measurement(EDDMetadata, EDDSerialize):
         return [md for md in mdata if md.is_defined()]
 
     def is_extracellular(self):
-        return self.compartment == '%s' % Measurement.Compartment.EXTRACELLULAR
+        return self.compartment == Measurement.Compartment.EXTRACELLULAR
 
     def data(self):
         """ Return the data associated with this measurement. """
@@ -1661,13 +1706,13 @@ class Measurement(EDDMetadata, EDDSerialize):
     def extract_data_xvalues(self, defined_only=False):
         qs = self.measurementvalue_set.all()
         if defined_only:
-            qs = qs.exclude(y=None, y__len=0)
+            qs = qs.exclude(Q(y=None) | Q(y__len=0))
         # first index unpacks single value from tuple; second index unpacks first value from X
         return map(lambda x: x[0][0], qs.values_list('x'))
 
     # this shouldn't need to handle vectors
     def interpolate_at(self, x):
-        assert (int(self.measurement_format) == Measurement.Format.SCALAR)
+        assert (self.measurement_format == Measurement.Format.SCALAR)
         from main.utilities import interpolate_at
         return interpolate_at(self.valid_data(), x)
 
@@ -1873,6 +1918,10 @@ def User_to_json(self, depth=0):
     }
 
 
+def User_system_user(cls):
+    return cls.objects.get(username='system')
+
+
 def User_to_solr_json(self):
     format_string = '%Y-%m-%dT%H:%M:%SZ'
     return {
@@ -1905,3 +1954,4 @@ def patch_user_model():
     User.add_to_class("initials", property(User_initials))
     User.add_to_class("institution", property(User_institution))
     User.add_to_class("institutions", property(User_institutions))
+    User.system_user = classmethod(User_system_user)

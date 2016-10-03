@@ -2,8 +2,8 @@
 from django.conf.urls import include, url
 import rest_framework.routers as rest_routers
 
-from jbei.edd.rest.constants import STRAINS_RESOURCE_NAME, STUDIES_RESOURCE_NAME, \
-    METADATA_TYPES_RESOURCE_NAME, METADATA_GROUPS_RESOURCE_NAME, LINES_RESOURCE_NAME
+from jbei.rest.clients.edd.constants import (STRAINS_RESOURCE_NAME, STUDIES_RESOURCE_NAME,
+    METADATA_TYPES_RESOURCE_NAME, METADATA_GROUPS_RESOURCE_NAME, LINES_RESOURCE_NAME)
 from .views import (LineViewSet, MetadataGroupViewSet, MetadataTypeViewSet,
                     STRAIN_NESTED_RESOURCE_PARENT_PREFIX, StrainStudiesView, StrainViewSet,
                     StudyLineView, StudyStrainsView, StudyViewSet)

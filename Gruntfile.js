@@ -1,12 +1,15 @@
 module.exports = function(grunt) {
 
-    grunt.loadNpmTasks('grunt-typescript');
+    grunt.loadNpmTasks('grunt-ts');
     grunt.loadNpmTasks('grunt-contrib-watch');
     grunt.loadNpmTasks('grunt-contrib-copy');
     grunt.loadNpmTasks('grunt-contrib-clean');
     grunt.loadNpmTasks('grunt-exec');
     grunt.loadNpmTasks('grunt-insert-timestamp');
     grunt.loadNpmTasks('grunt-contrib-uglify');
+    grunt.loadNpmTasks('grunt-karma');
+    grunt.loadNpmTasks('grunt-contrib-jshint');
+    grunt.loadNpmTasks('grunt-protractor-runner');
 
     grunt.initConfig({
     	clean: {
@@ -25,7 +28,7 @@ module.exports = function(grunt) {
                       fileList.forEach(function(filepath) {
                         statsObj = fs.statSync(filepath);
                         mTime = statsObj.mtime.getTime();
-                        if (mTime > mostRecentMTime) { mostRecentMTime = mTime }
+                        if (mTime > mostRecentMTime) { mostRecentMTime = mTime; }
                       });
                       return new Date(mostRecentMTime);
                     },
@@ -46,7 +49,31 @@ module.exports = function(grunt) {
                 }]
             }
         },
-        typescript: {
+        protractor: {
+              options: {
+                // Location of your protractor config file
+                configFile: "main/static/main/js/test/e2e/conf.js",
+                noColor: false,
+
+                // Set to true if you would like to use the Protractor command line debugging tool
+                // debug: true,
+
+                // Additional arguments that are passed to the webdriver command
+                args: { }
+              },
+              e2e: {
+                options: {
+                  // Stops Grunt process if a test fails
+                  keepAlive: false
+                }
+              },
+              continuous: {
+                options: {
+                  keepAlive: true
+                }
+              }
+            },
+        ts: {
             dev: {
                 src: ['./typescript/build/*.ts'],
                 dest: './typescript/build/',
@@ -54,6 +81,7 @@ module.exports = function(grunt) {
                     rootDir: './typescript/build/',
                     target: 'es5',
                     declaration: false,
+                    pretty: true,
                     inlineSourceMap: true,
                     inlineSources: true,
                     removeComments: false,
@@ -82,6 +110,34 @@ module.exports = function(grunt) {
                 }
             }
         },
+        karma: {
+          unit: {
+            configFile: 'karma.conf.js',
+            singleRun: true
+          }
+        },
+        concat: {
+          options: {},
+          dist: {
+            files: [
+                 'static/main/js/**/*.js',
+                 'fixtures/*.js',
+                 '!main/static/main/js/test/*.js'
+               ]
+          }
+        },
+        jshint: {
+            //include 'main/static/main/js/*.js' to lint all js files  
+          files: ['Gruntfile.js',
+                  './main/static/main/js/GroupedBarAssay.js',
+                  './main/static/main/js/GroupedBarTime.js',
+                  './main/static/main/js/GroupedBarTime.js'],
+          options: {
+            globals: {
+              jQuery: true
+            }
+          }
+        },
         uglify: {
             options: {
                 mangle: false
@@ -94,6 +150,13 @@ module.exports = function(grunt) {
                     dest: './typescript/build/'
                 }]
             }
+        },
+        screenshots: {
+          default_options: {
+            options: {
+                spawn: false
+            }
+          }
         },
         copy: {
             prep: {
@@ -124,7 +187,7 @@ module.exports = function(grunt) {
         watch: {
             scripts: {
                 files: ['./typescript/src/*.ts'],                 // the watched files
-                tasks: ["clean:build", "copy:prep", "insert_timestamp:js", "typescript:dev", "copy:mergeDev", "exec:collect"],  // the task(s) to run
+                tasks: ["clean:build", "copy:prep", "insert_timestamp:js", "ts:dev", "copy:mergeDev", "exec:collect"],  // the task(s) to run
                 options: {
                     spawn: false // makes the watch task faster
                 }
@@ -137,19 +200,40 @@ module.exports = function(grunt) {
     var commit = grunt.option('commit');
     var watch = grunt.option('watch');
 
+    grunt.registerTask('test', [
+          'jshint',
+          'karma'
+    ]);
+
+    grunt.registerTask('e2e-test', ['protractor:e2e']);
+
+    grunt.registerMultiTask( 'screenshots', 'Use Grunt and PhantomJS to generate Screenshots of' +
+        ' pages', function(){
+        var server = require( "./main/fixtures/node-server/main" );
+        var screenshot = require( "./main/fixtures/shot-wrapper" );
+
+        var done = this.async();
+
+        screenshot.takeShot( function(){
+            done();
+        });
+
+    });
+
     if (production) {
         // One-time production build
-        grunt.registerTask('default', ["clean:build", "copy:prep", "typescript:prod", "uglify:prod", "copy:mergeProd", "exec:collect"]);
+        grunt.registerTask('default', ["clean:build", "copy:prep", "ts:prod", "uglify:prod", "copy:mergeProd", "exec:collect"]);
     } else if (watch) {
         // Dev build and watch for changes
-        grunt.registerTask('default', ["clean:build", "copy:prep", "insert_timestamp:js", "typescript:dev", "copy:mergeDev", "exec:collect", 'watch']);
+        grunt.registerTask('default', ["clean:build", "copy:prep", "insert_timestamp:js", "ts:dev", "copy:mergeDev", "exec:collect", 'watch']);
     } else if (commit) {
         // Dev build and watch for changes
-        grunt.registerTask('default', ["clean:build", "copy:prep", "typescript:commit", "copy:mergeDev", "exec:collect"]);
+        grunt.registerTask('default', ["clean:build", "copy:prep", "ts:commit", "copy:mergeDev", "exec:collect"]);
     } else {
         // Standard one-time dev build
-        grunt.registerTask('default', ["clean:build", "copy:prep", "insert_timestamp:js", "typescript:dev", "copy:mergeDev", "exec:collect"]);
+        grunt.registerTask('default', ["clean:build", "copy:prep", "insert_timestamp:js", "ts:dev", "copy:mergeDev", "exec:collect"]);
     }
+
 };
 
 

@@ -10,8 +10,11 @@ Note that many of the docstrings in this module use specific YAML formatting to 
 endpoint documentation viewable in the browser. See
 http://django-rest-swagger.readthedocs.io/en/latest/yaml.html
 """
+
+import logging
 import re
 
+from django.core.exceptions import PermissionDenied
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from rest_framework.permissions import DjangoModelPermissions, IsAuthenticated, BasePermission
@@ -19,16 +22,13 @@ from rest_framework.status import HTTP_403_FORBIDDEN
 
 from edd.rest.serializers import (LineSerializer, MetadataGroupSerializer, MetadataTypeSerializer,
                                   StrainSerializer, StudySerializer, UserSerializer)
-from jbei.edd.rest.constants import (QUERY_ACTIVE_OBJECTS_ONLY, QUERY_ALL_OBJECTS,
-                                     CASE_SENSITIVE_PARAM,
-                                     QUERY_INACTIVE_OBJECTS_ONLY, LINE_ACTIVE_STATUS_PARAM,
-                                     LINES_ACTIVE_DEFAULT,
-                                     METADATA_TYPE_CONTEXT, METADATA_TYPE_GROUP,
-                                     METADATA_TYPE_I18N, METADATA_TYPE_LOCALE,
-                                     METADATA_TYPE_NAME_REGEX,
-                                     STRAIN_CASE_SENSITIVE, STRAIN_NAME, STRAIN_NAME_REGEX,
-                                     STRAIN_REGISTRY_ID, STRAIN_REGISTRY_URL_REGEX,
-                                     STUDIES_RESOURCE_NAME)
+from jbei.rest.clients.edd.constants import (
+    CASE_SENSITIVE_PARAM, LINE_ACTIVE_STATUS_PARAM, LINES_ACTIVE_DEFAULT, METADATA_TYPE_CONTEXT,
+    METADATA_TYPE_GROUP, METADATA_TYPE_I18N, METADATA_TYPE_LOCALE, METADATA_TYPE_NAME_REGEX,
+    QUERY_ACTIVE_OBJECTS_ONLY, QUERY_ALL_OBJECTS, QUERY_INACTIVE_OBJECTS_ONLY,
+    STRAIN_CASE_SENSITIVE, STRAIN_NAME, STRAIN_NAME_REGEX, STRAIN_REGISTRY_ID,
+    STRAIN_REGISTRY_URL_REGEX, STUDIES_RESOURCE_NAME,
+)
 from jbei.rest.utils import is_numeric_pk
 from jbei.utils import PK_OR_TYPICAL_UUID_PATTERN, PK_OR_TYPICAL_UUID_REGEX
 from main.models import Line, MetadataType, Strain, Study, StudyPermission, User, MetadataGroup
@@ -37,7 +37,6 @@ from rest_framework.exceptions import APIException
 from rest_framework.relations import StringRelatedField
 from rest_framework.response import Response
 
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -58,11 +57,14 @@ logger = logging.getLogger(__name__)
 
 STRAIN_NESTED_RESOURCE_PARENT_PREFIX = r'strains'
 
+STUDY_URL_KWARG = 'study'
 BASE_STRAIN_URL_KWARG = 'id'  # NOTE: value impacts url kwarg names for nested resources
 HTTP_MUTATOR_METHODS = ('POST', 'PUT', 'PATCH', 'UPDATE', 'DELETE')
 
 # TODO: consider for all models below:
-#   queryset = Strain.objects.none()  # Required for DjangoModelPermissions bc of get_queryset()
+#   # Required for DjangoModelPermissions bc of get_queryset() override.
+#   # See http://www.django-rest-framework.org/api-guide/permissions/#djangomodelpermissions
+#   queryset = Strain.objects.none()
 #   permissionClasses = (IsAuthenticated,) for views dependent on custom Study permissions
 
 
@@ -287,12 +289,12 @@ def _do_optional_regex_filter(query_params_dict, queryset, data_member_name, reg
     Implements consistent regular expression matching behavior for EDD's REST API. Applies
     default behaviors re: case-sensitivity to all regex-based searches in the REST API.
     :param queryset: the queryset to filter based on the regular expression parameter
-    :param data_member_name the django model data member name to be filtered according to the regex,
-    if present
+    :param data_member_name the django model data member name to be filtered according to the
+        regex, if present
     :param regex_param_name: the query parameter name REST API clients use to pass the regular
-    expression used for the search
+        expression used for the search
     :param locale_param_name: the query parameter name REST API clients use to pass the locale used
-    to determine which strings the regular expression is tested against
+        to determine which strings the regular expression is tested against
     :return: the queryset, filtered using the regex, if available
     """
     # TODO: do something with locale, which we've at least forced clients to provide to simplify
@@ -682,10 +684,10 @@ def filter_by_active_status(queryset, active_status=QUERY_ACTIVE_OBJECTS_ONLY, q
     # we prepend '' and come up with Q(active=True). For example 2, when querying
     # Strain, we prepend 'line__' and get Q(line__active=True)
     query_keyword = '%sactive' % query_prefix
-    active_value = (active_status != QUERY_INACTIVE_OBJECTS_ONLY)  # return requested status,
-                                                                   # or active objects only if
-                                                                   # input was bad
-    print('Active query %s' % str({query_keyword: active_value})) # TODO: remove debug stmt
+    # return requested status, or active objects only if input was bad
+    active_value = (active_status != QUERY_INACTIVE_OBJECTS_ONLY)
+    # TODO: remove debug stmt
+    print('Active query %s' % str({query_keyword: active_value}))
     active_criterion = Q(**{query_keyword: active_value})
     return queryset.filter(active_criterion)
 
@@ -704,8 +706,9 @@ class StudyViewSet(viewsets.ReadOnlyModelViewSet):  # read-only for now...see TO
 
         user = self.request.user
 
-        permission = (StudyPermission.WRITE if self.request.method in HTTP_MUTATOR_METHODS else
-                     StudyPermission.READ)
+        permission = StudyPermission.READ
+        if self.request.method in HTTP_MUTATOR_METHODS:
+            permission = StudyPermission.WRITE
 
         # if the user's admin / staff role gives read access to all Studies, don't bother querying
         # the database for specific permissions defined on this study
@@ -739,8 +742,8 @@ class StudyViewSet(viewsets.ReadOnlyModelViewSet):  # read-only for now...see TO
 NUMERIC_PK_PATTERN = re.compile('^\d+$')
 
 # Notes on DRF nested views:
-# lookup_url_kwargs doesn't seem to be used/respected by nested routers in the same way as plain DRF
-#           - see StrainStudiesView for an example that works, but isn't clearly the most clear yet
+# lookup_url_kwargs doesn't seem to be used/respected by nested routers in the same way as plain
+# DRF - see StrainStudiesView for an example that works, but isn't clearly the most clear yet
 
 
 class StrainStudiesView(viewsets.ReadOnlyModelViewSet):
@@ -756,14 +759,13 @@ class StrainStudiesView(viewsets.ReadOnlyModelViewSet):
         Overrides the default implementation to provide flexible lookup for nested strain
         views (either based on local numeric primary key, or based on the strain UUID from ICE
         """
-        filters = {}  # unlike the example, just do all the filtering in get_queryset() for
-                      # consistency
+        # unlike the example, just do all the filtering in get_queryset() for consistency
+        filters = {}
         queryset = self.get_queryset()
 
         obj = get_object_or_404(queryset, **filters)
-        self.check_object_permissions(self.request, obj)  # verify class-level strain access. study
-                                                          # permissions are enforced in
-                                                          # get_queryset()
+        # verify class-level strain access. study permissions are enforced in get_queryset()
+        self.check_object_permissions(self.request, obj)
         return obj
 
     def get_queryset(self):
@@ -771,7 +773,8 @@ class StrainStudiesView(viewsets.ReadOnlyModelViewSet):
         # get the strain identifier, which could be either a numeric (local) primary key, or a UUID
         strain_id = self.kwargs.get(kwarg)
 
-        print('lookup_url_kwarg = %s, kwargs = %s' % (str(self.lookup_url_kwarg), str(self.kwargs)))
+        print('lookup_url_kwarg = %s, kwargs = %s' %
+              (str(self.lookup_url_kwarg), str(self.kwargs)))
 
         # figure out which it is
         strain_pk = strain_id if is_numeric_pk(strain_id) else None
@@ -779,8 +782,9 @@ class StrainStudiesView(viewsets.ReadOnlyModelViewSet):
 
         print('strain_pk=%s, strain_uuid=%s' % (strain_pk, strain_uuid))
 
-        line_active_status = self.request.query_params.get(LINE_ACTIVE_STATUS_PARAM,
-                                                           LINES_ACTIVE_DEFAULT)
+        line_active_status = self.request.query_params.get(
+            LINE_ACTIVE_STATUS_PARAM, LINES_ACTIVE_DEFAULT
+        )
         user = self.request.user
 
         # only allow superusers through, since this is strain-related data that should only be
@@ -813,8 +817,8 @@ class StrainStudiesView(viewsets.ReadOnlyModelViewSet):
                                                               keyword_prefix='line__study__')
             studies_query = studies_query.filter(study_user_permission_q)
 
-        studies_query = studies_query.distinct()  # required by both line activity and studies
-                                                  # permissions queries
+        # required by both line activity and studies permissions queries
+        studies_query = studies_query.distinct()
 
         return studies_query
 
@@ -862,8 +866,8 @@ class StudyStrainsView(viewsets.ReadOnlyModelViewSet):
         user = self.request.user
 
         # build the query, enforcing EDD's custom study access controls. Normally we'd require
-        # sysadmin access to view strains, but the names/descriptions of strains in the study should
-        # be visible to users with read access to a study that measures them
+        # sysadmin access to view strains, but the names/descriptions of strains in the study
+        # should be visible to users with read access to a study that measures them
         study_user_permission_q = Study.user_permission_q(user, StudyPermission.READ,
                                                           keyword_prefix='line__study__')
         if study_id_is_pk:
@@ -884,15 +888,15 @@ class StudyStrainsView(viewsets.ReadOnlyModelViewSet):
         # filter by line active status, applying the default (only active lines)
         strain_query = filter_by_active_status(strain_query, line_active_status,
                                                query_prefix='line__')
-        strain_query = strain_query.distinct()  # required by both study permission query and
-                                                # line active filters above
+        # required by both study permission query and line active filters above
+        strain_query = strain_query.distinct()
 
         return strain_query
 
 
 class StudyLineView(viewsets.ModelViewSet):  # LineView(APIView):
     """
-        API endpoint that allows lines to be viewed or edited.
+        API endpoint that allows lines within a study to be searched, viewed, and edited.
     """
     serializer_class = LineSerializer
     lookup_url_kwarg = 'line_pk'
@@ -922,30 +926,17 @@ class StudyLineView(viewsets.ModelViewSet):  # LineView(APIView):
                                                               keyword_prefix='study__')
             line_query = Line.objects.filter(study_user_permission_q, study__pk=study_pk)
 
+        line_query = _do_optional_regex_filter(self.request.query_params, line_query, 'name',
+                                               STUDY_LINE_NAME_REGEX, None,)
+
         # filter by line active status, applying the default (only active lines)
         line_active_status = self.request.query_params.get(LINE_ACTIVE_STATUS_PARAM,
                                                            LINES_ACTIVE_DEFAULT)
         line_query = filter_by_active_status(line_query, line_active_status)
-        line_query = line_query.distinct()  # distinct() required by *both* study permissions check
-                                                # and line activity filter above
+        # distinct() required by *both* study permissions check and line activity filter above
+        line_query = line_query.distinct()
 
         return line_query
-
-    # TODO: if doable with some degree of clarity, use reflection to enforce DRY in mutator methods
-    # below. For now, we'll go with fast rather than elegant. MF 2/24/16
-    # def enforce_write_access_privileges(self, call_on_success_function):
-    #     study_pk = self.kwargs[self.STUDY_URL_KWARG]
-    #     user = self.request.user
-    #
-    #     if self.queryset:
-    #         logger.log('has queryset')
-    #
-    #     # enforce study write privileges
-    #     error_response = StudyLineView._test_user_write_access(user, study_pk)
-    #     if error_response:
-    #         return error_response
-    #
-    #     super(StudyLineView).call_on_success_function(self, ) # TODO: investigate this
 
     def create(self, request, *args, **kwargs):
         ##############################################################
@@ -953,13 +944,8 @@ class StudyLineView(viewsets.ModelViewSet):  # LineView(APIView):
         ##############################################################
         study_pk = self.kwargs[self.STUDY_URL_KWARG]
         user = self.request.user
-        error_response = StudyLineView._test_user_write_access(user, study_pk)
-        if error_response:
-            return error_response
-
-        ##############################################################
+        StudyLineView._test_user_write_access(user, study_pk)
         # if user has write privileges for the study, use parent implementation
-        ##############################################################
         return super(StudyLineView, self).create(request, *args, **kwargs)
 
     def update(self, request, *args, **kwargs):
@@ -968,13 +954,8 @@ class StudyLineView(viewsets.ModelViewSet):  # LineView(APIView):
         ##############################################################
         study_pk = self.kwargs[self.STUDY_URL_KWARG]
         user = self.request.user
-        error_response = StudyLineView._test_user_write_access(user, study_pk)
-        if error_response:
-            return error_response
-
-        ##############################################################
+        StudyLineView._test_user_write_access(user, study_pk)
         # if user has write privileges for the study, use parent implementation
-        ##############################################################
         return super(StudyLineView, self).update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
@@ -983,29 +964,20 @@ class StudyLineView(viewsets.ModelViewSet):  # LineView(APIView):
         ##############################################################
         study_pk = self.kwargs[self.STUDY_URL_KWARG]
         user = self.request.user
-        error_response = StudyLineView._test_user_write_access(user, study_pk)
-        if error_response:
-            return error_response
-
-        ##############################################################
+        StudyLineView._test_user_write_access(user, study_pk)
         # if user has write privileges for the study, use parent implementation
-        ##############################################################
         return super(StudyLineView, self).destroy(request, *args, **kwargs)
 
     @staticmethod
     def _test_user_write_access(user, study_pk):
         # return a 403 error if user doesn't have write access
-        requested_permission = StudyPermission.WRITE
-        study_user_permission_q = Study.user_permission_q(user, requested_permission)
-        user_has_permission_query = Study.objects.filter(study_user_permission_q,
-                                                         pk=study_pk).distinct()
-
-        # TODO: per William's comment, test raising PermissionDenied() similar to Django
-
-        if not user_has_permission_query:
-            return Response(status=status.HTTP_403_FORBIDDEN)
-
-        return None
+        try:
+            study = Study.objects.get(pk=study_pk)
+            if study.user_can_write(user):
+                return None
+        except Study.DoesNotExist as e:
+            logger.warning('Got request to modify non-existent study %s', study_pk)
+        raise PermissionDenied()
 
 
 class NotImplementedException(APIException):

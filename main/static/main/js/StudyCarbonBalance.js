@@ -9,17 +9,17 @@ var CarbonBalance;
             this.normalizedError = normalizedError;
         }
         return ImbalancedTimeSample;
-    })();
+    }());
     CarbonBalance.ImbalancedTimeSample = ImbalancedTimeSample;
     var Display = (function () {
         function Display() {
+            this.allCBGraphs = [];
+            this.mergedTimelinesByLineID = {};
+            this.carbonSum = null;
             // See _calcNormalizedError.
             this._normalizedErrorThreshold = 0.1;
             this.POPUP_HEIGHT = 320;
             this.POPUP_SVG_HEIGHT = 280;
-            this.allCBGraphs = [];
-            this.mergedTimelinesByLineID = {};
-            this.carbonSum = null;
         }
         // Called as the page is loading to initialize and precalculate CB data.
         Display.prototype.calculateCarbonBalances = function (metabolicMapID, biomassCalculation) {
@@ -434,7 +434,7 @@ var CarbonBalance;
         };
         Display.graphDiv = null;
         return Display;
-    })();
+    }());
     CarbonBalance.Display = Display;
     ;
     var LineSampleBalance = (function () {
@@ -445,5 +445,5 @@ var CarbonBalance;
             this.measurements = measurements;
         }
         return LineSampleBalance;
-    })();
+    }());
 })(CarbonBalance || (CarbonBalance = {})); // end CarbonBalance module

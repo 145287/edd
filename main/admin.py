@@ -2,9 +2,11 @@
 from __future__ import unicode_literals
 
 from django import forms
+from django.conf import settings
 from django.contrib import admin, messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin
+from django.core.validators import RegexValidator
 from django.db import connection
 from django.core.urlresolvers import reverse
 from django.db.models import Count, Q
@@ -14,6 +16,8 @@ from django.utils.html import escape, format_html
 from django.utils.safestring import mark_safe
 from django.utils.translation import ugettext_lazy as _
 from django_auth_ldap.backend import LDAPBackend
+
+import logging
 
 from .export.sbml import validate_sbml_attachment
 from .forms import (
@@ -27,6 +31,8 @@ from .models import (
     WorklistColumn, WorklistTemplate,
 )
 from .solr import StudySearch, UserSearch
+
+logger = logging.getLogger(__name__)
 
 
 class AttachmentInline(admin.TabularInline):
@@ -162,12 +168,14 @@ class StrainAdmin(EDDObjectAdmin):
         super(StrainAdmin, self).__init__(*args, **kwargs)
         self.ice_validator = RegistryValidator()
 
+    def has_add_permission(self, request):
+        """ Disable adding via admin interface. Strains are automatically added when referenced
+            via the main.forms.RegistryValidator. """
+        return False
+
     def get_fields(self, request, obj=None):
         self.ice_validator = RegistryValidator(existing_strain=obj)
-        if not obj:  # creating a strain
-            return ['registry_id', ]
-        elif not obj.registry_id:  # existing strain without link to ICE
-            return ['name', 'description', 'registry_id', 'study_list', ]
+        assert(obj)
         # existing strain with link to ICE
         return ['name', 'description', 'registry_url', 'study_list', ]
 
@@ -178,9 +186,8 @@ class StrainAdmin(EDDObjectAdmin):
         return super(StrainAdmin, self).formfield_for_dbfield(db_field, **kwargs)
 
     def get_readonly_fields(self, request, obj=None):
-        if not obj:  # creating a strain
-            return []
-        elif not obj.registry_id:  # existing strain without link to ICE
+        assert(obj)
+        if not obj.registry_id:  # existing strain without link to ICE
             return ['study_list', ]
         return ['name', 'description', 'registry_url', 'study_list', ]
 
@@ -420,6 +427,33 @@ class MetaboliteAdmin(MeasurementTypeAdmin):
 
 
 class ProteinAdmin(MeasurementTypeAdmin):
+
+    def get_form(self, request, obj=None, **kwargs):
+        """
+        Override default generated admin form to add specialized help text and verification for
+        Uniprot accession ID's. This is a bit indirect since type_name is inherited from
+        MeasurementTypeAdmin.
+        """
+
+        # override the type_name label to indicate it should be a UniProt accession ID
+        if settings.REQUIRE_UNIPROT_ACCESSION_IDS:
+            labels = kwargs.get('labels')
+            if not labels:
+                labels = {}
+                kwargs['labels'] = labels
+            labels['type_name'] = 'UniProt Accession ID'
+
+        generated_form = super(ProteinAdmin, self).get_form(self, request, **kwargs)
+
+        # require that newly-created ProteinIdentifiers have an accession ID matching the
+        # expected pattern. existing ID's that don't conform should still be editable
+        new_identifier = not obj
+        if new_identifier and settings.REQUIRE_UNIPROT_ACCESSION_IDS:
+            generated_form.base_fields['type_name'].validators.append(RegexValidator(
+                    regex=ProteinIdentifier.accession_pattern,
+                    message='New entries must be valid UniProt accession IDs'))
+        return generated_form
+
     def get_fields(self, request, obj=None):
         return super(ProteinAdmin, self).get_fields(request, obj) + [
             ('length', 'mass',),
@@ -535,8 +569,15 @@ class StudyAdmin(EDDObjectAdmin):
 
 class SBMLTemplateAdmin(EDDObjectAdmin):
     """ Definition fro admin-edit of SBML Templates """
-    fields = ('name', 'description', 'sbml_file', 'biomass_calculation', )
-    list_display = ('name', 'description', 'biomass_calculation', 'created', )
+    fields = (
+        'name', 'description', 'sbml_file',
+        'biomass_calculation', 'biomass_exchange_name',
+    )
+    list_display = (
+        'name', 'description',
+        'biomass_calculation', 'biomass_exchange_name',
+        'created',
+    )
     inlines = (AttachmentInline, )
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
@@ -546,7 +587,7 @@ class SBMLTemplateAdmin(EDDObjectAdmin):
 
     def get_fields(self, request, obj=None):
         if obj:
-            return ('name', 'description', 'sbml_file', 'biomass_calculation',)
+            return self.fields
         # Only show attachment inline for NEW templates
         return ((), )
 
@@ -571,7 +612,10 @@ class SBMLTemplateAdmin(EDDObjectAdmin):
         if change:
             sbml = obj.sbml_file.file
             sbml_data = validate_sbml_attachment(sbml.read())
-            obj.biomass_exchange_name = self._extract_biomass_exchange_name(sbml_data.getModel())
+            if not obj.biomass_exchange_name:
+                obj.biomass_exchange_name = self._extract_biomass_exchange_name(
+                    sbml_data.getModel()
+                )
         elif len(form.files) == 1:
             sbml = list(form.files.values())[0]
             sbml_data = validate_sbml_attachment(sbml.read())

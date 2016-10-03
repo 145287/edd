@@ -421,23 +421,15 @@ class AssayDataTests(TestCase):
         self.assertFalse(p3_json.get('active', True))
         self.assertTrue(p3_json.get('name', None) == 'New protocol')
         user1 = User.objects.get(username="admin")
-        Protocol.objects.create(
-            name="Another protocol",
-            owned_by=user1,
-            variant_of_id=p3.id)
+        Protocol.objects.create(name="Another protocol", owned_by=user1, variant_of_id=p3.id)
         try:
-            Protocol.objects.create(
-                name="Another protocol",
-                owned_by=user1,
-                variant_of_id=p3.id)
+            Protocol.objects.create(name="Another protocol", owned_by=user1, variant_of_id=p3.id)
         except ValueError as e:
             self.assertTrue('%s' % e == "There is already a protocol named 'Another protocol'.")
         else:
             raise Exception("Should have caught a ValueError...")
         try:
-            Protocol.objects.create(
-                name="",
-                owned_by=user1)
+            Protocol.objects.create(name="", owned_by=user1)
         except ValueError as e:
             self.assertTrue('%s' % e == "Protocol name required.")
         else:
@@ -445,21 +437,14 @@ class AssayDataTests(TestCase):
 
     def test_assay(self):
         assay = Assay.objects.get(description="GC-MS assay 1")
-        self.assertTrue(len(assay.get_metabolite_measurements()) == 1) #no. equal to 0
-        self.assertTrue(len(assay.get_gene_measurements()) == 1)
-        self.assertTrue(len(assay.get_protein_measurements()))
         assay.to_json()
         self.assertTrue(assay.long_name == "WT1-gc-ms-1")
         new_assay_number = assay.line.new_assay_number("gc-ms")
         self.assertTrue(new_assay_number == 2)
 
     def test_measurement_type(self):
-        proteins = MeasurementType.proteins()
-        self.assertTrue(len(proteins) == 2)
-        self.assertTrue(proteins[0].is_protein())
         assay = Assay.objects.get(description="GC-MS assay 1")
-        meas1 = assay.measurement_set.filter(
-            measurement_type__short_name="ac")[0]
+        meas1 = assay.measurement_set.filter(measurement_type__short_name="ac")[0]
         mt1 = meas1.measurement_type
         # ((<MeasurementType: Acetate>, mt1.is_metabolite() == False, False, False))
         self.assertTrue(mt1.is_metabolite() and not mt1.is_protein() and not mt1.is_gene())
@@ -472,13 +457,15 @@ class AssayDataTests(TestCase):
 
     def test_measurement(self):
         assay = Assay.objects.get(description="GC-MS assay 1")
-        metabolites = list(assay.get_metabolite_measurements()) #[]
+        metabolites = list(assay.measurement_set.filter(
+            measurement_type__type_group=MeasurementType.Group.METABOLITE
+        ))  # []
         self.assertTrue(len(metabolites) == 1)
         meas1 = metabolites[0]
         self.assertTrue(meas1.y_axis_units_name == "mM")
         self.assertTrue(meas1.name == "Acetate")
         self.assertTrue(meas1.short_name == "ac")
-        self.assertTrue(meas1.full_name == "IC Acetate")
+        self.assertTrue(meas1.full_name == "Intracellular/Cytosol (Cy) Acetate")
         self.assertTrue(meas1.is_concentration_measurement())
         self.assertTrue(not meas1.is_carbon_ratio())
         mdata = list(meas1.measurementvalue_set.all())
@@ -489,8 +476,12 @@ class AssayDataTests(TestCase):
 
     def test_measurement_extract(self):
         assay = Assay.objects.get(description="GC-MS assay 1")
-        meas1 = list(assay.get_metabolite_measurements())[0] #returns []
-        meas2 = list(assay.get_gene_measurements())[0]  # returns FFMeasurement{22}{Gene name 1}
+        meas1 = assay.measurement_set.filter(
+            measurement_type__type_group=MeasurementType.Group.METABOLITE
+        )[0]
+        meas2 = assay.measurement_set.filter(
+            measurement_type__type_group=MeasurementType.Group.GENEID
+        )[0]
         xval = meas1.extract_data_xvalues()
         self.assertTrue(xval == [0.0, 4.0, 8.0, 12.0, 18.0, 24.0, 32.0])
         xval2 = meas1.extract_data_xvalues(defined_only=True)
@@ -500,8 +491,12 @@ class AssayDataTests(TestCase):
 
     def test_measurement_interpolate(self):
         assay = Assay.objects.get(description="GC-MS assay 1")
-        meas1 = list(assay.get_metabolite_measurements())[0] #returns []
-        meas2 = list(assay.get_gene_measurements())[0]
+        meas1 = assay.measurement_set.filter(
+            measurement_type__type_group=MeasurementType.Group.METABOLITE
+        )[0]  # returns []
+        meas2 = assay.measurement_set.filter(
+            measurement_type__type_group=MeasurementType.Group.GENEID
+        )[0]
         y_interp = meas1.interpolate_at(21)
         self.assertTrue('%s' % y_interp == "1.2")
         y_interp2 = meas1.interpolate_at(25)
@@ -591,7 +586,7 @@ class ImportTests(TestCase):
         }
         # XXX not proud of this, but we need actual IDs in here
         return {
-            'action': "Submit Data",
+            'action': "Submit Import",
             'datalayout': "std",
             'jsonoutput': json,
             'rawdataformat': "csv",
@@ -1018,7 +1013,7 @@ class IceTests(TestCase):
     fixtures = ['unit_test_user', ]  # prevents ICE notifications
 
     def test_entry_uri_pattern(self):
-        from jbei.ice.rest.ice import ICE_ENTRY_URL_PATTERN
+        from jbei.rest.clients.ice.api import ICE_ENTRY_URL_PATTERN
 
         # test matching against ICE URI's with a numeric ID
         uri = 'https://registry-test.jbei.org/entry/49194/'
@@ -1033,3 +1028,13 @@ class IceTests(TestCase):
         self.assertEquals('https', match.group(1))
         self.assertEquals('registry-test.jbei.org', match.group(2))
         self.assertEquals('761ec36a-cd17-41b8-a348-45d7552d4f4f', match.group(3))
+
+        # verify non-match against invalid URLs
+        uri = 'ftp://registry.jbei.org/entry/12345'
+        self.assertIsNone(ICE_ENTRY_URL_PATTERN.match(uri))
+        uri = 'http://registry.jbei.org/admin/12345'
+        self.assertIsNone(ICE_ENTRY_URL_PATTERN.match(uri))
+        uri = 'http://registry.jbei.org/entry/12345/experiments'
+        self.assertIsNone(ICE_ENTRY_URL_PATTERN.match(uri))
+        uri = 'http://registry.jbei.org/entry/foobar'
+        self.assertIsNone(ICE_ENTRY_URL_PATTERN.match(uri))

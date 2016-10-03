@@ -13,6 +13,7 @@ from django.core.exceptions import ValidationError
 from django.core.urlresolvers import reverse
 from django.db import transaction
 from django.db.models import Count, Prefetch, Q
+from django.db.transaction import atomic
 from django.http import (
     Http404, HttpResponse, HttpResponseNotAllowed, HttpResponseRedirect, JsonResponse,
 )
@@ -81,11 +82,9 @@ def load_study(request, study_id, permission_type=['R', 'W',]):
         return get_object_or_404(Study, pk=study_id)
     return get_object_or_404(
         Study.objects.distinct(),
-        Q(userpermission__user=request.user,
-          userpermission__permission_type__in=permission_type) |
-        Q(grouppermission__group__user=request.user,
-          grouppermission__permission_type__in=permission_type),
-        pk=study_id)
+        Study.user_permission_q(request.user, permission_type),
+        pk=study_id,
+    )
 
 
 class StudyCreateView(generic.edit.CreateView):
@@ -93,7 +92,7 @@ class StudyCreateView(generic.edit.CreateView):
     View for request to create a study, and the index page.
     """
     form_class = CreateStudyForm
-    template_name = 'main/index.html'
+    template_name = 'main/create_study.html'
 
     def form_valid(self, form):
         update = Update.load_request_update(self.request)
@@ -108,8 +107,17 @@ class StudyCreateView(generic.edit.CreateView):
         context['can_create'] = Study.user_can_create(self.request.user)
         return context
 
+    def get_form_kwargs(self):
+        kwargs = super(StudyCreateView, self).get_form_kwargs()
+        kwargs.update(user=self.request.user)
+        return kwargs
+
     def get_success_url(self):
         return reverse('main:detail', kwargs={'pk': self.object.pk})
+
+
+class StudyIndexView(StudyCreateView):
+    template_name = 'main/index.html'
 
 
 class StudyDetailView(generic.DetailView):
@@ -144,11 +152,9 @@ class StudyDetailView(generic.DetailView):
         qs = super(StudyDetailView, self).get_queryset()
         if self.request.user.is_superuser:
             return qs
-        return qs.filter(
-            Q(userpermission__user=self.request.user,
-              userpermission__permission_type__in=['R', 'W', ]) |
-            Q(grouppermission__group__user=self.request.user,
-              grouppermission__permission_type__in=['R', 'W', ])).distinct()
+        return qs.filter(Study.user_permission_q(
+            self.request.user, (StudyPermission.READ, StudyPermission.WRITE, ),
+        )).distinct()
 
     def handle_assay(self, request, context, *args, **kwargs):
         assay_id = request.POST.get('assay-assay_id', None)
@@ -517,6 +523,7 @@ class StudyDetailView(generic.DetailView):
         return {
             'csv': ExportView.as_view(),
             'sbml': SbmlView.as_view(),
+            'study': StudyCreateView.as_view(),
             'worklist': WorklistView.as_view(),
         }
 
@@ -851,6 +858,7 @@ def permissions(request, study):
                 for perm in perms:
                     user = perm.get('user', None)
                     group = perm.get('group', None)
+                    everyone = perm.get('public', None)
                     ptype = perm.get('type', StudyPermission.NONE)
                     manager = None
                     lookup = {}
@@ -860,17 +868,18 @@ def permissions(request, study):
                     elif user is not None:
                         lookup = {'user_id': user.get('id', 0), 'study_id': study_model.pk}
                         manager = study_model.userpermission_set.filter(**lookup)
+                    elif everyone is not None:
+                        lookup = {'study_id': study}
+                        manager = study_model.everyonepermission_set.filter(**lookup)
                     if manager is None:
                         logger.warning('Invalid permission type for add')
                     elif ptype == StudyPermission.NONE:
                         manager.delete()
                     else:
-                        logger.error('*** Updating user permissions : %s' % str(lookup))  # TODO:
-                        #  remove debug stmt
                         lookup['permission_type'] = ptype
                         manager.update_or_create(**lookup)
         except Exception as e:
-            logger.exception('Error modifying study (%s) permissions: %s' % (study, str(e)))
+            logger.exception('Error modifying study (%s) permissions: %s', study, e)
             return HttpResponse(status=500)
         return HttpResponse(status=204)
     elif request.method == 'DELETE':
@@ -878,10 +887,11 @@ def permissions(request, study):
             return HttpResponseForbidden("You do not have permission to modify this study.")
         try:
             with transaction.atomic():
+                study_model.everyonepermission_set.all().delete()
                 study_model.grouppermission_set.all().delete()
                 study_model.userpermission_set.all().delete()
         except Exception as e:
-            logger.exception('Error deleting study (%s) permissions: %s' % (study, str(e)))
+            logger.exception('Error deleting study (%s) permissions: %s', study, e)
             return HttpResponse(status=500)
         return HttpResponse(status=204)
     else:
@@ -892,22 +902,28 @@ def permissions(request, study):
 # FIXME should have trailing slash?
 @ensure_csrf_cookie
 def study_import_table(request, study):
-    """ View for importing tabular assay data (replaces AssayTableData.cgi). """
-    model = load_study(request, study, permission_type=['W', ])
+    """ View for importing tabular data (replaces AssayTableData.cgi).
+    :raises: Exception if an error occurrs during the import attempt
+    """
+    model = load_study(request, study, permission_type=[StudyPermission.WRITE, ])
     # FIXME filter protocols?
     protocols = Protocol.objects.order_by('name')
-    if (request.method == "POST"):
+    if request.method == "POST":
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug('\n'.join([
                 '%(key)s : %(value)s' % {'key': key, 'value': request.POST[key]}
                 for key in sorted(request.POST)
             ]))
+
+        table = TableImport(model, request.user, request=request)
         try:
-            table = TableImport(model, request.user, request=request)
             added = table.import_data(request.POST)
             messages.success(request, 'Imported %s measurement values.' % added)
-        except ValueError as e:
-            logger.exception('Import failed: %s', e)
+        except RuntimeError as e:
+            logger.exception('Data import failed: %s', e.message)
+
+            # show the first error message to the user. continuing the import attempt to collect
+            # more potentially-useful errors makes the code too complex / hard to maintain.
             messages.error(request, e)
     return render(
         request,
@@ -1346,6 +1362,7 @@ AUTOCOMPLETE_VIEW_LOOKUP = {
     'MetaboliteSpecies': autocomplete.search_sbml_species,
     'Strain': autocomplete.search_strain,
     'StudyWrite': autocomplete.search_study_writable,
+    'StudyLines': autocomplete.search_study_lines,
     'User': autocomplete.search_user,
 }
 

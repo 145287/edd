@@ -14,8 +14,6 @@ import environ
 from django.conf.global_settings import TEMPLATE_CONTEXT_PROCESSORS as TCP
 from psycopg2.extensions import ISOLATION_LEVEL_SERIALIZABLE
 
-from jbei.rest.auth import HmacAuth
-
 
 root = environ.Path(__file__) - 3  # root is two parents up of directory containing base.py
 BASE_DIR = root()
@@ -29,6 +27,10 @@ if env('SECRET_KEY', default=DOCKER_SENTINEL) is DOCKER_SENTINEL:
     env.read_env(root('secrets.env'))
 
 
+# override to allow arbitrary text instead of requiring protein ID's to fit the pattern of Uniprot
+# accession id's (though at present validity isn't confirmed)
+REQUIRE_UNIPROT_ACCESSION_IDS = True
+
 ###################################################################################################
 # Set ICE configuration used in multiple places, or that we want to be able to override in local.py
 ###################################################################################################
@@ -36,7 +38,9 @@ ICE_KEY_ID = 'edd'
 ICE_SECRET_HMAC_KEY = env('ICE_HMAC_KEY')
 ICE_URL = 'https://registry-test.jbei.org/'
 ICE_REQUEST_TIMEOUT = (10, 10)  # HTTP request connection and read timeouts, respectively (seconds)
-HmacAuth.register_key(ICE_KEY_ID, ICE_SECRET_HMAC_KEY)
+
+# Override only to avoid heachaches in *LOCAL* testing against a non-TLS ICE deployment
+VERIFY_ICE_CERT = True
 
 
 ###################################################################################################
@@ -59,6 +63,8 @@ EMAIL_HOST_PASSWORD = ''
 EMAIL_PORT = 25
 
 
+
+
 ###################################################################################################
 # Basic Django configuration
 ###################################################################################################
@@ -75,6 +81,8 @@ SECRET_KEY = env('SECRET_KEY', default='I was awake and dreaming at the same tim
 ALLOWED_HOSTS = []
 SITE_ID = 1
 USE_X_FORWARDED_HOST = True
+EDD_DEPLOYMENT_ENVIRONMENT = env('EDD_DEPLOYMENT_ENVIRONMENT',  default='PRODUCTION')
+
 LOGIN_REDIRECT_URL = '/'
 
 # Application definition
@@ -114,6 +122,7 @@ MIDDLEWARE_CLASSES = (
     'threadlocals.middleware.ThreadLocalMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'main.utilities.EDDSettingsMiddleware',
 )
 
 
