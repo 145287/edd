@@ -353,7 +353,7 @@ class EddApi(RestApiClient):
 
             # make the HTTP request
             url = '%s/rest/metadata_types' % self.base_url
-            response = request_generator.get(url, params=search_params, headers=self._json_header)
+            response = self.session.get(url, params=search_params, headers=self._json_header)
 
         # throw an error for unexpected reply
         if response.status_code != requests.codes.ok:

@@ -17,8 +17,8 @@ from views import schema_view
 ####################################################################################################
 base_rest_api_router = rest_routers.DefaultRouter()
 base_rest_api_router.register(LINES_RESOURCE_NAME, LineViewSet)
-base_rest_api_router.register(STUDIES_RESOURCE_NAME, StudyViewSet, 'studies')
-base_rest_api_router.register(STRAINS_RESOURCE_NAME, StrainViewSet, 'strains')
+base_rest_api_router.register(STUDIES_RESOURCE_NAME, StudyViewSet, STUDIES_RESOURCE_NAME)
+base_rest_api_router.register(STRAINS_RESOURCE_NAME, StrainViewSet, STRAINS_RESOURCE_NAME)
 base_rest_api_router.register(METADATA_TYPES_RESOURCE_NAME, MetadataTypeViewSet)
 base_rest_api_router.register(METADATA_GROUPS_RESOURCE_NAME, MetadataGroupViewSet)
 
