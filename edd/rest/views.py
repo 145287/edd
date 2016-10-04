@@ -32,10 +32,13 @@ from jbei.rest.clients.edd.constants import (
 from jbei.rest.utils import is_numeric_pk
 from jbei.utils import PK_OR_TYPICAL_UUID_PATTERN, PK_OR_TYPICAL_UUID_REGEX
 from main.models import Line, MetadataType, Strain, Study, StudyPermission, User, MetadataGroup
-from rest_framework import (status, viewsets)
+from rest_framework import (response, schemas, status, viewsets)
+from rest_framework.decorators import api_view, renderer_classes
 from rest_framework.exceptions import APIException
 from rest_framework.relations import StringRelatedField
 from rest_framework.response import Response
+from rest_framework_swagger.renderers import OpenAPIRenderer, SwaggerUIRenderer
+
 
 
 logger = logging.getLogger(__name__)
@@ -240,6 +243,11 @@ class ModelImplicitViewOrResultImpliedPermissions(BasePermission):
                         'url': request.path, })
         return has_permission
 
+@api_view()
+@renderer_classes([OpenAPIRenderer, SwaggerUIRenderer])
+def schema_view(request):
+    generator = schemas.SchemaGenerator(title='Experiment Data Depot')
+    return response.Response(generator.get_schema(request=request))
 
 class MetadataTypeViewSet(viewsets.ReadOnlyModelViewSet):
     """

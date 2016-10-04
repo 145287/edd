@@ -8,6 +8,7 @@ from .views import (LineViewSet, MetadataGroupViewSet, MetadataTypeViewSet,
                     STRAIN_NESTED_RESOURCE_PARENT_PREFIX, StrainStudiesView, StrainViewSet,
                     StudyLineView, StudyStrainsView, StudyViewSet)
 import rest_framework_nested.routers as nested_routers
+from views import schema_view
 
 
 
@@ -49,5 +50,5 @@ urlpatterns = [
     url(r'', include(study_nested_resources_router.urls)),
     url(r'', include(strain_nested_resources_router.urls)),
     url(r'', include('rest_framework.urls', namespace='rest_framework')),
-    url(r'docs/', include('rest_framework_swagger.urls')),
+    url(r'docs/', schema_view),
 ]
