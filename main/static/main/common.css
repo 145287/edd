@@ -503,9 +503,14 @@ table.dataTable tr > td p {
     margin:3px 3px 0px 0px;
     padding:0px;
 }
-/* Default DataGrid group header style */
-table.dataTable tr.groupHeader > td {
+table.dataTable tr.groupHeader.replicate > td:before {
     padding:0;
+    content: '▼';
+}
+
+table.dataTable tr.groupHeader > td:before {
+    padding: 0;
+    content: '►';
 }
 table.dataTable tr.groupHeader > td > div {
     font-weight:bold;
@@ -518,6 +523,9 @@ table.dataTable tr.groupHeader > td > div {
     background: -ms-linear-gradient(top, rgba(244,244,244,0.5) 0%, rgba(244,244,244,0.3) 10%, rgba(255,255,255,0) 50%, rgba(255,255,255,1) 100%);
 }
 
+.replicateLineShow {
+    color: grey;
+}
 
 /* Data table controls for DataGrids.  These can fit inside "sectionHeads" or the "header" row of a "dataTable" */
 span.tableControl {
@@ -728,8 +736,24 @@ table.filterCriteriaTable input[type="checkbox"] {
 div.filterHead {
     padding:4px 8px 2px 2px;
     margin:0px;
+    vertical-align: bottom;
 }
-div.filterHead > span {
+div.filterHead > span.filterClearIcon, div.filterHeadSearch > span.filterClearIcon {
+    display: inline-block;
+    width:12px;
+    height:12px;
+    opacity:0;
+    margin:0 1px -2px 3px;
+    background-image: url(images/clear_checkboxes_icon.png);
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+}
+div.filterHead > span.filterClearIcon.enabled, div.filterHeadSearch > span.filterClearIcon.enabled {
+    cursor: pointer;
+    opacity:0.75;
+}
+div.filterHead > span.filterTitle {
     color:black;
     padding:0px;
     margin:5px 0px 2px 2px;
@@ -742,7 +766,7 @@ div.filterHeadSearch {
 div.filterHeadSearch > input[type="text"] {
     color:black;
     padding:0px 8px 0px 6px;
-    margin:0px;
+    margin:0px 0px 0px 1px;
     font-weight: bold;
     font-size:11px;
     border-radius: 7px;
@@ -1342,7 +1366,7 @@ ol.comment-list > li {
 }
 
 .edd-form > p > label,
-.edd-form > p > .label {
+.edd-form > p > .edd-label {
     display: inline-block;
     vertical-align: top;
     width: 8em;
@@ -1417,6 +1441,9 @@ div.footer > div.footer-text > span {
     margin: 0 2em;
 }
 
+.groupReplicateRow {
+    font-weight: bold;
+}
 
 .fd-zone {
     background-repeat: no-repeat;
@@ -1432,6 +1459,12 @@ div.footer > div.footer-text > span {
 }
 .fd-zone.xml.over {
     background-image: url(images/dropzone-xml-over.png);
+}
+.fd-zone.text {
+    background-image: url(images/dropzone-text.png);
+}
+.fd-zone.text.over {
+    background-image: url(images/dropzone-text-over.png);
 }
 
 /* End of common styles */

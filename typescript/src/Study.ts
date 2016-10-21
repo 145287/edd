@@ -135,13 +135,11 @@ module StudyD {
             assayFilters.push(new CarbonSourceFilterSection());
             assayFilters.push(new CarbonLabelingFilterSection());
             assayFilters.push(new AssaySuffixFilterSection()); //Assasy suffix
-
-            for (var id in seenInAssaysHash) {
-                assayFilters.push(new AssayMetaDataFilterSection(id));
-            }
-            for (var id in seenInLinesHash) {
-                assayFilters.push(new LineMetaDataFilterSection(id));
-            }
+            // convert seen metadata IDs to FilterSection objects, and push to end of assayFilters
+            assayFilters.push.apply(assayFilters, 
+                $.map(seenInAssaysHash, (_, id: string) => new AssayMetaDataFilterSection(id)));
+            assayFilters.push.apply(assayFilters,
+                $.map(seenInLinesHash, (_, id: string) => new LineMetaDataFilterSection(id)));
 
             this.metaboliteFilters = [];
             this.metaboliteFilters.push(new MetaboliteCompartmentFilterSection());
@@ -156,6 +154,15 @@ module StudyD {
             this.measurementFilters = [];
             this.measurementFilters.push(new MeasurementFilterSection());
 
+            // All filter sections are constructed; now need to call configure() on all
+            this.allFilters = [].concat(
+                assayFilters,
+                this.metaboliteFilters,
+                this.proteinFilters,
+                this.geneFilters,
+                this.measurementFilters);
+            this.allFilters.forEach((section) => section.configure());
+
             // We can initialize all the Assay- and Line-level filters immediately
             this.assayFilters = assayFilters;
             assayFilters.forEach((filter) => {
@@ -163,12 +170,6 @@ module StudyD {
                 filter.populateTable();
             });
 
-            this.allFilters = [].concat(
-                assayFilters,
-                this.metaboliteFilters,
-                this.proteinFilters,
-                this.geneFilters,
-                this.measurementFilters);
             this.repopulateFilteringSection();
         }
 
@@ -176,13 +177,14 @@ module StudyD {
         // Clear out any old filters in the filtering section, and add in the ones that
         // claim to be "useful".
         repopulateFilteringSection(): void {
-            this.filterTableJQ.children().detach();
             var dark:boolean = false;
             $.each(this.allFilters, (i, widget) => {
                 if (widget.isFilterUseful()) {
                     widget.addToParent(this.filterTableJQ[0]);
                     widget.applyBackgroundStyle(dark);
                     dark = !dark;
+                } else {
+                    widget.detach();
                 }
             });
         }
@@ -406,6 +408,7 @@ module StudyD {
 
         // References to HTML elements created by the filter
         filterColumnDiv: HTMLElement;
+        clearIcons: JQuery;
         plaintextTitleDiv: HTMLElement;
         searchBox: HTMLInputElement;
         searchBoxTitleDiv: HTMLElement;
@@ -425,6 +428,9 @@ module StudyD {
         sectionTitle: string;
         sectionShortLabel: string;
 
+        // TODO: Convert to a protected constructor! Then use a factory method to create objects
+        //    with configure() already called. Typescript 1.8 does not support visibility
+        //    modifiers on constructors, support is added in Typescript 2.0
         constructor() {
             this.uniqueValues = {};
             this.uniqueIndexes = {};
@@ -438,16 +444,14 @@ module StudyD {
             this.currentSearchSelection = '';
             this.previousSearchSelection = '';
             this.minCharsToTriggerSearch = 1;
-
-            this.configure();
             this.anyCheckboxesChecked = false;
-            this.createContainerObjects();
         }
 
 
-        configure(): void {
-            this.sectionTitle = 'Generic Filter';
-            this.sectionShortLabel = 'gf';
+        configure(title: string='Generic Filter', shortLabel: string='gf'): void {
+            this.sectionTitle = title;
+            this.sectionShortLabel = shortLabel;
+            this.createContainerObjects();
         }
 
 
@@ -456,8 +460,9 @@ module StudyD {
             var sBoxID: string = 'filter' + this.sectionShortLabel + 'SearchBox',
                 sBox: HTMLInputElement;
             this.filterColumnDiv = $("<div>").addClass('filterColumn')[0];
-            var textTitle = $("<span>").text(this.sectionTitle)[0];
-            this.plaintextTitleDiv = $("<div>").addClass('filterHead').append(textTitle)[0];
+            var textTitle = $("<span>").addClass('filterTitle').text(this.sectionTitle);
+            var clearIcon = $("<span>").addClass('filterClearIcon');
+            this.plaintextTitleDiv = $("<div>").addClass('filterHead').append(clearIcon).append(textTitle)[0];
 
             $(sBox = document.createElement("input"))
                 .attr({
@@ -468,7 +473,19 @@ module StudyD {
                 });
             sBox.setAttribute('type', 'text'); // JQuery .attr() cannot set this
             this.searchBox = sBox;
-            this.searchBoxTitleDiv = $("<div>").addClass('filterHeadSearch').append(sBox)[0];
+            // We need two clear iccons for the two versions of the header
+            var searchClearIcon = $("<span>").addClass('filterClearIcon');
+            this.searchBoxTitleDiv = $("<div>").addClass('filterHeadSearch').append(searchClearIcon).append(sBox)[0];
+
+            this.clearIcons = clearIcon.add(searchClearIcon);    // Consolidate the two JQuery elements into one
+
+            this.clearIcons.on('click', (ev) => {
+                // Changing the checked status will automatically trigger a refresh event
+                $.each(this.checkboxes || {}, (id: number, checkbox: JQuery) => {
+                    checkbox.prop('checked', false);
+                });
+                return false;
+            });
 
             this.scrollZoneDiv = $("<div>").addClass('filterCriteriaScrollZone')[0];
             this.filteringTable = $("<table>")
@@ -533,6 +550,11 @@ module StudyD {
         }
 
 
+        detach():void {
+            $(this.filterColumnDiv).detach();
+        }
+
+
         applyBackgroundStyle(darker:boolean):void {
             $(this.filterColumnDiv).removeClass(darker ? 'stripeRowB' : 'stripeRowA');
             $(this.filterColumnDiv).addClass(darker ? 'stripeRowA' : 'stripeRowB');
@@ -543,7 +565,8 @@ module StudyD {
         // filtering value represented.  If there are more than 15 values, the filter gets
         // a search box and scrollbar.
         populateTable():void {
-            var fCol = $(this.filterColumnDiv).empty();
+            var fCol = $(this.filterColumnDiv);
+            fCol.children().detach();
             // Only use the scrolling container div if the size of the list warrants it, because
             // the scrolling container div declares a large padding margin for the scroll bar,
             // and that padding margin would be an empty waste of space otherwise.
@@ -569,8 +592,8 @@ module StudyD {
             //add color obj to EDDData 
             EDDData['color'] = colorObj;
             
-            //line label color based on graph color of line 
-            if (this.sectionTitle === "Line") {
+            // line label color based on graph color of line 
+            if (this.sectionTitle === "Line") {    // TODO: Find a better way to identify this section
                 var colors:any = {};
 
                 //create new colors object with line names a keys and color hex as values 
@@ -633,6 +656,7 @@ module StudyD {
                 if (current === 'C') this.anyCheckboxesChecked = true;
                 currentCheckboxState[uniqueId] = current;
             });
+            this.clearIcons.toggleClass('enabled', this.anyCheckboxesChecked);
 
             v = v.trim();                // Remove leading and trailing whitespace
             v = v.toLowerCase();
@@ -767,8 +791,7 @@ module StudyD {
 
     export class StrainFilterSection extends GenericFilterSection {
         configure():void {
-            this.sectionTitle = 'Strain';
-            this.sectionShortLabel = 'st';
+            super.configure('Strain', 'st');
         }
 
 
@@ -793,8 +816,7 @@ module StudyD {
 
     export class CarbonSourceFilterSection extends GenericFilterSection {
         configure():void {
-            this.sectionTitle = 'Carbon Source';
-            this.sectionShortLabel = 'cs';
+            super.configure('Carbon Source', 'cs');
         }
 
 
@@ -819,8 +841,7 @@ module StudyD {
 
     export class CarbonLabelingFilterSection extends GenericFilterSection {
         configure():void {
-            this.sectionTitle = 'Labeling';
-            this.sectionShortLabel = 'l';
+            super.configure('Labeling', 'l');
         }
 
 
@@ -845,8 +866,7 @@ module StudyD {
 
     export class LineNameFilterSection extends GenericFilterSection {
         configure():void {
-            this.sectionTitle = 'Line';
-            this.sectionShortLabel = 'ln';
+            super.configure('Line', 'ln');
         }
 
 
@@ -867,8 +887,7 @@ module StudyD {
 
     export class ProtocolFilterSection extends GenericFilterSection {
         configure():void {
-            this.sectionTitle = 'Protocol';
-            this.sectionShortLabel = 'p';
+            super.configure('Protocol', 'p');
         }
 
 
@@ -889,8 +908,7 @@ module StudyD {
 
     export class AssaySuffixFilterSection extends GenericFilterSection {
         configure():void {
-            this.sectionTitle = 'Assay Suffix';
-            this.sectionShortLabel = 'a';
+            super.configure('Assay Suffix', 'a');
         }
 
 
@@ -925,8 +943,7 @@ module StudyD {
 
 
         configure():void {
-            this.sectionTitle = EDDData.MetaDataTypes[this.metaDataID].name;
-            this.sectionShortLabel = 'md'+this.metaDataID;
+            super.configure(EDDData.MetaDataTypes[this.metaDataID].name, 'md'+this.metaDataID);
         }
     }
 
@@ -970,8 +987,7 @@ module StudyD {
     export class MetaboliteCompartmentFilterSection extends GenericFilterSection {
         // NOTE: this filter class works with Measurement IDs rather than Assay IDs
         configure():void {
-            this.sectionTitle = 'Compartment';
-            this.sectionShortLabel = 'com';
+            super.configure('Compartment', 'com');
         }
 
 
@@ -996,9 +1012,8 @@ module StudyD {
         loadPending: boolean;
 
         configure(): void {
-            this.sectionTitle = 'Measurement';
-            this.sectionShortLabel = 'mm';
             this.loadPending = true;
+            super.configure('Measurement', 'mm');
         }
 
         isFilterUseful(): boolean {
@@ -1030,9 +1045,8 @@ module StudyD {
         loadPending:boolean;
 
         configure():void {
-            this.sectionTitle = 'Metabolite';
-            this.sectionShortLabel = 'me';
             this.loadPending = true;
+            super.configure('Metabolite', 'me');
         }
 
 
@@ -1067,9 +1081,8 @@ module StudyD {
         loadPending:boolean;
 
         configure():void {
-            this.sectionTitle = 'Protein';
-            this.sectionShortLabel = 'pr';
             this.loadPending = true;
+            super.configure('Protein', 'pr');
         }
 
 
@@ -1104,9 +1117,8 @@ module StudyD {
         loadPending:boolean;
 
         configure():void {
-            this.sectionTitle = 'Gene';
-            this.sectionShortLabel = 'gn';
             this.loadPending = true;
+            super.configure('Gene', 'gn');
         }
 
 
@@ -1646,7 +1658,7 @@ module StudyD {
      */
     function uncheckEventHandler(labels) {
         _.each(labels, function(label){
-            var id = $(label).prev().prop('id');
+            var id = $(label).prev().attr('id');
             $('#' + id).change(function() {
                     var ischecked= $(this).is(':checked');
                     if(!ischecked)
@@ -2739,7 +2751,7 @@ class DataGridAssays extends DataGrid {
                 };
                 var singleAssayObj = GraphHelperMethods.transformSingleLineItem(dataObj);
 
-                if (line.control) set.iscontrol = true;
+                if (line.control) singleAssayObj.iscontrol = true;
                 dataSets.push(singleAssayObj);
             });
         });
@@ -2790,12 +2802,13 @@ class DataGridSpecAssays extends DataGridSpecBase {
         this.assayIDsInProtocol = [];
         $.each(EDDData.Assays, (assayId:string, assay:AssayRecord):void => {
             var line:LineRecord;
-            if (this.protocolID !== assay.pid) {
-                // skip assays for other protocols
-            } else if (!(line = EDDData.Lines[assay.lid]) || !line.active) {
+            // skip assays for other protocols
+            if (this.protocolID === assay.pid) {
+                line = EDDData.Lines[assay.lid];
                 // skip assays without a valid line or with a disabled line
-            } else {
-                this.assayIDsInProtocol.push(assay.id);
+                if (line && line.active) {
+                    this.assayIDsInProtocol.push(assay.id);
+                }
             }
         });
     }
@@ -2992,13 +3005,14 @@ class DataGridSpecAssays extends DataGridSpecBase {
 
     // The colspan value for all the cells that are assay-level (not measurement-level) is based on
     // the number of measurements for the respective record. Specifically, it's the number of
-    // metabolite measurements, plus 1 if there are transcriptomics measurements, plus 1 if there
+    // metabolite and general measurements, plus 1 if there are transcriptomics measurements, plus 1 if there
     // are proteomics measurements, all added together.  (Or 1, whichever is higher.)
     private rowSpanForRecord(index):number {
         var rec = EDDData.Assays[index];
-        var v:number = ((rec.metabolites || []).length +
+        var v:number = ((rec.general         || []).length +
+                        (rec.metabolites     || []).length +
                         ((rec.transcriptions || []).length ? 1 : 0) +
-                        ((rec.proteins || []).length ? 1 : 0)) || 1;
+                        ((rec.proteins       || []).length ? 1 : 0)   ) || 1;
         return v;
     }
 
@@ -3102,7 +3116,6 @@ class DataGridSpecAssays extends DataGridSpecBase {
 
 
     generateMeasurementNameCells(gridSpec:DataGridSpecAssays, index:string):DataGridDataCell[] {
-        var record = EDDData.Assays[index];
         return gridSpec.generateMeasurementCells(gridSpec, index, {
             'metaboliteToValue': (measureId) => {
                 var measure:any = EDDData.AssayMeasurements[measureId] || {},
@@ -3205,25 +3218,20 @@ class DataGridSpecAssays extends DataGridSpecBase {
 
 
     generateMeasuringTimesCells(gridSpec:DataGridSpecAssays, index:string):DataGridDataCell[] {
-        var tupleTimeCount = (value, key) => { return [[ key, value ]]; },
-            sortByTime = (a:any, b:any) => {
-                var y = parseFloat(a[0]), z = parseFloat(b[0]);
-                return (<any>(y > z) - <any>(z > y));
-            },
-            svgCellForTimeCounts = (ids:any[]) => {
+        var svgCellForTimeCounts = (ids:any[]) => {
                 var consolidated, svg = '', timeCount = {};
                 // count values at each x for all measurements
                 ids.forEach((measureId) => {
                     var measure:any = EDDData.AssayMeasurements[measureId] || {},
-                        data:any[] = measure.values || [];
-                    data.forEach((point) => {
+                        points:number[][][] = measure.values || [];
+                    points.forEach((point:number[][]) => {
                         timeCount[point[0][0]] = timeCount[point[0][0]] || 0;
                         // Typescript compiler does not like using increment operator on expression
                         ++timeCount[point[0][0]];
                     });
                 });
-                // map the counts to [x, y] tuples, sorted by x value
-                consolidated = $.map(timeCount, tupleTimeCount).sort(sortByTime);
+                // map the counts to [x, y] tuples
+                consolidated = $.map(timeCount, (value, key) => [[ [parseFloat(key)], [value] ]]);
                 // generate SVG string
                 if (consolidated.length) {
                     svg = gridSpec.assembleSVGStringForDataPoints(consolidated, '');
@@ -3245,8 +3253,8 @@ class DataGridSpecAssays extends DataGridSpecBase {
             'metaboliteValueToCell': (value) => {
                 var measure = value.measure || {},
                     format = measure.format === 1 ? 'carbon' : '',
-                    data = value.measure.values || [],
-                    svg = gridSpec.assembleSVGStringForDataPoints(data, format);
+                    points = value.measure.values || [],
+                    svg = gridSpec.assembleSVGStringForDataPoints(points, format);
                 return new DataGridDataCell(gridSpec, index, {
                     'contentString': svg
                 });

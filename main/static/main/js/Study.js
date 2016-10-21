@@ -79,12 +79,9 @@ var StudyD;
             assayFilters.push(new CarbonSourceFilterSection());
             assayFilters.push(new CarbonLabelingFilterSection());
             assayFilters.push(new AssaySuffixFilterSection()); //Assasy suffix
-            for (var id in seenInAssaysHash) {
-                assayFilters.push(new AssayMetaDataFilterSection(id));
-            }
-            for (var id in seenInLinesHash) {
-                assayFilters.push(new LineMetaDataFilterSection(id));
-            }
+            // convert seen metadata IDs to FilterSection objects, and push to end of assayFilters
+            assayFilters.push.apply(assayFilters, $.map(seenInAssaysHash, function (_, id) { return new AssayMetaDataFilterSection(id); }));
+            assayFilters.push.apply(assayFilters, $.map(seenInLinesHash, function (_, id) { return new LineMetaDataFilterSection(id); }));
             this.metaboliteFilters = [];
             this.metaboliteFilters.push(new MetaboliteCompartmentFilterSection());
             this.metaboliteFilters.push(new MetaboliteFilterSection());
@@ -94,26 +91,30 @@ var StudyD;
             this.geneFilters.push(new GeneFilterSection());
             this.measurementFilters = [];
             this.measurementFilters.push(new MeasurementFilterSection());
+            // All filter sections are constructed; now need to call configure() on all
+            this.allFilters = [].concat(assayFilters, this.metaboliteFilters, this.proteinFilters, this.geneFilters, this.measurementFilters);
+            this.allFilters.forEach(function (section) { return section.configure(); });
             // We can initialize all the Assay- and Line-level filters immediately
             this.assayFilters = assayFilters;
             assayFilters.forEach(function (filter) {
                 filter.populateFilterFromRecordIDs(aIDsToUse);
                 filter.populateTable();
             });
-            this.allFilters = [].concat(assayFilters, this.metaboliteFilters, this.proteinFilters, this.geneFilters, this.measurementFilters);
             this.repopulateFilteringSection();
         };
         // Clear out any old filters in the filtering section, and add in the ones that
         // claim to be "useful".
         ProgressiveFilteringWidget.prototype.repopulateFilteringSection = function () {
             var _this = this;
-            this.filterTableJQ.children().detach();
             var dark = false;
             $.each(this.allFilters, function (i, widget) {
                 if (widget.isFilterUseful()) {
                     widget.addToParent(_this.filterTableJQ[0]);
                     widget.applyBackgroundStyle(dark);
                     dark = !dark;
+                }
+                else {
+                    widget.detach();
                 }
             });
         };
@@ -298,6 +299,9 @@ var StudyD;
     // progressively narrowing down the enabled checkboxes.
     // MeasurementGroupCode: Need to subclass this for each group type.
     var GenericFilterSection = (function () {
+        // TODO: Convert to a protected constructor! Then use a factory method to create objects
+        //    with configure() already called. Typescript 1.8 does not support visibility
+        //    modifiers on constructors, support is added in Typescript 2.0
         function GenericFilterSection() {
             this.uniqueValues = {};
             this.uniqueIndexes = {};
@@ -310,20 +314,23 @@ var StudyD;
             this.currentSearchSelection = '';
             this.previousSearchSelection = '';
             this.minCharsToTriggerSearch = 1;
-            this.configure();
             this.anyCheckboxesChecked = false;
-            this.createContainerObjects();
         }
-        GenericFilterSection.prototype.configure = function () {
-            this.sectionTitle = 'Generic Filter';
-            this.sectionShortLabel = 'gf';
+        GenericFilterSection.prototype.configure = function (title, shortLabel) {
+            if (title === void 0) { title = 'Generic Filter'; }
+            if (shortLabel === void 0) { shortLabel = 'gf'; }
+            this.sectionTitle = title;
+            this.sectionShortLabel = shortLabel;
+            this.createContainerObjects();
         };
         // Create all the container HTML objects
         GenericFilterSection.prototype.createContainerObjects = function () {
+            var _this = this;
             var sBoxID = 'filter' + this.sectionShortLabel + 'SearchBox', sBox;
             this.filterColumnDiv = $("<div>").addClass('filterColumn')[0];
-            var textTitle = $("<span>").text(this.sectionTitle)[0];
-            this.plaintextTitleDiv = $("<div>").addClass('filterHead').append(textTitle)[0];
+            var textTitle = $("<span>").addClass('filterTitle').text(this.sectionTitle);
+            var clearIcon = $("<span>").addClass('filterClearIcon');
+            this.plaintextTitleDiv = $("<div>").addClass('filterHead').append(clearIcon).append(textTitle)[0];
             $(sBox = document.createElement("input"))
                 .attr({
                 'id': sBoxID,
@@ -333,7 +340,17 @@ var StudyD;
             });
             sBox.setAttribute('type', 'text'); // JQuery .attr() cannot set this
             this.searchBox = sBox;
-            this.searchBoxTitleDiv = $("<div>").addClass('filterHeadSearch').append(sBox)[0];
+            // We need two clear iccons for the two versions of the header
+            var searchClearIcon = $("<span>").addClass('filterClearIcon');
+            this.searchBoxTitleDiv = $("<div>").addClass('filterHeadSearch').append(searchClearIcon).append(sBox)[0];
+            this.clearIcons = clearIcon.add(searchClearIcon); // Consolidate the two JQuery elements into one
+            this.clearIcons.on('click', function (ev) {
+                // Changing the checked status will automatically trigger a refresh event
+                $.each(_this.checkboxes || {}, function (id, checkbox) {
+                    checkbox.prop('checked', false);
+                });
+                return false;
+            });
             this.scrollZoneDiv = $("<div>").addClass('filterCriteriaScrollZone')[0];
             this.filteringTable = $("<table>")
                 .addClass('filterCriteriaTable dragboxes')
@@ -387,6 +404,9 @@ var StudyD;
         GenericFilterSection.prototype.addToParent = function (parentDiv) {
             parentDiv.appendChild(this.filterColumnDiv);
         };
+        GenericFilterSection.prototype.detach = function () {
+            $(this.filterColumnDiv).detach();
+        };
         GenericFilterSection.prototype.applyBackgroundStyle = function (darker) {
             $(this.filterColumnDiv).removeClass(darker ? 'stripeRowB' : 'stripeRowA');
             $(this.filterColumnDiv).addClass(darker ? 'stripeRowA' : 'stripeRowB');
@@ -396,7 +416,8 @@ var StudyD;
         // a search box and scrollbar.
         GenericFilterSection.prototype.populateTable = function () {
             var _this = this;
-            var fCol = $(this.filterColumnDiv).empty();
+            var fCol = $(this.filterColumnDiv);
+            fCol.children().detach();
             // Only use the scrolling container div if the size of the list warrants it, because
             // the scrolling container div declares a large padding margin for the scroll bar,
             // and that padding margin would be an empty waste of space otherwise.
@@ -418,7 +439,7 @@ var StudyD;
             var colorObj = graphHelper.renderColor(EDDData.Lines);
             //add color obj to EDDData 
             EDDData['color'] = colorObj;
-            //line label color based on graph color of line 
+            // line label color based on graph color of line 
             if (this.sectionTitle === "Line") {
                 var colors = {};
                 //create new colors object with line names a keys and color hex as values 
@@ -476,6 +497,7 @@ var StudyD;
                     _this.anyCheckboxesChecked = true;
                 currentCheckboxState[uniqueId] = current;
             });
+            this.clearIcons.toggleClass('enabled', this.anyCheckboxesChecked);
             v = v.trim(); // Remove leading and trailing whitespace
             v = v.toLowerCase();
             v = v.replace(/\s\s*/, ' '); // Replace internal whitespace with single spaces
@@ -598,8 +620,7 @@ var StudyD;
             _super.apply(this, arguments);
         }
         StrainFilterSection.prototype.configure = function () {
-            this.sectionTitle = 'Strain';
-            this.sectionShortLabel = 'st';
+            _super.prototype.configure.call(this, 'Strain', 'st');
         };
         StrainFilterSection.prototype.updateUniqueIndexesHash = function (ids) {
             var _this = this;
@@ -627,8 +648,7 @@ var StudyD;
             _super.apply(this, arguments);
         }
         CarbonSourceFilterSection.prototype.configure = function () {
-            this.sectionTitle = 'Carbon Source';
-            this.sectionShortLabel = 'cs';
+            _super.prototype.configure.call(this, 'Carbon Source', 'cs');
         };
         CarbonSourceFilterSection.prototype.updateUniqueIndexesHash = function (ids) {
             var _this = this;
@@ -656,8 +676,7 @@ var StudyD;
             _super.apply(this, arguments);
         }
         CarbonLabelingFilterSection.prototype.configure = function () {
-            this.sectionTitle = 'Labeling';
-            this.sectionShortLabel = 'l';
+            _super.prototype.configure.call(this, 'Labeling', 'l');
         };
         CarbonLabelingFilterSection.prototype.updateUniqueIndexesHash = function (ids) {
             var _this = this;
@@ -685,8 +704,7 @@ var StudyD;
             _super.apply(this, arguments);
         }
         LineNameFilterSection.prototype.configure = function () {
-            this.sectionTitle = 'Line';
-            this.sectionShortLabel = 'ln';
+            _super.prototype.configure.call(this, 'Line', 'ln');
         };
         LineNameFilterSection.prototype.updateUniqueIndexesHash = function (ids) {
             var _this = this;
@@ -710,8 +728,7 @@ var StudyD;
             _super.apply(this, arguments);
         }
         ProtocolFilterSection.prototype.configure = function () {
-            this.sectionTitle = 'Protocol';
-            this.sectionShortLabel = 'p';
+            _super.prototype.configure.call(this, 'Protocol', 'p');
         };
         ProtocolFilterSection.prototype.updateUniqueIndexesHash = function (ids) {
             var _this = this;
@@ -735,8 +752,7 @@ var StudyD;
             _super.apply(this, arguments);
         }
         AssaySuffixFilterSection.prototype.configure = function () {
-            this.sectionTitle = 'Assay Suffix';
-            this.sectionShortLabel = 'a';
+            _super.prototype.configure.call(this, 'Assay Suffix', 'a');
         };
         AssaySuffixFilterSection.prototype.updateUniqueIndexesHash = function (ids) {
             var _this = this;
@@ -764,8 +780,7 @@ var StudyD;
             this.post = MDT.post || '';
         }
         MetaDataFilterSection.prototype.configure = function () {
-            this.sectionTitle = EDDData.MetaDataTypes[this.metaDataID].name;
-            this.sectionShortLabel = 'md' + this.metaDataID;
+            _super.prototype.configure.call(this, EDDData.MetaDataTypes[this.metaDataID].name, 'md' + this.metaDataID);
         };
         return MetaDataFilterSection;
     }(GenericFilterSection));
@@ -821,8 +836,7 @@ var StudyD;
         }
         // NOTE: this filter class works with Measurement IDs rather than Assay IDs
         MetaboliteCompartmentFilterSection.prototype.configure = function () {
-            this.sectionTitle = 'Compartment';
-            this.sectionShortLabel = 'com';
+            _super.prototype.configure.call(this, 'Compartment', 'com');
         };
         MetaboliteCompartmentFilterSection.prototype.updateUniqueIndexesHash = function (amIDs) {
             var _this = this;
@@ -847,9 +861,8 @@ var StudyD;
             _super.apply(this, arguments);
         }
         MeasurementFilterSection.prototype.configure = function () {
-            this.sectionTitle = 'Measurement';
-            this.sectionShortLabel = 'mm';
             this.loadPending = true;
+            _super.prototype.configure.call(this, 'Measurement', 'mm');
         };
         MeasurementFilterSection.prototype.isFilterUseful = function () {
             return this.loadPending || this.uniqueValuesOrder.length > 0;
@@ -881,9 +894,8 @@ var StudyD;
             _super.apply(this, arguments);
         }
         MetaboliteFilterSection.prototype.configure = function () {
-            this.sectionTitle = 'Metabolite';
-            this.sectionShortLabel = 'me';
             this.loadPending = true;
+            _super.prototype.configure.call(this, 'Metabolite', 'me');
         };
         // Override: If the filter has a load pending, it's "useful", i.e. display it.
         MetaboliteFilterSection.prototype.isFilterUseful = function () {
@@ -916,9 +928,8 @@ var StudyD;
             _super.apply(this, arguments);
         }
         ProteinFilterSection.prototype.configure = function () {
-            this.sectionTitle = 'Protein';
-            this.sectionShortLabel = 'pr';
             this.loadPending = true;
+            _super.prototype.configure.call(this, 'Protein', 'pr');
         };
         // Override: If the filter has a load pending, it's "useful", i.e. display it.
         ProteinFilterSection.prototype.isFilterUseful = function () {
@@ -951,9 +962,8 @@ var StudyD;
             _super.apply(this, arguments);
         }
         GeneFilterSection.prototype.configure = function () {
-            this.sectionTitle = 'Gene';
-            this.sectionShortLabel = 'gn';
             this.loadPending = true;
+            _super.prototype.configure.call(this, 'Gene', 'gn');
         };
         // Override: If the filter has a load pending, it's "useful", i.e. display it.
         GeneFilterSection.prototype.isFilterUseful = function () {
@@ -1438,7 +1448,7 @@ var StudyD;
      */
     function uncheckEventHandler(labels) {
         _.each(labels, function (label) {
-            var id = $(label).prev().prop('id');
+            var id = $(label).prev().attr('id');
             $('#' + id).change(function () {
                 var ischecked = $(this).is(':checked');
                 if (!ischecked)
@@ -2376,7 +2386,7 @@ var DataGridAssays = (function (_super) {
                 };
                 var singleAssayObj = GraphHelperMethods.transformSingleLineItem(dataObj);
                 if (line.control)
-                    set.iscontrol = true;
+                    singleAssayObj.iscontrol = true;
                 dataSets.push(singleAssayObj);
             });
         });
@@ -2407,12 +2417,13 @@ var DataGridSpecAssays = (function (_super) {
         this.assayIDsInProtocol = [];
         $.each(EDDData.Assays, function (assayId, assay) {
             var line;
-            if (_this.protocolID !== assay.pid) {
-            }
-            else if (!(line = EDDData.Lines[assay.lid]) || !line.active) {
-            }
-            else {
-                _this.assayIDsInProtocol.push(assay.id);
+            // skip assays for other protocols
+            if (_this.protocolID === assay.pid) {
+                line = EDDData.Lines[assay.lid];
+                // skip assays without a valid line or with a disabled line
+                if (line && line.active) {
+                    _this.assayIDsInProtocol.push(assay.id);
+                }
             }
         });
     };
@@ -2564,11 +2575,12 @@ var DataGridSpecAssays = (function (_super) {
     };
     // The colspan value for all the cells that are assay-level (not measurement-level) is based on
     // the number of measurements for the respective record. Specifically, it's the number of
-    // metabolite measurements, plus 1 if there are transcriptomics measurements, plus 1 if there
+    // metabolite and general measurements, plus 1 if there are transcriptomics measurements, plus 1 if there
     // are proteomics measurements, all added together.  (Or 1, whichever is higher.)
     DataGridSpecAssays.prototype.rowSpanForRecord = function (index) {
         var rec = EDDData.Assays[index];
-        var v = ((rec.metabolites || []).length +
+        var v = ((rec.general || []).length +
+            (rec.metabolites || []).length +
             ((rec.transcriptions || []).length ? 1 : 0) +
             ((rec.proteins || []).length ? 1 : 0)) || 1;
         return v;
@@ -2667,7 +2679,6 @@ var DataGridSpecAssays = (function (_super) {
         return cells;
     };
     DataGridSpecAssays.prototype.generateMeasurementNameCells = function (gridSpec, index) {
-        var record = EDDData.Assays[index];
         return gridSpec.generateMeasurementCells(gridSpec, index, {
             'metaboliteToValue': function (measureId) {
                 var measure = EDDData.AssayMeasurements[measureId] || {}, mtype = EDDData.MeasurementTypes[measure.type] || {};
@@ -2760,22 +2771,19 @@ var DataGridSpecAssays = (function (_super) {
         });
     };
     DataGridSpecAssays.prototype.generateMeasuringTimesCells = function (gridSpec, index) {
-        var tupleTimeCount = function (value, key) { return [[key, value]]; }, sortByTime = function (a, b) {
-            var y = parseFloat(a[0]), z = parseFloat(b[0]);
-            return ((y > z) - (z > y));
-        }, svgCellForTimeCounts = function (ids) {
+        var svgCellForTimeCounts = function (ids) {
             var consolidated, svg = '', timeCount = {};
             // count values at each x for all measurements
             ids.forEach(function (measureId) {
-                var measure = EDDData.AssayMeasurements[measureId] || {}, data = measure.values || [];
-                data.forEach(function (point) {
+                var measure = EDDData.AssayMeasurements[measureId] || {}, points = measure.values || [];
+                points.forEach(function (point) {
                     timeCount[point[0][0]] = timeCount[point[0][0]] || 0;
                     // Typescript compiler does not like using increment operator on expression
                     ++timeCount[point[0][0]];
                 });
             });
-            // map the counts to [x, y] tuples, sorted by x value
-            consolidated = $.map(timeCount, tupleTimeCount).sort(sortByTime);
+            // map the counts to [x, y] tuples
+            consolidated = $.map(timeCount, function (value, key) { return [[[parseFloat(key)], [value]]]; });
             // generate SVG string
             if (consolidated.length) {
                 svg = gridSpec.assembleSVGStringForDataPoints(consolidated, '');
@@ -2794,7 +2802,7 @@ var DataGridSpecAssays = (function (_super) {
                 return ((y > z) - (z > y));
             },
             'metaboliteValueToCell': function (value) {
-                var measure = value.measure || {}, format = measure.format === 1 ? 'carbon' : '', data = value.measure.values || [], svg = gridSpec.assembleSVGStringForDataPoints(data, format);
+                var measure = value.measure || {}, format = measure.format === 1 ? 'carbon' : '', points = value.measure.values || [], svg = gridSpec.assembleSVGStringForDataPoints(points, format);
                 return new DataGridDataCell(gridSpec, index, {
                     'contentString': svg
                 });
