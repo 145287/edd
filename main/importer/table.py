@@ -416,8 +416,11 @@ class TableImport(object):
                     # if configured. this isn't as good as looking them up in Uniprot, but should
                     # help as a stopgap to curate our protein entries
                     if settings.REQUIRE_UNIPROT_ACCESSION_IDS and not accession_match:
-                        raise ValidationError('Protein name "%s" isn\'t a valid UniProt '
-                                              'accession id.')
+                        raise ValidationError(
+                            'Protein name "%(type_name)s" is not a valid UniProt accession id.' % {
+                                'type_name': measurement_name,
+                            }
+                        )
 
                     logger.info('Creating a new ProteinIdentifier for %(name)s' % {
                         'name': measurement_name,
@@ -428,7 +431,7 @@ class TableImport(object):
                     p = ProteinIdentifier.objects.create(
                         type_name=measurement_name,
                         short_name=uniprot_id,
-                        source=self._load_datasource(),
+                        type_source=self._load_datasource(),
                     )
                     found_type = MType(compartment, p.pk, units_id)
         return found_type

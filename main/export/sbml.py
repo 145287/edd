@@ -453,7 +453,8 @@ class SbmlExport(object):
                         combined += ['-'] * (13 - len(magnitudes))
                         name = m.measurement_type.short_name
                         value = '\t'.join(combined)
-                        notes[m.assay.protocol.name].append('%s\tM-0\t%s' % (name, value))
+                        # TODO: find a better way to store/update this magic string
+                        notes['LCMSLabelData'].append(' %s\tM-0\t%s' % (name, value))
                     else:
                         logger.warning(
                             "No vector data found for %(measurement)s at %(time)s",
@@ -604,9 +605,9 @@ class SbmlExport(object):
             try:
                 # TODO: change to .order_by('x__0') once Django supports ordering on transform
                 # https://code.djangoproject.com/ticket/24747
-                values = models.MeasurementValue.objects.filter(
+                values = list(models.MeasurementValue.objects.filter(
                     measurement__in=measurements
-                ).select_related('measurement__y_units').order_by('x')
+                ).select_related('measurement__y_units').order_by('x'))
                 # convert units
                 for v in values:
                     units = v.measurement.y_units
@@ -640,7 +641,7 @@ class SbmlExportSettingsForm(SbmlForm):
     """ Form used for selecting settings on SBML exports. """
     sbml_template = forms.ModelChoiceField(
         # TODO: potentially narrow options based on current user?
-        models.SBMLTemplate.objects.all(),
+        models.SBMLTemplate.objects.exclude(biomass_exchange_name=''),
         label=_('SBML Template'),
     )
 
