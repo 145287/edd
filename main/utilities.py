@@ -1,36 +1,28 @@
 # coding: utf-8
 from __future__ import unicode_literals
 
-import json
 import re
 
 from builtins import str
 from collections import defaultdict, Iterable
-from decimal import Decimal
 from django.conf import settings
-from django.contrib import auth, messages
+from django.contrib import auth
 from django.contrib.sites.models import Site
 from django.db.models import Aggregate
 from django.db.models.aggregates import Aggregate as SQLAggregate
-from functools import partial
 from six import string_types
 from threadlocals.threadlocals import get_current_request
-from uuid import UUID
 
-from .importer.table import import_task
-from .models import (
-    CarbonSource, GeneIdentifier, MeasurementUnit, Metabolite, MetadataType, ProteinIdentifier,
-    Strain,
-)
+from edd.utilities import JSONEncoder
+from . import models
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 
-class JSONDecimalEncoder(json.JSONEncoder):
-    def default(self, o):
-        if isinstance(o, Decimal):
-            return float(o)
-        elif isinstance(o, UUID):
-            return str(o)
-        return super(JSONDecimalEncoder, self).default(o)
+class JSONDecimalEncoder(JSONEncoder):
+    pass
 
 
 class SQLArrayAgg(SQLAggregate):
@@ -51,56 +43,6 @@ class EDDSettingsMiddleware(object):
         of the current deployment environment. """
     def process_request(self, request):
         request.edd_deployment = settings.EDD_DEPLOYMENT_ENVIRONMENT
-
-
-class EDDImportCheckMiddleware(object):
-    """ Checks for any pending import tasks in the request session, and displays a message
-        of the current status of the import. """
-    TAG = 'import_processing'
-
-    def process_request(self, request):
-        tasks = EDDImportTasks(request.session)
-        task_ids = filter(partial(self._process_task, request), tasks.load_task_ids())
-        tasks.save_task_ids(task_ids)
-
-    def _process_task(self, request, task_id):
-        task = import_task.AsyncResult(task_id)
-        still_running = False
-        # Every request can generate a 'still running' message, but not all will display/clear
-        msgs = messages.get_messages(request)
-        # Check if any existing message is the 'still running' message
-        has_running_msg = any(filter(lambda m: self.TAG in m.extra_tags, msgs))
-        # Make sure messages framework does not discard the messages because we peeked
-        msgs.used = False
-        if task.successful():
-            messages.success(request, '%s' % task.info)
-        elif task.failed():
-            messages.error(request, 'An import task failed with error: %s' % task.info)
-        else:
-            still_running = True
-        if still_running and not has_running_msg:
-            messages.info(request, 'Import is still running.', extra_tags=self.TAG)
-        return still_running
-
-
-class EDDImportTasks(object):
-    """ Loads and saves import task IDs from a session. """
-    SESSION_KEY = '_edd_import_tasks'
-
-    def __init__(self, session):
-        self._session = session
-
-    def add_task_id(self, task_id):
-        task_ids = self.load_task_ids()
-        task_ids.append(task_id)
-        self.save_task_ids(task_ids)
-
-    def load_task_ids(self):
-        return self._session.get(self.SESSION_KEY, [])
-
-    def save_task_ids(self, task_ids):
-        self._session[self.SESSION_KEY] = task_ids
-        self._session.save()
 
 
 media_types = {
@@ -139,10 +81,10 @@ def get_edddata_study(study):
         the given study. """
 
     metab_types = study.get_metabolite_types_used()
-    gene_types = GeneIdentifier.objects.filter(assay__line__study=study).distinct()
-    protein_types = ProteinIdentifier.objects.filter(assay__line__study=study).distinct()
+    gene_types = models.GeneIdentifier.objects.filter(assay__line__study=study).distinct()
+    protein_types = models.ProteinIdentifier.objects.filter(assay__line__study=study).distinct()
     protocols = study.get_protocols_used()
-    carbon_sources = CarbonSource.objects.filter(line__study=study).distinct()
+    carbon_sources = models.CarbonSource.objects.filter(line__study=study).distinct()
     assays = study.get_assays().select_related(
         'line__name', 'created__mod_by', 'updated__mod_by',
     )
@@ -186,32 +128,26 @@ def get_edddata_study(study):
 
 
 def get_edddata_misc():
-    # XXX should these be stored elsewhere (postgres, other module)?
-    measurement_compartments = {i: comp for i, comp in enumerate([
-        {"name": "", "sn": ""},
-        {"name": "Intracellular/Cytosol (Cy)", "sn": "IC"},
-        {"name": "Extracellular", "sn": "EC"},
-    ])}
-    users = get_edddata_users()
-    mdtypes = MetadataType.objects.all().select_related('group')
-    unit_types = MeasurementUnit.objects.all()
+    mdtypes = models.MetadataType.objects.all().select_related('group')
+    unit_types = models.MeasurementUnit.objects.all()
+    # TODO: find if any of these are still needed on front-end, could eliminate call
     return {
         # Measurement units
         "UnitTypes": {ut.id: ut.to_json() for ut in unit_types},
         # media types
         "MediaTypes": media_types,
         # Users
-        "Users": users,
+        "Users": get_edddata_users(),
         # Assay metadata
         "MetaDataTypes": {m.id: m.to_json() for m in mdtypes},
         # compartments
-        "MeasurementTypeCompartments": measurement_compartments,
+        "MeasurementTypeCompartments": models.Measurement.Compartment.to_json(),
     }
 
 
 def get_edddata_carbon_sources():
     """All available CarbonSource records."""
-    carbon_sources = CarbonSource.objects.all()
+    carbon_sources = models.CarbonSource.objects.all()
     return {
         "MediaTypes": media_types,
         "CSourceIDs": [cs.id for cs in carbon_sources],
@@ -223,7 +159,7 @@ def get_edddata_carbon_sources():
 # TODO unit test
 def get_edddata_measurement():
     """All data not associated with a study or related objects."""
-    metab_types = Metabolite.objects.all()
+    metab_types = models.Metabolite.objects.all()
     return {
         "MetaboliteTypeIDs": [mt.id for mt in metab_types],
         "MetaboliteTypes": {mt.id: mt.to_json() for mt in metab_types},
@@ -231,7 +167,7 @@ def get_edddata_measurement():
 
 
 def get_edddata_strains():
-    strains = Strain.objects.all().select_related("created", "updated")
+    strains = models.Strain.objects.all().select_related("created", "updated")
     return {
         "StrainIDs": [s.id for s in strains],
         "EnabledStrainIDs": [s.id for s in strains if s.active],
@@ -320,6 +256,7 @@ def get_absolute_url(relative_url):
     if current_request and not current_request.is_secure():
         protocol = 'http://'
     return protocol + Site.objects.get_current().domain + relative_url
+
 
 extensions_to_icons = {
     '.zip':  'icon-zip.png',

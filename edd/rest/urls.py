@@ -6,7 +6,8 @@ from jbei.rest.clients.edd.constants import (STRAINS_RESOURCE_NAME, STUDIES_RESO
     METADATA_TYPES_RESOURCE_NAME, METADATA_GROUPS_RESOURCE_NAME, LINES_RESOURCE_NAME)
 from .views import (LineViewSet, MetadataGroupViewSet, MetadataTypeViewSet,
                     STRAIN_NESTED_RESOURCE_PARENT_PREFIX, StrainStudiesView, StrainViewSet,
-                    StudyLineView, StudyStrainsView, StudyViewSet)
+                    StudyLineView, StudyStrainsView, StudyViewSet, ProtocolViewSet,
+                    MeasurementUnitViewSet)
 import rest_framework_nested.routers as nested_routers
 from views import schema_view
 
@@ -19,8 +20,10 @@ base_rest_api_router = rest_routers.DefaultRouter()
 base_rest_api_router.register(LINES_RESOURCE_NAME, LineViewSet)
 base_rest_api_router.register(STUDIES_RESOURCE_NAME, StudyViewSet, STUDIES_RESOURCE_NAME)
 base_rest_api_router.register(STRAINS_RESOURCE_NAME, StrainViewSet, STRAINS_RESOURCE_NAME)
+base_rest_api_router.register(r'measurement_units', MeasurementUnitViewSet, 'measurement_units')
 base_rest_api_router.register(METADATA_TYPES_RESOURCE_NAME, MetadataTypeViewSet)
 base_rest_api_router.register(METADATA_GROUPS_RESOURCE_NAME, MetadataGroupViewSet)
+base_rest_api_router.register(r'protocols', ProtocolViewSet)
 
 ####################################################################################################
 # /rest/studies nested router
@@ -46,6 +49,7 @@ strain_nested_resources_router.register(STUDIES_RESOURCE_NAME, StrainStudiesView
 # Use routers & supporting frameworks to construct URL patterns
 ####################################################################################################
 urlpatterns = [
+    # url(r'docs/$', include('rest_framework_swagger.urls')),
     url(r'', include(base_rest_api_router.urls)),
     url(r'', include(study_nested_resources_router.urls)),
     url(r'', include(strain_nested_resources_router.urls)),

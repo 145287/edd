@@ -26,6 +26,7 @@ from urlparse import urlunparse, ParseResult, parse_qs
 from jbei.rest.api import RestApiClient
 from jbei.rest.sessions import PagedResult, PagedSession, Session
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -816,11 +817,15 @@ class IceApi(RestApiClient):
 
     def get_entry(self, entry_id, suppress_errors=False):
         """
-        Retrieves a part using any of the unique identifiers: part number, synthetic id, or
-        UUID. Returns a Part object; or None if no part was found or if there were suppressed
-        errors in making the request.
-        :param entry_id: the ICE ID for this entry (either the local numeric primary key, or a
-            UUID)
+        Retrieves an ICE entry using any of the unique identifiers: UUID (preferred), part
+        number (often globally unique, though not enforceably), or locally-unique primary
+        key. Returns a Part object, or None if no part was found, or if there were
+        suppressed errors in making the request. Note that this method doesn't currently
+        support querying the web of registries for entries that aren't stored locally in this ICE
+        instance (see search_entries(), and currently undocumented ICE API resource
+        /rest/web/{X}/entries/{Y}).
+        :param entry_id: the ICE ID for this entry (either the UUID, part number,
+            locally-unique integer primary  key)
         :param suppress_errors: true to catch and log exception messages and return None instead of
             raising Exceptions.
         :return: A Part object representing the response from ICE, or None if an an Exception
@@ -1037,7 +1042,6 @@ class IceApi(RestApiClient):
         # behaves vs. what the original plan was. Probably best to wait for comments and see
         # whether SYNBIO-1196 changes (see associated
         # comments). Currently, there's no need to provide the link ID at all when adding/updating.
-
 
         logger.info(
             "Requesting part-> study link from ICE (id=%s): %s" %
@@ -1330,7 +1334,6 @@ class IcePagedResult(PagedResult):
             # extract elements of the query URL so we can reconstruct it using paging parameters
             url_elts, query_params_dict = parse_query_url(query_url)
             # if paging parameters aren't already defined, try extracting them from query_url
-            print('%s' % (query_params_dict, ))
             if not result_limit:
                 result_limit = extract_int_parameter(query_params_dict, RESULT_LIMIT_PARAMETER)
             if offset is None:

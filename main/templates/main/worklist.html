@@ -12,6 +12,7 @@
     $(e.target).closest('.disclose').toggleClass('discloseHide');
     return false;
   });
+
   $(function () {
     var dataArea, tables, sep, rsplit, ctrl;
     dataArea = $('#textData').hide();
@@ -36,16 +37,16 @@
 {% endblock js_css %}
 
 {% block head_title %}
-  {% if selection.studies.values|length == 1 %}
-    Worklist Export For {{ selection.studies.values.0.name }}
+  {% if selection.studies|length == 1 %}
+    Worklist Export For {{ selection.studies.0.name }}
   {% else %}
-    Worklist Export for {{ selection.studies.values|length }} Studies
+    Worklist Export for {{ selection.studies|length }} Studies
   {% endif %}
 {% endblock head_title %}
 
 {% block body_title %}
   Worklist Export For {% for study in selection.studies %}
-   <a href="{% url 'main:detail' study.id %}">{{ study.name }}</a>{% if not forloop.last %},{% endif %}
+   <a href="{% url 'main:detail' slug=study.slug %}">{{ study.name }}</a>{% if not forloop.last %},{% endif %}
   {% endfor %}
 {% endblock body_title %}
 
@@ -83,7 +84,7 @@
         </div>
       </div>
       {% endif %}
-      <button type="submit" name="action" value="apply">Apply</button>
+      <button type="submit" name="action" value="apply" id="apply">Apply</button>
       <button type="submit" name="action" value="download">Download</button>
     </div>
   </div>
