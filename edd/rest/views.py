@@ -27,13 +27,17 @@ from rest_framework.status import HTTP_403_FORBIDDEN
 from edd.rest.serializers import (LineSerializer, MetadataGroupSerializer, MetadataTypeSerializer,
                                   StrainSerializer, StudySerializer, UserSerializer,
                                   ProtocolSerializer, MeasurementUnitSerializer)
-from jbei.rest.clients.edd.constants import (
-    CASE_SENSITIVE_PARAM, LINE_ACTIVE_STATUS_PARAM, LINES_ACTIVE_DEFAULT, METADATA_TYPE_CONTEXT,
-    METADATA_TYPE_GROUP, METADATA_TYPE_I18N, METADATA_TYPE_LOCALE, METADATA_TYPE_NAME_REGEX,
-    QUERY_ACTIVE_OBJECTS_ONLY, QUERY_ALL_OBJECTS, QUERY_INACTIVE_OBJECTS_ONLY,
-    STRAIN_CASE_SENSITIVE, STRAIN_NAME, STRAIN_NAME_REGEX, STRAIN_REGISTRY_ID,
-    STUDY_LINE_NAME_REGEX, STRAIN_REGISTRY_URL_REGEX, CREATED_AFTER_PARAM, CREATED_BEFORE_PARAM,
-    UPDATED_BEFORE_PARAM, UPDATED_AFTER_PARAM)
+from jbei.rest.clients.edd.constants import (CASE_SENSITIVE_PARAM, LINE_ACTIVE_STATUS_PARAM,
+                                             LINES_ACTIVE_DEFAULT, METADATA_TYPE_CONTEXT,
+                                             METADATA_TYPE_GROUP, METADATA_TYPE_I18N,
+                                             METADATA_TYPE_LOCALE, METADATA_TYPE_NAME_REGEX,
+                                             QUERY_ACTIVE_OBJECTS_ONLY, QUERY_ALL_OBJECTS,
+                                             QUERY_INACTIVE_OBJECTS_ONLY, STRAIN_CASE_SENSITIVE,
+                                             STRAIN_NAME, STRAIN_NAME_REGEX, STRAIN_REGISTRY_ID,
+                                             STUDY_LINE_NAME_REGEX, STRAIN_REGISTRY_URL_REGEX,
+                                             CREATED_AFTER_PARAM, CREATED_BEFORE_PARAM,
+                                             UPDATED_BEFORE_PARAM, UPDATED_AFTER_PARAM,
+                                             STUDIES_RESOURCE_NAME)
 from jbei.rest.utils import is_numeric_pk
 from jbei.utils import PK_OR_TYPICAL_UUID_PATTERN, PK_OR_TYPICAL_UUID_REGEX
 from main.models import Line, MetadataType, Strain, Study, StudyPermission, User, MetadataGroup
