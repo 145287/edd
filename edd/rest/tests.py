@@ -50,9 +50,11 @@ PLAINTEXT_TEMP_USER_PASSWORD = 'password'
 
 
 class StrainResourceTests(APITransactionTestCase):
-    fixtures = ['unit_test_user', ]  # prevents ICE notifications
     #available_apps = ['main', 'django.contrib.auth']
     STRAIN_RESOURCE_URL = '/rest/strain'
+
+    def setup(self):
+        self.create_fixture()
 
     def create_fixture(self):  # TODO: resolve fixture creation / setUp() use w/
         """
@@ -81,6 +83,11 @@ class StrainResourceTests(APITransactionTestCase):
         # refresh http://stackoverflow.com/questions/10102918/cant-change-user-permissions-during
         # -unittest-in-django
         self.superuser = User.objects.get(username=ADMIN_USERNAME)
+
+        # as a stopgap, create the "system" user that isn't being applied via migrations...
+        # TODO: do this more cleanly later
+        self.system_user = User.objects.create_user(username='system',
+                                                    email='jbei-edd-admin@lists.lbl.gov')
 
         # admin/staff user w/ no extra privileges
         self.admin_staff_user = User.objects.create_user(username=ADMIN_STAFF_USERNAME,
@@ -148,11 +155,11 @@ class StrainResourceTests(APITransactionTestCase):
         self.study = Study(name='Test study')
         self.study.save()
         self.study.userpermission_set.all().update_or_create(
-                user_id=self.study_owner.pk, study_id=self.study.id,
+                user=self.study_owner, study=self.study,
                 permission_type=StudyPermission.READ)
-        self.study.userpermission_set.all().update_or_create(user_id=self.study_owner.pk,
-                                                             study_id=self.study.id,
-                                                             permission_type=StudyPermission.WRITE)
+        self.study.userpermission_set.update_or_create(user=self.study_owner,
+                                                       study=self.study,
+                                                       permission_type=StudyPermission.WRITE)
         self.study.save()
 
         self.study_strain1 = Strain(name='Study strain 1')
@@ -237,7 +244,8 @@ class StrainResourceTests(APITransactionTestCase):
                                     is_list else
                                     self._require_authenticated_access_empty_result)
 
-        # enforce access denied behavior for the list resource -- same as just showing an empty list
+        #  enforce access denied behavior for the list resource -- same as just showing an empty
+        #  list
         if is_list:
             require_no_result_method(url, self.unprivileged_user)
             require_no_result_method(url, self.staff_user)
@@ -253,8 +261,8 @@ class StrainResourceTests(APITransactionTestCase):
         # test that a 'staff' user with strain write privileges can use the resource
         self._require_authenticated_access_allowed(url, self.staff_strain_user)
 
-        # test that an otherwise unprivileged user with read access to a study containing the strain
-        # can also use the strain resource to view the strain
+        # test that an otherwise unprivileged user with read access to a study containing the
+        # strain can also use the strain resource to view the strain
         self._require_authenticated_access_allowed(url, self.study_owner)
 
     def test_strain_nested_study_read_access(self):
@@ -265,9 +273,9 @@ class StrainResourceTests(APITransactionTestCase):
         pass
 
     def test_strain_uuid_pattern_match(self):
-        # TODO: test pattern matching for UUID's. had to make code changes during initial testing to
-        # enforce matching for UUID's returned by EDD's REST API, which is pretty wierd after prior
-        # successful tests.
+        # TODO: test pattern matching for UUID's. had to make code changes during initial testing
+        # to enforce matching for UUID's returned by EDD's REST API, which is pretty wierd after
+        # prior successful tests.
         pass
 
     def _require_authenticated_access_denied(self, url, user):
@@ -318,7 +326,8 @@ class StrainResourceTests(APITransactionTestCase):
                               required_result_status, response.status_code))
 
     def _require_authenticated_access_empty_result(self, url, user):
-        logged_in = self.client.login(username=user.username, password=PLAINTEXT_TEMP_USER_PASSWORD)
+        logged_in = self.client.login(username=user.username,
+                                      password=PLAINTEXT_TEMP_USER_PASSWORD)
 
         self.assertTrue(logged_in, 'Client login failed. Unable to continue with the test.')
 
@@ -336,7 +345,8 @@ class StrainResourceTests(APITransactionTestCase):
         self.assertFalse(bool(response.content))
 
     def _require_authenticated_access_empty_paged_result(self, url, user):
-        logged_in = self.client.login(username=user.username, password=PLAINTEXT_TEMP_USER_PASSWORD)
+        logged_in = self.client.login(username=user.username,
+                                      password=PLAINTEXT_TEMP_USER_PASSWORD)
 
         self.assertTrue(logged_in, 'Client login failed. Unable to continue with the test.')
 

@@ -40,18 +40,14 @@ from jbei.rest.clients.edd.constants import (CASE_SENSITIVE_PARAM, LINE_ACTIVE_S
                                              STUDIES_RESOURCE_NAME)
 from jbei.rest.utils import is_numeric_pk
 from jbei.utils import PK_OR_TYPICAL_UUID_PATTERN, PK_OR_TYPICAL_UUID_REGEX
-from main.models import Line, MetadataType, Strain, Study, StudyPermission, User, MetadataGroup
 from rest_framework import (response, schemas, status, viewsets)
 from rest_framework.decorators import api_view, renderer_classes
 from main.models import (Line, MeasurementUnit, MetadataGroup, MetadataType, Protocol, Strain,
                          Study, StudyPermission, User)
-from rest_framework import (status, viewsets)
 from rest_framework.exceptions import APIException
 from rest_framework.relations import StringRelatedField
 from rest_framework.response import Response
 from rest_framework_swagger.renderers import OpenAPIRenderer, SwaggerUIRenderer
-
-
 
 logger = logging.getLogger(__name__)
 
@@ -177,7 +173,8 @@ class ModelImplicitViewOrResultImpliedPermissions(BasePermission):
         codes that enable the user to access this resource (having any of them will permit access)
         """
         kwargs = {
-            'app_label': orm_model_cls._meta.app_label, 'model_name': orm_model_cls._meta.model_name
+            'app_label': orm_model_cls._meta.app_label,
+            'model_name': orm_model_cls._meta.model_name
         }
         return [perm % kwargs for perm in self.django_auth_perms_map[http_method]]
 
@@ -217,15 +214,15 @@ class ModelImplicitViewOrResultImpliedPermissions(BasePermission):
                             'username': user.username,
                             'method': request.method,
                             'url': request.path,
-                        })
+                         })
             return True
 
         # if user has been explicitly granted any of the class-level permissions that enable
         # access, allow access
         for permission in enabling_perms:
             if user.has_perm(permission):
-                logger.debug('User %(username)s has explicitly-granted permission %(permission)s on'
-                             ' resource %(method)s %(url)s' % {
+                logger.debug('User %(username)s has explicitly-granted permission %(permission)s '
+                             'on resource %(method)s %(url)s' % {
                                 'username': user.username,
                                 'permission': permission,
                                 'method': request.method,
@@ -240,7 +237,7 @@ class ModelImplicitViewOrResultImpliedPermissions(BasePermission):
                             'username': user.username,
                             'method': request.method,
                             'url': request.path,
-                        })
+                         })
             return False
 
         # note: we'll just return an empty resultset, but still tell the user they have access to
@@ -259,11 +256,13 @@ class ModelImplicitViewOrResultImpliedPermissions(BasePermission):
                         'url': request.path, })
         return has_permission
 
+
 @api_view()
 @renderer_classes([OpenAPIRenderer, SwaggerUIRenderer])
 def schema_view(request):
     generator = schemas.SchemaGenerator(title='Experiment Data Depot')
     return response.Response(generator.get_schema(request=request))
+
 
 class MetadataTypeViewSet(viewsets.ReadOnlyModelViewSet):
     """
@@ -318,6 +317,7 @@ class MetadataTypeViewSet(viewsets.ReadOnlyModelViewSet):
                                               METADATA_TYPE_NAME_REGEX,
                                               METADATA_TYPE_LOCALE, )
         return queryset
+
 
 OWNED_BY = 'owned_by'
 VARIANT_OF = 'variant_of'
@@ -392,8 +392,8 @@ class ProtocolViewSet(viewsets.ReadOnlyModelViewSet):
             if is_numeric_pk(owned_by):
                 queryset = queryset.filter(owned_by=owned_by)
             else:
-                # first try UUID-based input since UUID instantiation is the best way to error check
-                # UUID input
+                # first try UUID-based input since UUID instantiation is the best way to error
+                # check UUID input
                 try:
                     queryset = queryset.filter(owned_by__uuid=owned_by)
                 except Exception:
@@ -412,15 +412,15 @@ class ProtocolViewSet(viewsets.ReadOnlyModelViewSet):
             if default_units:
                 if is_numeric_pk(default_units):
                     queryset = queryset.filter(default_units=default_units)
-                # first try UUID-based input since UUID instantiation is the best way to error check
-                # UUID input
+                # first try UUID-based input since UUID instantiation is the best way to error
+                # check UUID input
                 try:
                     queryset = queryset.filter(default_units__uuid=default_units)
                 except Exception:
                     # if this wasn't a valid UUID, assume it's a regex for the unit name
 
                     queryset = _optional_regex_filter(params, queryset,
-                                                         'default_units__unit_name',
+                                                      'default_units__unit_name',
                                                       DEFAULT_UNITS_QUERY_PARAM,
                                                       i18n_placeholder)
             # categorization
@@ -488,10 +488,9 @@ class MetadataGroupViewSet(viewsets.ReadOnlyModelViewSet):
         """
 
 
-
 class UserViewSet(viewsets.ReadOnlyModelViewSet):
-    permission_classes = [IsAuthenticated, DjangoModelPermissions]   # TODO: allows unrestricted
-                                                                     # read access
+    # TODO: allows unrestricted read access
+    permission_classes = [IsAuthenticated, DjangoModelPermissions]
     """
     API endpoint that allows privileged users to get read-only information on the current set of
     EDD user accounts.
@@ -500,6 +499,7 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         return User.objects.filter(self.kwargs['user'])
+
 
 PAGING_PARAMETER_DESCRIPTIONS = """
             parameters:
@@ -885,11 +885,10 @@ class StudyViewSet(viewsets.ReadOnlyModelViewSet):  # read-only for now...see TO
             study_query = Study.objects.filter(user_permission_q).distinct()
 
         # if client provided a study ID, filter based on it
-        # TODO: nice-to-have UUID / slug based lookup drafted here isn't working, but log statements
-        # inserted here imply that the logic is correct/similar queries work from the command line.
-        # circle back to this and to any other related code when revisiting the REST
-        # API...
-        # TODO: misleading 'pk' kwarg is set by router...investigate later.
+        # TODO: nice-to-have UUID / slug based lookup drafted here isn't working, but log
+        # statements inserted here imply that the logic is correct/similar queries work from the
+        # command line. circle back to this and to any other related code when revisiting the REST
+        # API... TODO: misleading 'pk' kwarg is set by router...investigate later.
         study_id = self.kwargs.get('pk', None)
         if study_id:
             # test whether this is an integer pk
@@ -1167,7 +1166,7 @@ class StudyLineView(viewsets.ModelViewSet):  # LineView(APIView):
             study = Study.objects.get(pk=study_pk)
             if study.user_can_write(user):
                 return None
-        except Study.DoesNotExist as e:
+        except Study.DoesNotExist:
             logger.warning('Got request to modify non-existent study %s', study_pk)
         raise PermissionDenied()
 
@@ -1209,7 +1208,7 @@ def _optional_timestamp_filter(queryset, query_params):
 
     # if user provided a date in a format Django doesn't understand,
     # re-raise in a way that makes the client error apparent
-    except TypeError as te:
+    except TypeError:
         raise ParseError(detail='%(param)s %(value)s is not a valid date/time.' % {
             'param': query_param_name,
             'value': value,
