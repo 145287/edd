@@ -33,6 +33,26 @@ module IndexPage {
 		this.studiesDataGridSpec = new DataGridSpecStudies();
         this.studiesDataGridSpec.init();
 
+        //prepare tooltip for matched searches
+        $(this.studiesDataGridSpec.tableElement).tooltip({
+            content: function () {
+                return $(this).prop('title');
+            },
+            position: { my: "left-10 center", at: "right center" },
+            show: null,
+            close: function (event, ui:any) {
+                ui.tooltip.hover(
+                function () {
+                    $(this).stop(true).fadeTo(400, 1);
+                },
+                function () {
+                    $(this).fadeOut("400", function () {
+                        $(this).remove();
+                    })
+                });
+            }
+        });
+
 		// Instantiate the table itself with the spec
 		this.studiesDataGrid = new DataGrid(this.studiesDataGridSpec);
         this.studiesDataGridSpec.requestPageOfData((success) => {
@@ -98,7 +118,7 @@ class DataGridSpecStudies extends DataGridSpecBase implements DGPageDataSource {
         if (match) {
             sideMenuItems = match.getFields().map((field):string => {
                 var matches = match.getMatches(field, '<span class="search_match">', '</span>', 10);
-                return 'Matched on ' + field + ': ' + matches.join(', ');
+                return 'Matched on ' + field + ': ' + matches.join(', ') + " ";
             });
         }
         return [
@@ -186,8 +206,8 @@ class DataGridSpecStudies extends DataGridSpecBase implements DGPageDataSource {
             new DataGridColumnGroupSpec('Owner Initials'),
             new DataGridColumnGroupSpec('Owner Full Name', { 'hiddenByDefault': true }),
             new DataGridColumnGroupSpec('Institute', { 'hiddenByDefault': true }),
-            new DataGridColumnGroupSpec('Date Created', { 'hiddenByDefault': true }),
-            new DataGridColumnGroupSpec('Last Modified')
+            new DataGridColumnGroupSpec('Date Created'),
+            new DataGridColumnGroupSpec('Last Modified', { 'hiddenByDefault': true })
 		];
 	}
 

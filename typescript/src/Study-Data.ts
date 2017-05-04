@@ -188,7 +188,6 @@ namespace StudyDataPage {
             $.each(this.allFilters, (i, widget) => {
                 if (widget.isFilterUseful()) {
                     widget.addToParent(this.filterTableJQ[0]);
-                    widget.applyBackgroundStyle(dark);
                     dark = !dark;
                 } else {
                     widget.detach();
@@ -631,18 +630,12 @@ namespace StudyDataPage {
             $(this.filterColumnDiv).detach();
         }
 
-        // Used to apply mild alternate striping to the filters so they stand out a bit from each other
-        applyBackgroundStyle(darker:boolean):void {
-            $(this.filterColumnDiv).removeClass(darker ? 'stripeRowB' : 'stripeRowA');
-            $(this.filterColumnDiv).addClass(darker ? 'stripeRowA' : 'stripeRowB');
-        }
-
         // Runs through the values in uniqueValuesOrder, adding a checkbox and label for each
         // filtering value represented.  If there are more than 15 values, the filter gets
         // a search box and scrollbar.
         // The checkbox, and the table row that encloses the checkbox and label, are saved in
         // a dictionary mapped by the unique value they represent, so they can be re-used if the
-        // filter is rebuilt (i.e. if populateTable is called again.) 
+        // filter is rebuilt (i.e. if populateTable is called again.)
         populateTable():void {
             var fCol = $(this.filterColumnDiv);
 
@@ -1091,7 +1084,7 @@ namespace StudyDataPage {
     // chunk of data from the server.  So, we instantiate it, then it appears in a
     // 'load pending' state until actual measurement values are received from the server.
     export class MeasurementFilterSection extends GenericFilterSection {
-        // Whenever this filter is instantiated, we 
+        // Whenever this filter is instantiated, we
         loadPending: boolean;
 
         configure(title:string, shortLabel:string): void {
@@ -1107,7 +1100,7 @@ namespace StudyDataPage {
 
     // A filter for the names of General Measurements.
     export class GeneralMeasurementFilterSection extends MeasurementFilterSection {
-        // Whenever this filter is instantiated, we 
+        // Whenever this filter is instantiated, we
         loadPending: boolean;
 
         configure(): void {
@@ -1228,7 +1221,7 @@ namespace StudyDataPage {
         viewingMode = 'linegraph';
         barGraphMode = 'measurement';
         barGraphTypeButtonsJQ = $('#barGraphTypeButtons');
-        actionPanelIsInBottomBar = true;
+        actionPanelIsInBottomBar = false;
         // Start out with every display mode needing a refresh
         viewingModeIsStale = {
             'linegraph': true,
@@ -1266,52 +1259,62 @@ namespace StudyDataPage {
         // and does the same to elements named in the 'for' attributes of each button.
         // We still need to add our own responders to actually do stuff.
         Utl.ButtonBar.prepareButtonBars();
+        copyActionButtons();
         // Prepend show/hide filter button for better alignment
         // Note: this will be removed when we implement left side filtering
 
-        var showHideFilterButton = $('#hideFilterSection');
-        $('#assaysActionPanel').prepend(showHideFilterButton);
+        //when all ajax requests are finished, determine if there are AssayMeasurements.
+        $(document).ajaxStop(function() {
+            // show assay table by default if there are assays but no assay measurements
+            if (_.keys(EDDData.Assays).length > 0 && _.keys(EDDData.AssayMeasurements).length === 0) {
+                //TODO: create prepare it for no data?
+                $('#dataTableButton').click();
+                $('.exportButton').prop('disabled', true);
+            } else {
+                $('.exportButton').prop('disabled', false);
+            }
+        });
 
         $("#dataTableButton").click(function() {
             viewingMode = 'table';
-            $('#assaysActionPanel').appendTo('#bottomBar');
-            $('#mainFilterSection').appendTo('#bottomBar');
-             makeLabelsBlack(EDDGraphingTools.labels);
+            queueActionPanelRefresh();
+            makeLabelsBlack(EDDGraphingTools.labels);
             $("#tableControlsArea").removeClass('off');
             $("#filterControlsArea").addClass('off');
-            $("#tableActionButtons").removeClass('off');
+            $(".tableActionButtons").removeClass('off');
             barGraphTypeButtonsJQ.addClass('off');
             queueRefreshDataDisplayIfStale();
             //TODO: enable users to export filtered data from graph
-            $('#exportButton').removeClass('off');
+            $('.exportButton').removeClass('off');
         });
 
         //click handler for edit assay measurements
-        $('#editMeasurementButton').click(function(ev) {
+        $('.editMeasurementButton').click(function(ev) {
             ev.preventDefault();
-            $('input[value="edit"]').prop('checked', true);
+            $('input[name="assay_action"][value="edit"]').prop('checked', true);
             $('button[value="assay_action"]').click();
             return false;
         });
 
         //click handler for delete assay measurements
-        $('#deleteButton').click(function(ev) {
+        $('.deleteButton').click(function(ev) {
             ev.preventDefault();
-            $('input[value="delete"]').prop('checked', true);
+            $('input[name="assay_action"][value="delete"]').prop('checked', true);
             $('button[value="assay_action"]').click();
             return false;
         });
 
         //click handler for export assay measurements
-        $('#exportButton').click(function(ev) {
+        $('.exportButton').click(function(ev) {
             ev.preventDefault();
+            includeAllLinesIfEmpty();
             $('input[value="export"]').prop('checked', true);
             $('button[value="assay_action"]').click();
             return false;
         });
 
         //click handler for disable assay measurements
-        $('#disableButton').click(function(ev) {
+        $('.disableButton').click(function(ev) {
             ev.preventDefault();
             $('input[value="mark"]').prop('checked', true);
             $('select[name="disable"]').val('true');
@@ -1320,7 +1323,7 @@ namespace StudyDataPage {
         });
 
         //click handler for re-enable assay measurements
-        $('#enableButton').click(function(ev) {
+        $('.enableButton').click(function(ev) {
             ev.preventDefault();
             $('input[value="mark"]').prop('checked', true);
             $('select[name="disable"]').val('false');
@@ -1330,16 +1333,10 @@ namespace StudyDataPage {
 
         // This one is active by default
         $("#lineGraphButton").click(function() {
-            //TODO: clean this up
-            $('#exportButton').addClass('off');
-            $('#assaysActionPanel').appendTo('#content');
-            $('#mainFilterSection').appendTo('#content');
+            $('.exportButton, #tableControlsArea, .tableActionButtons').addClass('off');
+            $('#filterControlsArea').removeClass('off');
+            queueActionPanelRefresh();
             viewingMode = 'linegraph';
-            $("#tableControlsArea").addClass('off');
-            $("#filterControlsArea").removeClass('off');
-            $("#tableActionButtons").addClass('off');
-            $('#assaysActionPanel').appendTo('#content');
-            $('#mainFilterSection').appendTo('#content');
             barGraphTypeButtonsJQ.addClass('off');
             $('#lineGraph').removeClass('off');
             $('#barGraphByTime').addClass('off');
@@ -1362,28 +1359,15 @@ namespace StudyDataPage {
             $('#graphLoading').removeClass('off');
         });
         $("#barGraphButton").click(function() {
-            //TODO: clean this up
+            $('.exportButton, #tableControlsArea, .tableActionButtons').addClass('off');
+            $('#filterControlsArea').removeClass('off');
+            queueActionPanelRefresh();
             viewingMode = 'bargraph';
-            $('#assaysActionPanel').appendTo('#content');
-            $('#mainFilterSection').appendTo('#content');
-            $('#exportButton').addClass('off');
-            $("#tableControlsArea").addClass('off');
-            $("#filterControlsArea").removeClass('off');
-            $("#tableActionButtons").addClass('off');
             barGraphTypeButtonsJQ.removeClass('off');
             $('#lineGraph').addClass('off');
-            $('#barGraphByTime').addClass('off');
-            $('#barGraphByLine').addClass('off');
-            $('#barGraphByMeasurement').addClass('off');
-            $('#assaysActionPanel').appendTo('#content');
-            $('#mainFilterSection').appendTo('#content');
-            if (barGraphMode == 'time') {
-                $('#barGraphByTime').removeClass('off');
-            } else if (barGraphMode == 'line') {
-                $('#barGraphByLine').removeClass('off');
-            } else {
-                $('#barGraphByMeasurement').removeClass('off');
-            }
+            $('#barGraphByTime').toggleClass('off', 'time' !== barGraphMode);
+            $('#barGraphByLine').toggleClass('off', 'line' !== barGraphMode);
+            $('#barGraphByMeasurement').toggleClass('off', 'measurement' !== barGraphMode);
             queueRefreshDataDisplayIfStale();
         });
         $("#timeBarGraphButton").click(function() {
@@ -1401,15 +1385,15 @@ namespace StudyDataPage {
         });
 
         //hides/shows filter section.
-        $('#hideFilterSection').click(function(event) {
+        var hideButtons: JQuery = $('.hideFilterSection');
+        hideButtons.click(function(event) {
+            var self: JQuery = $(this), old: string, replace: string;
             event.preventDefault();
-            if ($('#hideFilterSection').val() === "Hide Filter Section") {
-               $('#hideFilterSection').val("Show Filter Section");
-               $('#mainFilterSection').hide();
-            } else {
-               $('#hideFilterSection').val("Hide Filter Section");
-               $('#mainFilterSection').show();
-            }
+            old = self.text();
+            replace = self.attr('data-off-text');
+            // doing this for all
+            hideButtons.attr('data-off-text', old).text(replace);
+            $('#mainFilterSection').toggle();
             return false;
         });
 
@@ -1439,6 +1423,8 @@ namespace StudyDataPage {
             }
         });
 
+        fetchEDDData(onSuccess);
+
         // Simply setting display:none doesn't work on flex items.
         // They still occupy space in the layout.
         // barGraphTypeButtonsJQ.detach();
@@ -1450,15 +1436,29 @@ namespace StudyDataPage {
             autoOpen: false
         });
 
-        $("#addMeasurementButton").click(function() {
-           $("#addMeasurement").removeClass('off').dialog( "open" );
+        $(".addMeasurementButton").click(function() {
+            $("#addMeasurement").removeClass('off').dialog( "open" );
             return false;
         });
 
         // Callbacks to respond to the filtering section
         $('#mainFilterSection').on('mouseover mousedown mouseup', queueRefreshDataDisplayIfStale.bind(this))
             .on('keydown', filterTableKeyDown.bind(this));
+    }
 
+    function copyActionButtons() {
+        // create a copy of the buttons in the flex layout bottom bar
+        // the original must stay inside form
+        var original: JQuery, copy: JQuery;
+        original = $('#assaysActionPanel');
+        copy = original.clone().appendTo('#bottomBar').attr('id', 'copyActionPanel').hide();
+        // forward click events on copy to the original button
+        copy.on('click', '.actionButton', (e) => {
+            original.find('#' + e.target.id).trigger(e);
+        });
+    }
+
+    export function fetchEDDData(success) {
         $.ajax({
             'url': 'edddata/',
             'type': 'GET',
@@ -1466,32 +1466,49 @@ namespace StudyDataPage {
                 $('#content').prepend("<div class='noData'>Error. Please reload</div>");
                 console.log(['Loading EDDData failed: ', status, ';', e].join(''));
             },
-            'success': (data) => {
-                EDDData = $.extend(EDDData || {}, data);
-
-                colorObj = EDDGraphingTools.renderColor(EDDData.Lines);
-
-                progressiveFilteringWidget.prepareFilteringSection();
-
-                $('#filteringShowDisabledCheckbox, #filteringShowEmptyCheckbox').change(() => {
-                    queueRefreshDataDisplayIfStale();
-                });
-
-                //pulling in protocol measurements AssayMeasurements
-                $.each(EDDData.Protocols, (id, protocol) => {
-                    $.ajax({
-                        url: 'measurements/' + id + '/',
-                        type: 'GET',
-                        dataType: 'json',
-                        error: (xhr, status) => {
-                            console.log('Failed to fetch measurement data on ' + protocol.name + '!');
-                            console.log(status);
-                        },
-                        success: processMeasurementData.bind(this, protocol)
-                    });
-                });
-            }
+            'success': success
         });
+    }
+
+    function onSuccess(data) {
+        EDDData = $.extend(EDDData || {}, data);
+
+        colorObj = EDDGraphingTools.renderColor(EDDData.Lines);
+
+        progressiveFilteringWidget.prepareFilteringSection();
+
+        $('#filteringShowDisabledCheckbox, #filteringShowEmptyCheckbox').change(() => {
+            queueRefreshDataDisplayIfStale();
+        });
+        fetchMeasurements(EDDData);
+    }
+
+    function fetchMeasurements(EDDData) {
+        //pulling in protocol measurements AssayMeasurements
+        $.each(EDDData.Protocols, (id, protocol) => {
+            $.ajax({
+                url: 'measurements/' + id + '/',
+                type: 'GET',
+                dataType: 'json',
+                error: (xhr, status) => {
+                    console.log('Failed to fetch measurement data on ' + protocol.name + '!');
+                    console.log(status);
+                },
+                success: processMeasurementData.bind(this, protocol)
+            });
+        });
+    }
+
+    function includeAllLinesIfEmpty() {
+        if ($('#studyAssaysTable').find('tbody input[type=checkbox]:checked').length === 0) {
+            //append study id to form
+            var study = _.keys(EDDData.Studies)[0];
+            $('<input>').attr({
+                type: 'hidden',
+                value: study,
+                name: 'studyId',
+            }).appendTo('form');
+        }
     }
 
     function allActiveAssays() {
@@ -1527,7 +1544,6 @@ namespace StudyDataPage {
         }
     }
 
-
     export function requestAssayData(assay) {
         var protocol = EDDData.Protocols[assay.pid];
         $.ajax({
@@ -1541,15 +1557,6 @@ namespace StudyDataPage {
             success: processMeasurementData.bind(this, protocol)
         });
     }
-
-    //when all ajax requests are finished, determine if there are AssayMeasurements.
-    $(document).ajaxStop(function() {
-        // show assay table by default if there are assays but no assay measurements
-        if (_.keys(EDDData.Assays).length > 0 && _.keys(EDDData.AssayMeasurements).length === 0) {
-            //TODO: create prepare it for no data?
-            $('#dataTableButton').click();
-        }
-    });
 
     function processMeasurementData(protocol, data) {
         var assaySeen = {},
@@ -1668,27 +1675,6 @@ namespace StudyDataPage {
             }
             viewingModeIsStale['table'] = false;
             makeLabelsBlack(EDDGraphingTools.labels);
-
-            var h = $('#content').height();            // Height of the viewing region
-
-            // Height of the entire contents.  Note that we cannot just use scrollHeight on #content,
-            // because the flex layout changes the way scrollHeight is calculated.  (sh will always be >= h)
-            var sh = 0;
-            $('#content').children().get().forEach((e:HTMLElement):void => { sh += e.scrollHeight; });
-
-            if (actionPanelIsInBottomBar) {
-                if (sh < h) {
-                    $('#assaysActionPanel').appendTo('#content');
-                    $('#mainFilterSection').appendTo('#content');
-                    actionPanelIsInBottomBar = false;
-                }
-            } else {
-                if (sh > h) {
-                    $('#assaysActionPanel').appendTo('#bottomBar');
-                    $('#mainFilterSection').appendTo('#bottomBar');
-                    actionPanelIsInBottomBar = true;
-                }
-            }
         } else {
             remakeMainGraphArea();
             if (viewingMode == 'bargraph') {
@@ -1696,40 +1682,30 @@ namespace StudyDataPage {
             } else {
                 viewingModeIsStale['linegraph'] = false;
             }
-            if (actionPanelIsInBottomBar) {
-                actionPanelIsInBottomBar = false;
-                $('#assaysActionPanel').appendTo('#content');
-                $('#mainFilterSection').appendTo('#content');
-            }
         }
     }
 
 
     function actionPanelRefresh() {
-        var checkedBoxes:HTMLInputElement[], checkedAssays, checkedMeasure, nothingSelected:boolean;
+        var checkedBoxes: HTMLInputElement[], checkedAssays: number, checkedMeasure: number,
+            nothingSelected: boolean, contentScrolling: boolean, filterInBottom: boolean;
         // Figure out how many assays/checkboxes are selected.
 
         // Don't show the selected item count if we're not looking at the table.
         // (Only the visible item count makes sense in that case.)
         if (viewingMode == 'table') {
-
-            $('#displayedDiv').addClass('off');
-
-            checkedBoxes = assaysDataGrid.getSelectedCheckboxElements();
-
-            checkedAssays = $(checkedBoxes).filter('[id^=assay]').length;
-            checkedMeasure = $(checkedBoxes).filter(':not([id^=assay])').length;
-
-            nothingSelected = !checkedAssays && !checkedMeasure;
-
-            //enable action buttons if something is selected
-            if (!nothingSelected) {
-                $('#editMeasurementButton, #addMeasurementButton, #deleteButton, #disableButton').prop('disabled', false);
+            $('.displayedDiv').addClass('off');
+            if (assaysDataGrid) {
+                checkedBoxes = assaysDataGrid.getSelectedCheckboxElements();
             } else {
-                $('#editMeasurementButton, #addMeasurementButton, #deleteButton, #disableButton').prop('disabled', true);
+                checkedBoxes = [];
             }
-
-            $('#selectedDiv').toggleClass('off', nothingSelected);
+            checkedAssays = $(checkedBoxes).filter('[name=assayId]').length;
+            checkedMeasure = $(checkedBoxes).filter('[name=measurementId]').length;
+            nothingSelected = !checkedAssays && !checkedMeasure;
+            //enable action buttons if something is selected
+            $('.tableActionButtons').find('button').prop('disabled', nothingSelected);
+            $('.selectedDiv').toggleClass('off', nothingSelected);
             var selectedStrs = [];
             if (!nothingSelected) {
                 if (checkedAssays) {
@@ -1739,11 +1715,11 @@ namespace StudyDataPage {
                     selectedStrs.push((checkedMeasure > 1) ? (checkedMeasure + " Measurements") : "1 Measurement");
                 }
                 var selectedStr = selectedStrs.join(', ');
-                $('#selectedDiv').text(selectedStr + ' selected');
+                $('.selectedDiv').text(selectedStr + ' selected');
             }
         } else {
-            $('#selectedDiv').addClass('off');
-            $('#displayedDiv').removeClass('off');
+            $('.selectedDiv').addClass('off');
+            $('.displayedDiv').removeClass('off');
         }
         //if there are assays but no data, show empty assays
         //note: this is to combat the current default setting for showing graph on page load
@@ -1752,6 +1728,40 @@ namespace StudyDataPage {
                 $('#TableShowEAssaysCB').click();
             }
         }
+
+        // move buttons so they are always visible if the page is scrolling
+        contentScrolling = isContentScrolling();
+        if (actionPanelIsInBottomBar && !contentScrolling) {
+            $('#assaysActionPanel').show();
+            $('#copyActionPanel').hide();
+            actionPanelIsInBottomBar = false;
+        } else if (!actionPanelIsInBottomBar && contentScrolling) {
+            $('#assaysActionPanel').hide();
+            $('#copyActionPanel').show();
+            actionPanelIsInBottomBar = true;
+        }
+
+        // only move the filter section when the page is scrolling in table view
+        if (viewingMode == 'table') {
+            contentScrolling = isContentScrolling();
+            filterInBottom = $('#mainFilterSection').parent().is('#bottomBar');
+            if (filterInBottom && !contentScrolling) {
+                $('#mainFilterSection').appendTo('#content');
+            } else if (!filterInBottom && contentScrolling) {
+                $('#mainFilterSection').appendTo('#bottomBar');
+            }
+        } else {
+            // always put filter section in main content when not in table view
+            $('#mainFilterSection').appendTo('#content');
+        }
+    }
+
+
+    function isContentScrolling(): boolean {
+        var viewHeight: number = 0, itemsHeight: number = 0;
+        viewHeight = $('#content').height();
+        $('#content').children().each((i, e) => { itemsHeight += e.scrollHeight; });
+        return viewHeight < itemsHeight;
     }
 
 
@@ -1789,7 +1799,7 @@ namespace StudyDataPage {
             assay = EDDData.Assays[measure.assay] || {};
             line = EDDData.Lines[assay.lid] || {};
             protocol = EDDData.Protocols[assay.pid] || {};
-            name = [line.name, protocol.name, assay.name].join('-');
+            name = assay.name;
             lineName = line.name;
 
             var label = $('#' + line['identifier']).next();
@@ -1838,7 +1848,7 @@ namespace StudyDataPage {
             dataSets.push(singleAssayObj);
         });
 
-        $('#displayedDiv').text(dataPointsDisplayed + " measurements displayed");
+        $('.displayedDiv').text(dataPointsDisplayed + " measurements displayed");
 
         $('#noData').addClass('off');
 
@@ -2113,37 +2123,27 @@ namespace StudyDataPage {
         }
 
         //get type names for x labels
-        typeNames = data.map(function (d:any) {
-                return d.key;
-        });
+        typeNames = data.map((d:any) => d.key);
 
         //sort x values
-        typeNames.sort(function (a, b) {
-                return a - b
-        });
+        typeNames.sort((a, b) => a - b);
 
-        xValues = data.map(function (d:any) {
-            return (d.values);
-        });
+        xValues = data.map((d:any) => d.values);
 
-        yvalueIds = data[0].values[0].values.map(function (d:any) {
-            return d.key;
-        });
+        yvalueIds = data[0].values[0].values.map((d:any) => d.key);
 
         // returns time values
-        xValueLabels = xValues[0].map(function (d:any) {
-            return (d.key);
-        });
+        xValueLabels = xValues[0].map((d:any) => d.key);
 
         //sort time values
-        sortedXvalues = xValueLabels.sort(function(a, b) { return parseFloat(a) - parseFloat(b)});
+        sortedXvalues = xValueLabels.sort((a, b) => parseFloat(a) - parseFloat(b));
 
         x_name.domain(typeNames);
 
         x_xValue.domain(sortedXvalues).rangeRoundBands([0, x_name.rangeBand()]);
 
         lineID.domain(yvalueIds).rangeRoundBands([0, x_xValue.rangeBand()]);
-        
+
         // create x axis
         graphSet.create_x_axis(graphSet, x_name, svg, type);
 
@@ -2153,7 +2153,7 @@ namespace StudyDataPage {
             if (yMin[index] > 0 ) {
                 yMin[index] = 0;
             }
-            //y axis min and max domain 
+            //y axis min and max domain
             y.domain([yMin[index], d3.max(unitMeasurementData[index], function (d:any) {
                 return d3.max(d.values, function (d:any) {
                     return d.y;
@@ -2413,7 +2413,7 @@ class DataGridAssays extends DataGrid {
     }
 
     _getClasses():string {
-        return 'dataTable sortable dragboxes hastablecontrols';
+        return 'dataTable sortable dragboxes hastablecontrols table-striped';
     }
 
     getCustomControlsArea():HTMLElement {
@@ -2532,9 +2532,16 @@ class DataGridSpecAssays extends DataGridSpecBase {
         // decoration.
         var assay, line, protocolNaming;
         if ((assay = EDDData.Assays[index])) {
-            protocolNaming = EDDData.Protocols[assay.pid].name;
+            return assay.name.toUpperCase();
+        }
+        return '';
+    }
+
+    private loadLineName(index: any): string {
+        var assay, line;
+        if ((assay = EDDData.Assays[index])) {
             if ((line = EDDData.Lines[assay.lid])) {
-                return [line.n, protocolNaming, assay.name].join('-').toUpperCase();
+                return line.name.toUpperCase();
             }
         }
         return '';
@@ -2577,24 +2584,29 @@ class DataGridSpecAssays extends DataGridSpecBase {
                 'name': 'Name',
                 'headerRow': 2,
                 'sortBy': this.loadAssayName
+            }),
+            new DataGridHeaderSpec(2, 'hAssayLineName', {
+                'name': 'Line',
+                'headerRow': 2,
+                'sortBy': this.loadLineName
             })
         ];
 
-        this.measuringTimesHeaderSpec = new DataGridHeaderSpec(5 + metaDataHeaders.length,
+        this.measuringTimesHeaderSpec = new DataGridHeaderSpec(6 + metaDataHeaders.length,
                 'hAssaysMTimes', { 'name': 'Measuring Times', 'headerRow': 2 });
 
         var rightSide = [
-            new DataGridHeaderSpec(2 + metaDataHeaders.length,
+            new DataGridHeaderSpec(3 + metaDataHeaders.length,
                     'hAssaysMName',
                     { 'name': 'Measurement', 'headerRow': 2 }),
-            new DataGridHeaderSpec(3 + metaDataHeaders.length,
+            new DataGridHeaderSpec(4 + metaDataHeaders.length,
                     'hAssaysUnits',
                     { 'name': 'Units', 'headerRow': 2 }),
-            new DataGridHeaderSpec(4 + metaDataHeaders.length,
+            new DataGridHeaderSpec(5 + metaDataHeaders.length,
                     'hAssaysCount',
                     { 'name': 'Count', 'headerRow': 2 }),
             this.measuringTimesHeaderSpec,
-            new DataGridHeaderSpec(6 + metaDataHeaders.length,
+            new DataGridHeaderSpec(7 + metaDataHeaders.length,
                     'hAssaysExperimenter',
                     {
                         'name': 'Experimenter',
@@ -2602,7 +2614,7 @@ class DataGridSpecAssays extends DataGridSpecBase {
                         'sortBy': this.loadExperimenterInitials,
                         'sortAfter': 1
                     }),
-            new DataGridHeaderSpec(7 + metaDataHeaders.length,
+            new DataGridHeaderSpec(8 + metaDataHeaders.length,
                     'hAssaysModified',
                     {
                         'name': 'Last Modified',
@@ -2639,16 +2651,14 @@ class DataGridSpecAssays extends DataGridSpecBase {
     }
 
     generateAssayNameCells(gridSpec:DataGridSpecAssays, index:string):DataGridDataCell[] {
-
-
         var record = EDDData.Assays[index], line = EDDData.Lines[record.lid];
-            var sideMenuItems = [
+        var sideMenuItems = [
             '<a class="assay-edit-link" onclick="StudyDataPage.editAssay([' + index + '])">Edit Assay</a>',
             '<a href="/export?assayId=' + index + '">Export Data as CSV</a>'
         ];
 
         // Set up jQuery modals
-        $("#assayMain").dialog({ autoOpen: false });
+        $("#assayMain").dialog({ minWidth: 500, autoOpen: false });
 
         // TODO we probably don't want to special-case like this by name
         if (EDDData.Protocols[record.pid].name == "Transcriptomics") {
@@ -2662,7 +2672,17 @@ class DataGridSpecAssays extends DataGridSpecBase {
                 'hoverEffect': true,
                 'nowrap': true,
                 'rowspan': gridSpec.rowSpanForRecord(index),
-                'contentString': [line.name, EDDData.Protocols[record.pid].name, record.name].join('-')
+                'contentString': record.name
+            })
+        ];
+    }
+
+    generateLineNameCells(gridSpec: DataGridSpecAssays, index: string): DataGridDataCell[] {
+        var record = EDDData.Assays[index], line = EDDData.Lines[record.lid];
+        return [
+            new DataGridDataCell(gridSpec, index, {
+                'rowspan': gridSpec.rowSpanForRecord(index),
+                'contentString': line.name
             })
         ];
     }
@@ -2947,21 +2967,22 @@ class DataGridSpecAssays extends DataGridSpecBase {
             rightSide:DataGridColumnSpec[];
 
         leftSide = [
-            new DataGridColumnSpec(1, this.generateAssayNameCells)
-           ];
+            new DataGridColumnSpec(1, this.generateAssayNameCells),
+            new DataGridColumnSpec(2, this.generateLineNameCells)
+        ];
 
         metaDataCols = this.metaDataIDsUsedInAssays.map((id, index) => {
             var mdType = EDDData.MetaDataTypes[id];
-            return new DataGridColumnSpec(2 + index, this.makeMetaDataCellsGeneratorFunction(id));
+            return new DataGridColumnSpec(3 + index, this.makeMetaDataCellsGeneratorFunction(id));
         });
 
         rightSide = [
-            new DataGridColumnSpec(2 + metaDataCols.length, this.generateMeasurementNameCells),
-            new DataGridColumnSpec(3 + metaDataCols.length, this.generateUnitsCells),
-            new DataGridColumnSpec(4 + metaDataCols.length, this.generateCountCells),
-            new DataGridColumnSpec(5 + metaDataCols.length, this.generateMeasuringTimesCells),
-            new DataGridColumnSpec(6 + metaDataCols.length, this.generateExperimenterCells),
-            new DataGridColumnSpec(7 + metaDataCols.length, this.generateModificationDateCells)
+            new DataGridColumnSpec(3 + metaDataCols.length, this.generateMeasurementNameCells),
+            new DataGridColumnSpec(4 + metaDataCols.length, this.generateUnitsCells),
+            new DataGridColumnSpec(5 + metaDataCols.length, this.generateCountCells),
+            new DataGridColumnSpec(6 + metaDataCols.length, this.generateMeasuringTimesCells),
+            new DataGridColumnSpec(7 + metaDataCols.length, this.generateExperimenterCells),
+            new DataGridColumnSpec(8 + metaDataCols.length, this.generateModificationDateCells)
         ];
 
         return leftSide.concat(metaDataCols, rightSide);

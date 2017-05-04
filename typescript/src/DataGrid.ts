@@ -63,7 +63,7 @@ class DataGrid {
         this._timers = {};
         this._widgetRefreshCooldownTimer = null;
         this._widgetRefreshPending = false;
-        this._classes = 'dataTable sortable dragboxes hastablecontrols table-bordered';
+        this._classes = 'dataTable sortable dragboxes hastablecontrols table-striped table-bordered';
 
         var tableBody:JQuery = $(this._tableBody = document.createElement("tbody"));
 
@@ -524,12 +524,6 @@ class DataGrid {
 
         if (!this._groupingEnabled || rowGroupSpec.length < 1) {    // The standard non-grouped method:
 
-            if (this._spec.tableSpec.applyStriping) {
-                filteredSequence.forEach((s) => {
-                    striping = 1 - striping;
-                    this._recordElements[s].applyStriping(striping);
-                });
-            }
             filteredSequence.forEach((s) => {
                 var rows = this._recordElements[s].getElements();
                 rows.forEach((row) => {
@@ -538,9 +532,6 @@ class DataGrid {
             });
 
         } else {    // The more complicated, grouped method:
-
-            var stripeStyles = ['stripeRowA','stripeRowB'];
-            var stripeStylesJoin = stripeStyles.join(' ');
 
             filteredSequence.forEach((s) => {
                 var rowGroup = rowGroupSpec[this._spec.getRowGroupMembership(s)];
@@ -561,10 +552,6 @@ class DataGrid {
             rowGroupSpec.forEach((rowGroup) => {
                 striping = 1 - striping;
                 frag.appendChild(rowGroup.replicateGroupTable );
-                if (this._spec.tableSpec.applyStriping) {
-                    rowGroup.replicateGroupTitleRowJQ
-                        .removeClass(stripeStylesJoin).addClass(stripeStyles[striping]).end();
-                }
             });
             // TODO: This command doesn't make sense - the frag is not in the document yet
             $(frag).insertBefore($(this._tableBody));
@@ -1104,19 +1091,13 @@ class DataGridRecord {
     dataGridDataRows:DataGridDataRow[];
     rowElements:HTMLElement[];
     createdElements:boolean;
-    stripeStyles:string[];
-    stripeStylesJoin:string;
-    recentStripeIndex:any;
 
     constructor(gridSpec:DataGridSpecBase, id:string) {
         this.gridSpec = gridSpec;
         this.recordID = id;
         this.rowElements = [];
         this.dataGridDataRows = [];
-        this.stripeStyles = ['stripeRowA','stripeRowB'];
-        this.stripeStylesJoin = this.stripeStyles.join(' ');
         this.createdElements = false;
-        this.recentStripeIndex = null;
     }
 
 
@@ -1145,10 +1126,6 @@ class DataGridRecord {
         // The old cells are still referenced in their colSpec objects before this,
         // but calling generateCells again automatically replaces them.
         this.createElements();
-        // If recentStripeIndex is null, we haven't applied any striping to the previous row, so we skip it here.
-        if (!(this.recentStripeIndex === null)) {
-            this.applyStriping(this.recentStripeIndex);
-        }
         // Drop the new rows into place where the old rows lived.
         if (previousParent) {
             if (nextSibling) {
@@ -1248,16 +1225,6 @@ class DataGridRecord {
             this.createElements();
         }
         return this.rowElements;
-    }
-
-
-    applyStriping(stripeIndex:number) {
-        var rows = this.getDataGridDataRows();
-        this.recentStripeIndex = stripeIndex;
-        rows.forEach((row) => {
-            var rJQ = row.getElementJQ();
-            rJQ.removeClass(this.stripeStylesJoin).addClass(this.stripeStyles[stripeIndex]);
-        });
     }
 }
 
@@ -1404,6 +1371,7 @@ class DataGridDataCell {
             this.sideMenuItems.forEach((item) => {
                 //TODO: clean up
                 if (item.slice(0,1) != ('<')) {
+                    title += item
                 }
                 else if ($(item).attr('class') === "line-edit-link") {
                     $(item).addClass('editLine');
@@ -1801,42 +1769,14 @@ class DGSelectAllWidget extends DataGridHeaderWidget {
 
 
     clickHandler():void {
-        var sequence = this.dataGridOwnerObject.currentSequence();
-        // Have DataGrid apply function to everything in current sequence
-        this.dataGridOwnerObject.applyToRecordSet((rows) => {
-            // each row in sequence
-            rows.forEach((row) => {
-                if (row.dataGridDataCells) {
-                    // each cell in row
-                    row.dataGridDataCells.forEach((cell) => {
-                        var checkbox = cell.getCheckboxElement();
-                        if (checkbox) {
-                            $(cell.checkboxElement).prop('checked', !this.anySelected);
-                        }
-                    });
-                }
-            });
-        }, sequence);
+        $(this.dataGridSpec.tableElement).find('tbody input[type=checkbox]').prop('checked', !this.anySelected);
         this.anySelected = !this.anySelected;
         this.updateButtonLabel();
     }
 
 
     testIfAnySelected():boolean {
-        var sequence = this.dataGridOwnerObject.currentSequence();
-        // Cannot use applyToRecordSet here because we will very likely want to exit early
-        this.anySelected = !(this.dataGridOwnerObject.testRecordSet((rows) => {
-            return rows.every((row) => {
-                if (!row.dataGridDataCells) { return true; }
-                // each cell in row
-                return row.dataGridDataCells.every((cell) => {
-                    var checkbox = cell.getCheckboxElement();
-                    if (!checkbox) { return true; }    // On to the next one
-                    // If it's checked, exit early, with our question answered.
-                    return !(checkbox.checked);
-                });
-            });
-        }, sequence));
+        this.anySelected = $(this.dataGridSpec.tableElement).find('tbody input[type=checkbox]:checked').length > 0;
         return this.anySelected;
     }
 }
@@ -2100,15 +2040,13 @@ class DataGridTableSpec {
     id:string;              // A unique ID string for this table, to cat with other ID strings for generated table elements
     defaultSort:number;     // Index of header to sort by default
     showHeader:boolean;     // Whether to create a header area at the top of the table
-    applyStriping:boolean;  // Whether to apply horizontal striping styles to alternate rows
 
     constructor(id:string, opt?:{[index:string]:any}) {
         this.id = id;       // ID is required, initialize sensible defaults for everything else
-        opt = $.extend({ 'name': '', 'defaultSort': 0, 'showHeader': true, 'applyStriping': true }, opt);
+        opt = $.extend({ 'name': '', 'defaultSort': 0, 'showHeader': true}, opt);
         this.name = opt['name'];
         this.defaultSort = opt['defaultSort'];
         this.showHeader = opt['showHeader'];
-        this.applyStriping = opt['applyStriping'];
     }
 }
 
