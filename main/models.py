@@ -185,6 +185,7 @@ class Update(models.Model, EDDSerialize):
             update.save()
         else:
             logger.debug('Update.load_update(): request is NOT None')  # TODO: remove debug stmt
+            print(vars(request))
             update = cls.load_request_update(request)
         return update
 

@@ -4,13 +4,12 @@ Unit tests for EDD's REST API.
 from uuid import UUID
 
 from django.contrib.auth.models import AnonymousUser, Permission
-from django.test import TestCase
 import json
 from edd.rest.views import StrainViewSet
 
 from main.models import User, Strain, Study, Line, StudyPermission
 from rest_framework.test import (APIRequestFactory, force_authenticate, APIClient,
-                                 APITransactionTestCase)
+                                 APITransactionTestCase, APITestCase)
 from rest_framework.status import (HTTP_200_OK, HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN,
                                    HTTP_404_NOT_FOUND, )
 
@@ -48,15 +47,14 @@ STUDY_WRITER_GROUP_USER = 'study.writer.group.user'
 STUDY_WRITER_USERNAME = 'study.writer.user'
 PLAINTEXT_TEMP_USER_PASSWORD = 'password'
 
+STRAIN_RESOURCE_URL = '/rest/strains'
 
-class StrainResourceTests(APITransactionTestCase):
+
+class StrainResourceTests(APITestCase):
     #available_apps = ['main', 'django.contrib.auth']
-    STRAIN_RESOURCE_URL = '/rest/strain'
 
-    def setup(self):
-        self.create_fixture()
-
-    def create_fixture(self):  # TODO: resolve fixture creation / setUp() use w/
+    @classmethod
+    def setUpTestData(cls):  # TODO: resolve fixture creation / setUp() use w/
         """
         Creates strains, users, and study/line combinations to test the REST resource's application
         of user permissions. Note that this has to run *after* setUp() because it depends on the
@@ -69,60 +67,61 @@ class StrainResourceTests(APITransactionTestCase):
         delete_strain_permission = Permission.objects.get(codename=DELETE_STRAIN_CODENAME)
 
         # unprivileged
-        self.unprivileged_user = User.objects.create_user(username=UNPRIVILEGED_USERNAME,
+        cls.unprivileged_user = User.objects.create_user(username=UNPRIVILEGED_USERNAME,
                                                           email='unprivileged@localhost',
                                                           password=PLAINTEXT_TEMP_USER_PASSWORD)
         # admin w/ no extra privileges
-        self.superuser = User.objects.create_user(username=ADMIN_USERNAME,
+        cls.superuser = User.objects.create_user(username=ADMIN_USERNAME,
                                                   email='admin@localhost',
                                                   password=PLAINTEXT_TEMP_USER_PASSWORD)
-        self.superuser.is_superuser = True
-        self.superuser.user_permissions.add(change_strain_permission)
-        self.superuser.save()
+        cls.superuser.is_superuser = True
+        cls.superuser.user_permissions.add(change_strain_permission)
+        cls.superuser.save()
         # re - fetch from database to force permissions
         # refresh http://stackoverflow.com/questions/10102918/cant-change-user-permissions-during
         # -unittest-in-django
-        self.superuser = User.objects.get(username=ADMIN_USERNAME)
+        cls.superuser = User.objects.get(username=ADMIN_USERNAME)
 
         # as a stopgap, create the "system" user that isn't being applied via migrations...
         # TODO: do this more cleanly later
-        self.system_user = User.objects.create_user(username='system',
+        cls.system_user = User.objects.create_user(username='system',
                                                     email='jbei-edd-admin@lists.lbl.gov')
 
         # admin/staff user w/ no extra privileges
-        self.admin_staff_user = User.objects.create_user(username=ADMIN_STAFF_USERNAME,
+        cls.admin_staff_user = User.objects.create_user(username=ADMIN_STAFF_USERNAME,
                                                          email='admin@localhost',
                                                          password=PLAINTEXT_TEMP_USER_PASSWORD)
-        self.admin_staff_user.is_admin = True
-        self.admin_staff_user.is_staff = True
+        cls.admin_staff_user.is_admin = True
+        cls.admin_staff_user.is_staff = True
         # self.admin_staff_user.user_permissions.add(add_strain_permission)
         # self.admin_staff_user.user_permissions.add(change_strain_permission)
         # self.admin_staff_user.user_permissions.add(delete_strain_permission)
-        self.admin_staff_user.save()
-        self.admin_staff_user = User.objects.get(username=ADMIN_STAFF_USERNAME)  # refetch from
+        cls.admin_staff_user.save()
+        cls.admin_staff_user = User.objects.get(username=ADMIN_STAFF_USERNAME)  # refetch from
         # database to
         # force permissions
         # refresh http://stackoverflow.com/questions/10102918/cant-change-user-permissions-during
         # -unittest-in-django
 
         # staff w/ no extra privileges
-        self.staff_user = User(username=STAFF_USERNAME, email='staff@localhost')
-        self.staff_user.set_password(PLAINTEXT_TEMP_USER_PASSWORD)  # Note: setting password attr directly doesn't
+        cls.staff_user = User(username=STAFF_USERNAME, email='staff@localhost')
+        cls.staff_user.set_password(PLAINTEXT_TEMP_USER_PASSWORD)  # Note: setting password attr
+        # directly doesn't
         # work. See "login" subsection of
         # https://docs.djangoproject.com/en/1.9/topics/testing/tools/#making-requests
-        self.staff_user.is_staff = True
-        self.staff_user.save()
+        cls.staff_user.is_staff = True
+        cls.staff_user.save()
 
         # staff user with access to strain admin
-        self.staff_strain_user = User.objects.create_user(username=STAFF_STRAIN_USER,
+        cls.staff_strain_user = User.objects.create_user(username=STAFF_STRAIN_USER,
                                                           email='staff.study@localhost',
                                                           password=PLAINTEXT_TEMP_USER_PASSWORD)
-        self.staff_strain_user.is_staff = True
-        self.staff_strain_user.user_permissions.add(add_strain_permission)
-        self.staff_strain_user.user_permissions.add(change_strain_permission)
-        self.staff_strain_user.user_permissions.add(delete_strain_permission)
-        self.staff_strain_user.save()
-        self.staff_strain_user = User.objects.get(username=STAFF_STRAIN_USER)  # refetch from
+        cls.staff_strain_user.is_staff = True
+        cls.staff_strain_user.user_permissions.add(add_strain_permission)
+        cls.staff_strain_user.user_permissions.add(change_strain_permission)
+        cls.staff_strain_user.user_permissions.add(delete_strain_permission)
+        cls.staff_strain_user.save()
+        cls.staff_strain_user = User.objects.get(username=STAFF_STRAIN_USER)  # refetch from
         # database to
         # force permissions
         # refresh http://stackoverflow.com/questions/10102918/cant-change-user-permissions-during
@@ -130,93 +129,64 @@ class StrainResourceTests(APITransactionTestCase):
 
         # set up a study with lines/strains/permissions that allow us to test unprivileged user
         # access to ONLY the strains used in studies the user has read access to.
-        self.study_owner = User.objects.create_user(  # TODO: unused
+        cls.study_owner = User.objects.create_user(  # TODO: unused
                 username=STUDY_OWNER_USERNAME, email='study_owner@localhost',
                 password=PLAINTEXT_TEMP_USER_PASSWORD)
 
-        self.study_read_only_user = User.objects.create_user(
+        cls.study_read_only_user = User.objects.create_user(
             username=STUDY_READER_USERNAME, email='study_read_only@localhost',
             password=PLAINTEXT_TEMP_USER_PASSWORD)
 
-        self.study_read_only_group_user = User.objects.create_user(
+        cls.study_read_only_group_user = User.objects.create_user(
                 username=STUDY_READER_GROUP_USER, email='study.reader@localhost',
                 password=PLAINTEXT_TEMP_USER_PASSWORD)
 
-        self.study_write_only_group_user = User.objects.create_user(
+        cls.study_write_only_group_user = User.objects.create_user(
             username=STUDY_WRITER_GROUP_USER, email='study.writer@localhost',
             password=PLAINTEXT_TEMP_USER_PASSWORD
         )
 
-        self.study_write_only_user = User.objects.create_user(
+        cls.study_write_only_user = User.objects.create_user(
             username=STUDY_WRITER_USERNAME, email='study.writer@localhost',
             password=PLAINTEXT_TEMP_USER_PASSWORD
         )
 
-        self.study = Study(name='Test study')
-        self.study.save()
-        self.study.userpermission_set.all().update_or_create(
-                user=self.study_owner, study=self.study,
+        cls.study = Study(name='Test study')
+        cls.study.save()
+        cls.study.userpermission_set.all().update_or_create(
+                user=cls.study_owner, study=cls.study,
                 permission_type=StudyPermission.READ)
-        self.study.userpermission_set.update_or_create(user=self.study_owner,
-                                                       study=self.study,
+        cls.study.userpermission_set.update_or_create(user=cls.study_owner,
+                                                       study=cls.study,
                                                        permission_type=StudyPermission.WRITE)
-        self.study.save()
+        cls.study.save()
 
-        self.study_strain1 = Strain(name='Study strain 1')
-        self.study_strain1.save()
-        self.study_strain2 = Strain(name='Study strain 2')
-        self.study_strain2.save()
-        self.non_study_strain = Strain(name='Non-study strain')
-        self.non_study_strain.save()
+        cls.study_strain1 = Strain(name='Study strain 1')
+        cls.study_strain1.save()
+        cls.study_strain2 = Strain(name='Study strain 2')
+        cls.study_strain2.save()
+        cls.non_study_strain = Strain(name='Non-study strain')
+        cls.non_study_strain.save()
 
-        line1 = Line(name='Study strain1 line', study=self.study)
+        line1 = Line(name='Study strain1 line', study=cls.study)
         line1.save()
-        line1.strains.add(self.study_strain1)
+        line1.strains.add(cls.study_strain1)
         line1.save()
 
-        line2 = Line(name='Study strain2 line A', study=self.study)
+        line2 = Line(name='Study strain2 line A', study=cls.study)
         line2.save()
-        line2.strains.add(self.study_strain2)
+        line2.strains.add(cls.study_strain2)
         line2.save()
 
-        line3 = Line(name='Study strain2 line B', study=self.study)
+        line3 = Line(name='Study strain2 line B', study=cls.study)
         line3.save()
-        line3.strains.add(self.study_strain2)
+        line3.strains.add(cls.study_strain2)
         # TODO: mark lines 2/3 as replicates?
 
-        line5 = Line(name='Study non-strain line', study=self.study)
+        line5 = Line(name='Study non-strain line', study=cls.study)
         line5.save()
 
-    def test_strain_list_read_access(self):
-        """
-        Tests GET /rest/strain
-        """
-        print(SEPARATOR)
-        print('%s(): ' % self.test_strain_list_read_access.__name__)
-        print(SEPARATOR)
-
-        self.create_fixture()
-        list_url = '%s/' % self.STRAIN_RESOURCE_URL
-        print("Testing read access for %s" % list_url)
-        self._enforce_strain_read_access(list_url, True)
-
-    def test_strain_detail_read_access(self):
-        print(SEPARATOR)
-        print('%s(): ' % self.test_strain_detail_read_access.__name__)
-        print(SEPARATOR)
-        self.create_fixture()
-
-        # create a strain so we can test access to its detail view
-        strain = Strain.objects.create(name='Test strain', description='Description goes here')
-
-        # construct the URL for the strain detail view
-        strain_detail_url = '%(base_strain_url)s/%(pk)d/' % {
-            'base_strain_url':  self.STRAIN_RESOURCE_URL,
-            'pk': strain.pk, }
-
-        self._enforce_strain_read_access(strain_detail_url, False)
-
-    # TODO: expand actions tested (currently just detail/list)
+    # TODO: expand strain actions tested (currently just detail/list)
 
     def _enforce_strain_read_access(self, url, is_list):
         permissions_err_msg = 'Test permissions setup appears not to have worked'
@@ -291,8 +261,10 @@ class StrainResourceTests(APITransactionTestCase):
         expected_status = DRF_AUTHENTICATED_BUT_DENIED
         print('Location: %s' % response.get('Location'))
         self.assertEquals(expected_status, response.status_code,
-                          "Wrong response status code. Expected %d status but got %d" % (
-                                expected_status, response.status_code))
+                          "Wrong response status code. Expected %(expected)d status but got "
+                          "%(observed)d" % {
+                              'expected': expected_status,
+                              'observed': response.status_code})
         self.client.logout()
 
     def _require_authenticated_access_allowed(self, url, user):
@@ -307,12 +279,15 @@ class StrainResourceTests(APITransactionTestCase):
         response = self.client.get(url)
         required_result_status = HTTP_200_OK
         self.assertEquals(required_result_status, response.status_code,
-                          "Wrong response status code. Expected %d status but got %d" % (
-                              required_result_status, response.status_code))
+                          "Wrong response status code. Expected %(expected)d status but got "
+                          "%(observed)d" % {
+                              'expected': required_result_status,
+                              'observed': response.status_code})
         self.client.logout()
 
     def _require_authenticated_access_not_found(self, url, user):
-        logged_in = self.client.login(username=user.username, password=PLAINTEXT_TEMP_USER_PASSWORD)
+        logged_in = self.client.login(username=user.username,
+                                      password=PLAINTEXT_TEMP_USER_PASSWORD)
 
         self.assertTrue(logged_in, 'Client login failed. Unable to continue with the test.')
 
@@ -359,7 +334,8 @@ class StrainResourceTests(APITransactionTestCase):
                           "Wrong response status code. Expected %d status but got %d" % (
                               required_result_status, response.status_code))
 
-        print('Response content (empty paged result expected): %s' % str(response.content))  # TODO:
+        # TODO:
+        print('Response content (empty paged result expected): %s' % str(response.content))
         # remove debug stmt
         content_dict = json.loads(response.content)
         self.assertFalse(bool(content_dict['results']))
@@ -369,3 +345,30 @@ class StrainResourceTests(APITransactionTestCase):
 
     def test_paging(self):
         pass
+
+    def test_strain_list_read_access(self):
+        """
+        Tests GET /rest/strain
+        """
+        print(SEPARATOR)
+        print('%s(): ' % self.test_strain_list_read_access.__name__)
+        print(SEPARATOR)
+
+        list_url = '%s/' % STRAIN_RESOURCE_URL
+        print("Testing read access for %s" % list_url)
+        self._enforce_strain_read_access(list_url, True)
+
+    def test_strain_detail_read_access(self):
+        print(SEPARATOR)
+        print('%s(): ' % self.test_strain_detail_read_access.__name__)
+        print(SEPARATOR)
+
+        # create a strain so we can test access to its detail view
+        strain = Strain.objects.create(name='Test strain', description='Description goes here')
+
+        # construct the URL for the strain detail view
+        strain_detail_url = '%(base_strain_url)s/%(pk)d/' % {
+            'base_strain_url':  STRAIN_RESOURCE_URL,
+            'pk': strain.pk, }
+
+        self._enforce_strain_read_access(strain_detail_url, False)

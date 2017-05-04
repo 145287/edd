@@ -5,18 +5,18 @@ names used in EDD's the Django Model classes, explicitly capturing them here hel
 maintainability of the API across data member renames in Django's model classes
 """
 
-####################################################################################################
+###################################################################################################
 # String constants for REST resource names
-####################################################################################################
+###################################################################################################
 LINES_RESOURCE_NAME = r'lines'
 STUDIES_RESOURCE_NAME = r'studies'
 STRAINS_RESOURCE_NAME = r'strains'
 METADATA_TYPES_RESOURCE_NAME = r'metadata_types'
 METADATA_GROUPS_RESOURCE_NAME = r'metadata_groups'
 
-####################################################################################################
+###################################################################################################
 # General parameter names / values that apply to multiple REST resources. Consistency!! :-)
-####################################################################################################
+###################################################################################################
 
 LINE_ACTIVE_STATUS_PARAM = 'lines_active'
 QUERY_ALL_OBJECTS = 'all'
@@ -39,9 +39,9 @@ PAGE_SIZE_QUERY_PARAM = 'page_size'
 PAGE_NUMBER_QUERY_PARAM = 'page'
 RESULTS_OFFSET_QUERY_PARAM = 'offset'
 
-####################################################################################################
+###################################################################################################
 # Parameter names & values for /rest/metadata_types
-####################################################################################################
+###################################################################################################
 METADATA_TYPE_GROUP = 'group'
 METADATA_TYPE_CONTEXT = 'for_context'
 METADATA_TYPE_I18N = 'type_i18n'
@@ -56,9 +56,9 @@ METADATA_CONTEXT_ASSAY = 'A'
 
 METADATA_CONTEXT_VALUES = (METADATA_CONTEXT_LINE, METADATA_CONTEXT_STUDY, METADATA_CONTEXT_ASSAY)
 
-####################################################################################################
+###################################################################################################
 # Parameter names & values for /rest/strains
-####################################################################################################
+###################################################################################################
 STRAIN_REGISTRY_ID = 'registry_id'
 STRAIN_REGISTRY_URL_REGEX = 'registry_url_regex'
 STRAIN_NAME = 'name'
@@ -71,9 +71,9 @@ STRAIN_CASE_SENSITIVE = CASE_SENSITIVE_PARAM
 STUDY_LINE_NAME_REGEX = NAME_REGEX
 
 
-####################################################################################################
+###################################################################################################
 # Others TODO: (need organization)
-####################################################################################################
+###################################################################################################
 
 STRAIN_NAME_KEY = 'name'
 STRAIN_DESCRIPTION_KEY = 'description'

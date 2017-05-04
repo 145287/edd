@@ -39,7 +39,7 @@ from jbei.rest.clients.edd.constants import (CASE_SENSITIVE_PARAM, LINE_ACTIVE_S
                                              UPDATED_BEFORE_PARAM, UPDATED_AFTER_PARAM,
                                              STUDIES_RESOURCE_NAME)
 from jbei.rest.utils import is_numeric_pk
-from jbei.utils import PK_OR_TYPICAL_UUID_PATTERN, PK_OR_TYPICAL_UUID_REGEX
+from jbei.utils import PK_OR_TYPICAL_UUID_REGEX
 from rest_framework import (response, schemas, status, viewsets)
 from rest_framework.decorators import api_view, renderer_classes
 from main.models import (Line, MeasurementUnit, MetadataGroup, MetadataType, Protocol, Strain,

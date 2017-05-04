@@ -12,10 +12,9 @@ import rest_framework_nested.routers as nested_routers
 from views import schema_view
 
 
-
-####################################################################################################
+###################################################################################################
 # Define a router for base REST API methods & views
-####################################################################################################
+###################################################################################################
 base_rest_api_router = rest_routers.DefaultRouter()
 base_rest_api_router.register(LINES_RESOURCE_NAME, LineViewSet)
 base_rest_api_router.register(STUDIES_RESOURCE_NAME, StudyViewSet, STUDIES_RESOURCE_NAME)
@@ -25,9 +24,9 @@ base_rest_api_router.register(METADATA_TYPES_RESOURCE_NAME, MetadataTypeViewSet)
 base_rest_api_router.register(METADATA_GROUPS_RESOURCE_NAME, MetadataGroupViewSet)
 base_rest_api_router.register(r'protocols', ProtocolViewSet)
 
-####################################################################################################
+###################################################################################################
 # /rest/studies nested router
-####################################################################################################
+###################################################################################################
 study_nested_resources_router = nested_routers.NestedSimpleRouter(base_rest_api_router,
                                                                   STUDIES_RESOURCE_NAME,
                                                                   lookup='studies')
@@ -36,18 +35,18 @@ study_nested_resources_router.register(LINES_RESOURCE_NAME, StudyLineView,
 study_nested_resources_router.register(STRAINS_RESOURCE_NAME, StudyStrainsView,
                                        base_name='study-strains')
 
-####################################################################################################
+###################################################################################################
 # /rest/strains nested router
-####################################################################################################
+###################################################################################################
 strain_nested_resources_router = (
     nested_routers.NestedSimpleRouter(base_rest_api_router, STRAIN_NESTED_RESOURCE_PARENT_PREFIX,
                                       lookup='strains'))
 strain_nested_resources_router.register(STUDIES_RESOURCE_NAME, StrainStudiesView,
                                         base_name='strain-studies')
 
-####################################################################################################
+###################################################################################################
 # Use routers & supporting frameworks to construct URL patterns
-####################################################################################################
+###################################################################################################
 urlpatterns = [
     # url(r'docs/$', include('rest_framework_swagger.urls')),
     url(r'', include(base_rest_api_router.urls)),
