@@ -116,7 +116,7 @@ class ModelImplicitViewOrResultImpliedPermissions(BasePermission):
     A custom permissions class similar DjangoModelPermissions that allows permissions to a REST
     resource based on the following:
      1) Unauthenticated users are always denied access
-     2) A user who has class-level add/change/delete permissions explicitly granted
+     2) A user who has class-level add/change/delete permissions explicitly granted via
      django.contrib.auth permissions may exercise those capabilities
      2) A user who has any add/change/delete class-level permission explicitly granted also has
      implied class-level view access (though view isn't explicitly defined as an auth permission)
@@ -240,7 +240,7 @@ class ModelImplicitViewOrResultImpliedPermissions(BasePermission):
                          })
             return False
 
-        # note: we'll just return an empty resultset, but still tell the user they have access to
+        # note: we'll just return an empty ResultSet, but still tell the user they have access to
         # the resource since it would be confusing for the return code to change based solely on
         # the addition of an item
         requested_permission = self.method_to_inferred_perm_map[http_method]
