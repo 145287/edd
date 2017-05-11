@@ -182,8 +182,7 @@ def parse_csv(path, line_metadata_types):
                                  ' row.' % {
                                      'line_name': LINE_NAME_COL_LABEL,
                                      'part_number': PART_ID_COL_LABEL,
-                                     'row': row_number
-                    })
+                                     'row': row_number})
                     part_number_col = None
                     line_name_col = None
                     line_desc_col = None
@@ -1088,8 +1087,7 @@ def prevent_duplicate_line_names(edd, study_number, csv_summary, input_timer):
           'the same CSV file. It will be difficult or impossible to distinguish between lines '
           'with duplicate names in EDD.' % {
                 'existing_dupes': total_study_line_duplication_counts,
-                'csv_dupes': total_csv_duplication_count,
-    })
+                'csv_dupes': total_csv_duplication_count, })
 
     while True:
 
@@ -1110,10 +1108,10 @@ def prevent_duplicate_line_names(edd, study_number, csv_summary, input_timer):
 
             space = 3
             name_col_width = max(max_line_name_width, len(line_name_lbl)) + space
-            existing_col_width = max(len(str(max_existing_duplication_count)), len(existing_lbl)) \
-                                 + space
-            csv_col_width = max(len(str(max_csv_line_duplication_count)), len(other_csv_lbl)) + \
-                            space
+            existing_col_width = (max(len(str(max_existing_duplication_count)),
+                                      len(existing_lbl)) + space)
+            csv_col_width = (max(len(str(max_csv_line_duplication_count)), len(other_csv_lbl)) +
+                             space)
 
             print('')
             print(''.join(((line_name_lbl.ljust(name_col_width)), existing_lbl.ljust(
@@ -1287,8 +1285,8 @@ def main():
             requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
         # compile the input pattern to catch problems early
-        sample_label_pattern = (re.compile(args.sample_label_pattern) if args.sample_label_pattern
-                                                            else None)
+        sample_label_pattern = (re.compile(args.sample_label_pattern)
+                                if args.sample_label_pattern else None)
 
         ###########################################################################################
         # Prompt user to verify we've targeted the correct EDD / ICE instances.
@@ -1303,7 +1301,6 @@ def main():
         if not (('Y' == result) or ('YES' == result)):
             print('Line creation aborted. Please fix inputs and re-run this script.')
             return 0
-
 
         ###########################################################################################
         # Gather user credentials and verify by logging into EDD, then
@@ -1342,12 +1339,15 @@ def main():
         # log into ICE
         ############################
         # ( as early as possible to prevent asking for other user input prior to login failure)
-        ice_login_details = session_login(IceSessionAuth, ICE_URL, 'ICE',
-                                      username_arg=edd_login_details.username,
-                                      password_arg=edd_login_details.password,
-                                      user_input=input_timer, print_result=True,
-                                      verify_ssl_cert=VERIFY_ICE_CERT,
-                                      timeout=ICE_REQUEST_TIMEOUT)
+        ice_login_details = session_login(
+                IceSessionAuth,
+                ICE_URL,
+                'ICE',
+                username_arg=edd_login_details.username,
+                password_arg=edd_login_details.password,
+                user_input=input_timer, print_result=True,
+                verify_ssl_cert=VERIFY_ICE_CERT,
+                timeout=ICE_REQUEST_TIMEOUT)
 
         ice_session_auth = ice_login_details.session_auth
 
@@ -1503,7 +1503,7 @@ def main():
                   "prevent an error later in the process (typically in ~20-30 mins from "
                   "now). ")
             result = input_timer.user_input("Have you set/verified write permissions on "
-                                           "study %d? (Y/n): " % study_number).upper()
+                                            "study %d? (Y/n): " % study_number).upper()
             if ('Y' != result) and ('YES' != result):
                 print('Aborting line creation. Please set study permissions and re-run '
                       'this script.')
@@ -1545,7 +1545,7 @@ def main():
                                             "have many associated lines (Y/n): " % {
                                                 'found': len(ice_entries_dict),
                                                 'total': len(csv_unique_part_numbers)
-                                           }).upper()
+                                            }).upper()
             if ('Y' != result) and ('YES' != result):
                 print('Aborting line creation.')
                 return 0
@@ -1602,8 +1602,6 @@ def main():
                             sample_location.plate
                         line_creation_input.metadata[well_location_pk] = \
                             sample_location.well
-
-
             else:
                 print("Skipping search for archival well locations since "
                       "required metadata types weren't found earlier in the process.")
