@@ -115,18 +115,19 @@ class ModelImplicitViewOrResultImpliedPermissions(BasePermission):
     """
     A custom permissions class similar DjangoModelPermissions that allows permissions to a REST
     resource based on the following:
-     1) Unauthenticated users are always denied access
-     2) A user who has class-level add/change/delete permissions explicitly granted via
-     django.contrib.auth permissions may exercise those capabilities
-     2) A user who has any add/change/delete class-level permission explicitly granted also has
-     implied class-level view access (though view isn't explicitly defined as an auth permission)
-     3) If the inferred_permissions property is defined / non-empty, the existence of one or more
-     results  in the queryset implies that the user has a level of inferred permission only on
-     the objects returned by queryset. This inference should align with DRF's pattern of queryset
-     filtering based on only the objects a user has access to. In most cases, this feature will
-     probably only be used to infer view access to queryset results while avoiding a separate DB
-     query in this class to check user permissions that are already checked as part of queryset
-     result filtering.
+         1) Unauthenticated users are always denied access
+         2) A user who has class-level add/change/delete permissions explicitly granted via
+            django.contrib.auth permissions may exercise those capabilities
+         2) A user who has any add/change/delete class-level permission explicitly granted also 
+            has implied class-level view access (though view isn't explicitly defined as an auth 
+            permission)
+         3) If the inferred_permissions property is defined / non-empty, the existence of one or 
+         more results  in the queryset implies that the user has a level of inferred permission 
+         only on the objects returned by queryset. This inference should align with DRF's 
+         pattern of queryset filtering based on only the objects a user has access to. In most 
+         cases, this feature will probably only be used to infer view access to queryset results 
+         while avoiding a separate DB query in this class to check user permissions that are 
+         already checked as part of queryset result filtering.
     """
 
     # django.contrib.auth permissions explicitly respected or used as the basis for interring view
@@ -167,7 +168,8 @@ class ModelImplicitViewOrResultImpliedPermissions(BasePermission):
     # optional implied add/change/view permissions on the specific objects returned by the queryset
     queryset_inferred_permissions = [QS_INFERRED_VIEW_PERMISSION]
 
-    def get_enabling_permissions(self, http_method, orm_model_cls):
+    @classmethod
+    def get_enabling_permissions(cls, http_method, orm_model_cls):
         """
         Given a model class and an HTTP method, return the list of permission
         codes that enable the user to access this resource (having any of them will permit access)
@@ -176,7 +178,7 @@ class ModelImplicitViewOrResultImpliedPermissions(BasePermission):
             'app_label': orm_model_cls._meta.app_label,
             'model_name': orm_model_cls._meta.model_name
         }
-        return [perm % kwargs for perm in self.django_auth_perms_map[http_method]]
+        return [perm % kwargs for perm in cls.django_auth_perms_map[http_method]]
 
     def has_permission(self, request, view):  # TODO: adjust logging level after testing complete
         # Workaround to ensure DjangoModelPermissions are not applied
@@ -522,6 +524,11 @@ class StrainViewSet(viewsets.ModelViewSet):
     Defines the set of REST API views available for the base /rest/strain/ resource. Nested views
     are defined elsewhere (e.g. StrainStudiesView).
     """
+    # TODO: as a future improvement, limit strain creation input to only ICE part identifier (part
+    # ID, local pk, or UUID), except by apps with additional privileges (e.g. those granted to ICE
+    # itself to update strain data for ICE-72).  For now, we can just limit strain creation
+    # privileges to control consistency of newly-created strains (which should be created via
+    # the UI in most cases anyway).
 
     permission_classes = [ModelImplicitViewOrResultImpliedPermissions]
 
@@ -613,21 +620,41 @@ class StrainViewSet(viewsets.ModelViewSet):
             query = _optional_regex_filter(query_params, query, 'name', STRAIN_NAME_REGEX, None)
             query = _optional_timestamp_filter(query, query_params)
 
-        query = query.select_related('object_ref')  # TODO: remove -- unneccessary
-
         # filter results to ONLY the strains accessible by this user. Note that this may
         # prevent some users from accessing strains, depending on how EDD's permissions are set up,
         # but the present alternative is to create a potential leak of experimental strain names /
         # descriptions to potentially competing researchers that use the same EDD instance
-        print('User: %s' % str(user))  # TODO: remove debug stmt
-        requested_permission = get_requested_study_permission(self.request.method)
+        logger.debug('User: %s' % str(user))  # TODO: remove debug stmt
 
-        # if additions to the DB query are needed to filter results for users with permission to
-        # view them
-        if not ((requested_permission == StudyPermission.NONE) or
-                (requested_permission == StudyPermission.READ and Study.user_role_can_read(user))):
+        # test whether explicit "manager" permissions allow user to see strains without
+        # having to drill down into study/line/strain relationships that would grant access
+        # to view these strains
+        requested_permission = get_requested_study_permission(self.request.method)
+        enabling_manage_permissions = (
+            ModelImplicitViewOrResultImpliedPermissions.get_enabling_permissions(
+                    self.request.method, Strain))
+
+        has_explicit_manage_permission = False
+        for manage_permission in enabling_manage_permissions:
+            if user.has_perm(manage_permission):
+                has_explicit_manage_permission = True
+                logger.debug('User %(user)s has explicit permission to %(requested_perm)s '
+                             'all Strain objects, implied via the "%(granting_perm)s" '
+                             'permission' % {
+                                'user': user.username,
+                                'requested_perm': requested_permission,
+                                'granting_perm': manage_permission, })
+                break
+        has_role_based_permission = (requested_permission == StudyPermission.READ and
+                                        Study.user_role_can_read(user))
+
+        # if user role (e.g. admin) or manage permissions don't grant access to all strains, filter
+        # strain results by just the studies the user has access to
+        if not ((requested_permission == StudyPermission.NONE) or has_role_based_permission or
+                 has_explicit_manage_permission):
             user_permission_q = Study.user_permission_q(user, requested_permission,
                                                         keyword_prefix='line__study__')
+
             query = query.filter(user_permission_q).distinct()
 
         result_count = len(query)  # Note: more efficient for logging than qs.count()
