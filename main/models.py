@@ -883,7 +883,7 @@ class EDDObject(EDDMetadata, EDDSerialize):
         return json.dumps(json_dict, ensure_ascii=False).encode("utf8")
 
     def user_can_read(self, user):
-        return Trueh
+        return True
 
     def user_can_write(self, user):
         return user and user.is_superuser
@@ -981,7 +981,7 @@ class Study(EDDObject):
     @staticmethod
     def user_permission_q(user, permission, keyword_prefix=''):
         """
-        Constructs a django Q object for testing whether the specified user has the required
+        Constructs a django Q object for testing whether a user has the required
         permission for a study as part of a Study-related Django model query. It's important to
         note that the provided Q object will return one row for each user/group permission that
         gives the user access to the study, so clients that aren't already filtering by primary
@@ -1168,6 +1168,8 @@ class StudyPermission(models.Model):
         (READ, _('Read')),
         (WRITE, _('Write')),
     )
+    CAN_VIEW = [READ, WRITE]
+    CAN_EDIT = [WRITE]
     study = models.ForeignKey(
         Study,
         help_text=_('Study this permission applies to.'),

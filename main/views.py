@@ -55,8 +55,7 @@ from .utilities import (JSONDecimalEncoder, get_edddata_carbon_sources, get_eddd
 
 
 logger = logging.getLogger(__name__)
-CAN_VIEW = [StudyPermission.READ, StudyPermission.WRITE]
-CAN_EDIT = [StudyPermission.WRITE]
+
 FILE_TYPE_HEADER = 'HTTP_X_EDD_FILE_TYPE'
 
 
@@ -82,7 +81,7 @@ def formula(molecular_formula):
         )
 
 
-def load_study(request, pk=None, slug=None, permission_type=CAN_VIEW):
+def load_study(request, pk=None, slug=None, permission_type=StudyPermission.CAN_VIEW):
     """
     Loads a study as a request user; throws a 404 if the study does not exist OR if no valid
     permissions are set for the user on the study.
@@ -152,7 +151,8 @@ class StudyObjectMixin(generic.detail.SingleObjectMixin):
         qs = super(StudyObjectMixin, self).get_queryset()
         if self.request.user.is_superuser:
             return qs
-        return qs.filter(Study.user_permission_q(self.request.user, CAN_VIEW)).distinct()
+        return qs.filter(Study.user_permission_q(self.request.user,
+                                                 StudyPermission.CAN_VIEW)).distinct()
 
 
 class StudyIndexView(generic.edit.CreateView):
@@ -1360,7 +1360,7 @@ def study_describe_experiment(request, pk=None, slug=None):
     """
 
     # load the study first to detect any permission errors / fail early
-    study = load_study(request, pk=pk, slug=slug, permission_type=CAN_EDIT)
+    study = load_study(request, pk=pk, slug=slug, permission_type=StudyPermission.CAN_EDIT)
 
     if request.method != "POST":
         raise MethodNotAllowed(request.method)
@@ -1470,7 +1470,7 @@ def study_import_rnaseq(request, pk=None, slug=None):
     """ View for importing multiple sets of RNA-seq measurements in various simple tabular formats
         defined by us.  Handles both GET and POST. """
     messages = {}
-    model = load_study(request, pk=pk, slug=slug, permission_type=CAN_EDIT)
+    model = load_study(request, pk=pk, slug=slug, permission_type=StudyPermission.CAN_EDIT)
     lines = model.line_set.all()
     if request.method == "POST":
         try:
@@ -1496,7 +1496,7 @@ def study_import_rnaseq_edgepro(request, pk=None, slug=None):
     """ View for importing a single set of RNA-seq measurements from the EDGE-pro pipeline,
         attached to an existing Assay.  Handles both GET and POST. """
     messages = {}
-    study = load_study(request, pk=pk, slug=slug, permission_type=CAN_EDIT)
+    study = load_study(request, pk=pk, slug=slug, permission_type=StudyPermission.CAN_EDIT)
     assay_id = None
     if request.method == "GET":
         assay_id = request.POST.get("assay", None)
@@ -1543,7 +1543,7 @@ def study_import_rnaseq_parse(request, pk=None, slug=None):
     """ Parse raw data from an uploaded text file, and return JSON object of processed result.
         Result is identical to study_import_rnaseq_process, but this method is invoked by
         drag-and-drop of a file (via filedrop.js). """
-    study = load_study(request, pk=pk, slug=slug, permission_type=CAN_EDIT)
+    study = load_study(request, pk=pk, slug=slug, permission_type=StudyPermission.CAN_EDIT)
     referrer = request.META['HTTP_REFERER']
     result = None
     # XXX slightly gross: using HTTP_REFERER to dictate choice of parsing
@@ -1565,7 +1565,7 @@ def study_import_rnaseq_parse(request, pk=None, slug=None):
 def study_import_rnaseq_process(request, pk=None, slug=None):
     """ Process form submission containing either a file or text field, and return JSON object of
         processed result. """
-    study = load_study(request, pk=pk, slug=slug, permission_type=CAN_EDIT)
+    study = load_study(request, pk=pk, slug=slug, permission_type=StudyPermission.CAN_EDIT)
     assert(request.method == "POST")
     try:
         data = request.POST.get("data", "").strip()

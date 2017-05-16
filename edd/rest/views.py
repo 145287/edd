@@ -630,32 +630,46 @@ class StrainViewSet(viewsets.ModelViewSet):
         # having to drill down into study/line/strain relationships that would grant access
         # to view these strains
         requested_permission = get_requested_study_permission(self.request.method)
-        enabling_manage_permissions = (
-            ModelImplicitViewOrResultImpliedPermissions.get_enabling_permissions(
-                    self.request.method, Strain))
 
-        has_explicit_manage_permission = False
-        for manage_permission in enabling_manage_permissions:
-            if user.has_perm(manage_permission):
-                has_explicit_manage_permission = True
-                logger.debug('User %(user)s has explicit permission to %(requested_perm)s '
-                             'all Strain objects, implied via the "%(granting_perm)s" '
-                             'permission' % {
-                                'user': user.username,
-                                'requested_perm': requested_permission,
-                                'granting_perm': manage_permission, })
-                break
         has_role_based_permission = (requested_permission == StudyPermission.READ and
                                         Study.user_role_can_read(user))
 
-        # if user role (e.g. admin) or manage permissions don't grant access to all strains, filter
-        # strain results by just the studies the user has access to
-        if not ((requested_permission == StudyPermission.NONE) or has_role_based_permission or
-                 has_explicit_manage_permission):
-            user_permission_q = Study.user_permission_q(user, requested_permission,
-                                                        keyword_prefix='line__study__')
+        # if user role (e.g. admin) doesn't grant access to all strains, do additional queries
+        # to determine which (if any) strains to expose
+        if not has_role_based_permission:
 
-            query = query.filter(user_permission_q).distinct()
+            # test whether user has explicit manager permissions that enable access to all
+            # strains
+            has_explicit_manage_permission = False
+            enabling_manage_permissions = (
+                ModelImplicitViewOrResultImpliedPermissions.get_enabling_permissions(
+                        self.request.method, Strain))
+            for manage_permission in enabling_manage_permissions:
+                if user.has_perm(manage_permission):
+                    has_explicit_manage_permission = True
+                    logger.debug('User %(user)s has explicit permission to %(requested_perm)s '
+                                 'all Strain objects, implied via the "%(granting_perm)s" '
+                                 'permission' % {
+                                     'user':           user.username,
+                                     'requested_perm': requested_permission,
+                                     'granting_perm':  manage_permission,
+                                 })
+                    break
+
+            # if user has no global permissions that grant access to all strains, filter
+            # results to only the strains already exposed in studies the user has read/write
+            # access to. This is significantly more expensive, but exposes the data available
+            # via the UI.
+            if not has_explicit_manage_permission:
+                # if user is only requesting read access to the strain, construct a query that
+                # will infer read permission from the existing of either read or write
+                # permission
+                if requested_permission == StudyPermission.READ:
+                    requested_permission = StudyPermission.CAN_VIEW
+                user_permission_q = Study.user_permission_q(user,
+                                                            requested_permission,
+                                                            keyword_prefix='line__study__')
+                query = query.filter(user_permission_q).distinct()
 
         result_count = len(query)  # Note: more efficient for logging than qs.count()
         logger.debug('StrainViewSet query count=%d' % len(query))

@@ -3,8 +3,10 @@ Unit tests for EDD's REST API.
 """
 import json
 import logging
+from pprint import pformat
 from uuid import UUID
 
+import collections
 from django.contrib.auth.models import AnonymousUser, Permission, Group
 from rest_framework.status import (HTTP_200_OK, HTTP_201_CREATED, HTTP_400_BAD_REQUEST,
                                    HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN, HTTP_404_NOT_FOUND)
@@ -14,7 +16,8 @@ from edd.rest.views import StrainViewSet
 from jbei.rest.clients.edd.constants import (STRAINS_RESOURCE_NAME, STRAIN_DESCRIPTION_KEY,
                                              STRAIN_NAME_KEY, STRAIN_REG_ID_KEY,
                                              STRAIN_REG_URL_KEY)
-from main.models import Line, Strain, Study, StudyPermission, User
+from main.models import (Line, Strain, Study, StudyPermission, User, GroupPermission,
+                         UserPermission, EveryonePermission)
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +56,9 @@ DRF_UPDATE_ACTION = 'update'
 DRF_CREATE_ACTION = 'create'
 DRF_LIST_ACTION = 'list'
 DRF_RETRIEVE_ACTION = 'retrieve'
+
+_WRONG_STATUS_MSG = ('Wrong response status code from %(method)s %(url)s for user %(user)s. '
+                     'Expected %(expected)d status but got %(observed)d')
 
 
 class StrainResourceTests(APITestCase):
@@ -97,11 +103,6 @@ class StrainResourceTests(APITestCase):
                                          email='admin@localhost',
                                          is_superuser=True)
 
-        # TODO: remove if unneeded
-        # as a stopgap, create the "system" user that isn't being applied via migrations...
-        # cls.system_user = User.objects.create_user(username='system',
-        #                                            email='jbei-edd-admin@lists.lbl.gov')
-
         # plain staff w/ no extra privileges
         cls.staff_user = cls._create_user(username=STAFF_USERNAME, email='staff@localhost',
                                           is_staff=True)
@@ -144,51 +145,51 @@ class StrainResourceTests(APITestCase):
             email='study.writer@localhost',
             password=PLAINTEXT_TEMP_USER_PASSWORD)
 
-        cls.study_read_only_group_user = User.objects.create_user(
+        cls.study_read_group_user = User.objects.create_user(
             username=STUDY_READER_GROUP_USER,
-            email='study.reader@localhost',
+            email='study.group_reader@localhost',
             password=PLAINTEXT_TEMP_USER_PASSWORD)
 
-        cls.study_write_only_group_user = User.objects.create_user(
+        cls.study_write_group_user = User.objects.create_user(
             username=STUDY_WRITER_GROUP_USER,
-            email='study.writer@localhost',
+            email='study.group_writer@localhost',
             password=PLAINTEXT_TEMP_USER_PASSWORD
         )
 
         # create groups for testing group-level user permissions
-        study_read_only_group = Group.objects.create(name='study_read_only_group')
-        study_read_only_group.user_set.add(cls.study_read_only_group_user)
-        study_read_only_group.save()
+        study_read_group = Group.objects.create(name='study_read_only_group')
+        study_read_group.user_set.add(cls.study_read_group_user)
+        study_read_group.save()
 
-        study_write_only_group = Group.objects.create(name='study_write_only_group')
-        study_write_only_group.user_set.add(cls.study_write_only_group_user)
-        study_write_only_group.save()
+        study_write_group = Group.objects.create(name='study_write_only_group')
+        study_write_group.user_set.add(cls.study_write_group_user)
+        study_write_group.save()
 
         # create the study
-        cls.study = Study(name='Test study')
-        cls.study.save()
-        cls.study.userpermission_set.update_or_create(
-                user=cls.study_owner,
-                study=cls.study,
-                permission_type=StudyPermission.READ)
+        cls.study = Study.objects.create(name='Test study')
+
+        UserPermission.objects.create(study=cls.study,
+                                      user=cls.study_owner,
+                                      permission_type=StudyPermission.READ)
 
         # set permissions on the study
-        cls.study.userpermission_set.update_or_create(user=cls.study_read_only_user,
-                                                      study=cls.study,
-                                                      permission_type=StudyPermission.READ)
+        UserPermission.objects.create(study=cls.study,
+                                      user=cls.study_read_only_user,
+                                      permission_type=StudyPermission.READ)
 
-        cls.study.userpermission_set.update_or_create(user=cls.study_write_only_user,
-                                                      study=cls.study,
-                                                      permission_type=StudyPermission.WRITE)
+        UserPermission.objects.create(study=cls.study,
+                                      user=cls.study_write_only_user,
+                                      permission_type=StudyPermission.WRITE)
 
-        # cls.study.userpermission_set.update_or_create(group=study_read_only_group,
-        #                                               study=cls.study,
-        #                                               permission_type=StudyPermission.READ)
-        #
-        # cls.study.userpermission_set.update_or_create(group=study_write_only_group,
-        #                                               study=cls.study,
-        #                                               permission_type=StudyPermission.WRITE)
-        cls.study.save()
+        GroupPermission.objects.create(study=cls.study,
+                                       group=study_read_group,
+                                       permission_type=StudyPermission.READ)
+
+        GroupPermission.objects.create(study=cls.study,
+                                       group=study_write_group,
+                                       permission_type=StudyPermission.WRITE)
+
+        # TODO: re-query the study to refresh permissions?
 
         # create some strains / lines in the study
         cls.study_strain1 = Strain(name='Study Strain 1',
@@ -218,7 +219,7 @@ class StrainResourceTests(APITestCase):
         line5.save()
 
     @classmethod
-    def _create_user(self, username, email='staff.study@localhost', is_admin=False,
+    def _create_user(cls, username, email='staff.study@localhost', is_admin=False,
                      is_superuser=False,
                      is_staff=True, manage_perms=()):
         """
@@ -266,9 +267,7 @@ class StrainResourceTests(APITestCase):
         factory = APIRequestFactory()
 
         # verify that an un-authenticated request gets a 404
-        request = factory.get(url, user=AnonymousUser())
-        response = StrainViewSet.as_view({'get': drf_action})(request)
-        self.assertTrue(response.status_code in DRF_UNAUTHENTICATED_PERMISSION_DENIED_CODES)
+        self._require_unauthenticated_get_access_denied(url, drf_action)
 
         # verify that various authenticated, but unprivileged users
         # are denied access to strains without class level permission or access to a study that
@@ -300,6 +299,11 @@ class StrainResourceTests(APITestCase):
         self._require_authenticated_get_access_allowed(url, self.staff_strain_deleter)
         self._require_authenticated_get_access_allowed(url, self.staff_strain_user)
 
+        # test that user group members with any access to the study have implied read permission
+        # on the strains used in it
+        self._require_authenticated_get_access_allowed(url, self.study_read_group_user)
+        self._require_authenticated_get_access_allowed(url, self.study_write_group_user)
+
         if strain_in_study:
             # if the strain is in our test study,
             # test that an otherwise unprivileged user with read access to the study can also use
@@ -309,6 +313,7 @@ class StrainResourceTests(APITestCase):
             # if the strain isn't in our test study, test that the study owner, who has no
             # additional privileges, can't access it
             self._require_authenticated_get_access_denied(url, self.study_owner)
+
 
     def test_strain_uuid_pattern_match(self):
         # TODO: test pattern matching for UUID's. had to make code changes during initial testing
@@ -401,6 +406,14 @@ class StrainResourceTests(APITestCase):
                                                       self.unprivileged_user,
                                                       put_data)
 
+        # verify that group-level read/write permission on a related study doesn't grant any access
+        # to update the contained strains
+        self._require_authenticated_put_access_denied(url, self.study_read_group_user,
+                                                      put_data)
+        self._require_authenticated_put_access_denied(url,
+                                                      self.study_write_group_user,
+                                                      put_data)
+
         # verify that staff permission alone isn't enough to update a strain
         self._require_authenticated_put_access_denied(url, self.staff_user, put_data)
 
@@ -420,6 +433,12 @@ class StrainResourceTests(APITestCase):
         factory = APIRequestFactory()
         request = factory.post(url, put_data, format='json', user=AnonymousUser())
         response = StrainViewSet.as_view({'put': DRF_UPDATE_ACTION})(request)
+        self.assertTrue(response.status_code in DRF_UNAUTHENTICATED_PERMISSION_DENIED_CODES)
+
+    def _require_unauthenticated_get_access_denied(self, url, drf_action):
+        factory = APIRequestFactory()
+        request = factory.get(url, user=AnonymousUser())
+        response = StrainViewSet.as_view({'get': drf_action})(request)
         self.assertTrue(response.status_code in DRF_UNAUTHENTICATED_PERMISSION_DENIED_CODES)
 
     def _require_unauthenticated_post_access_denied(self, url, post_data):
@@ -453,11 +472,9 @@ class StrainResourceTests(APITestCase):
         response = self.client.post(url, post_data, format='json')
         self.client.logout()
 
-        # TODO: remove debug stmt
-        logger.debug('RESPONSE: ' + str(response))
         self.assertEquals(required_status, response.status_code,
-                          'Wrong response status code from POST %(url)s for user %(user)s. '
-                          'Expected %(expected)d status but got %(observed)d' % {
+                          _WRONG_STATUS_MSG % {
+                              'method': 'POST',
                               'url':      url, 'user': user.username,
                               'expected': required_status,
                               'observed': response.status_code
@@ -473,12 +490,11 @@ class StrainResourceTests(APITestCase):
         response = self.client.put(url, put_data, format='json')
         self.client.logout()
 
-        # TODO: remove debug stmt
-        logger.debug('RESPONSE: ' + str(response))
         self.assertEquals(required_status, response.status_code,
-                          'Wrong response status code from PUT %(url)s for user %(user)s. '
-                          'Expected %(expected)d status but got %(observed)d' % {
-                              'url':      url, 'user': user.username,
+                          _WRONG_STATUS_MSG % {
+                              'method': 'PUT',
+                              'url':      url,
+                              'user': user.username,
                               'expected': required_status,
                               'observed': response.status_code
                           })
@@ -496,32 +512,51 @@ class StrainResourceTests(APITestCase):
         # TODO: DRF_AUTHENTICATED_BUT_FORBIDDEN would be consistent with DRF results, but 404 will
         # do in a pinch
         expected_status = HTTP_404_NOT_FOUND
-        logger.debug('Location: %s' % response.get('Location'))
 
-        self.assertEquals(expected_status, response.status_code,
-                          'Wrong response status code from %(url)s for user %(user)s. Expected '
-                          '%(expected)d status but got %(observed)d' % {
+        self.assertEquals(expected_status,
+                          response.status_code,
+                          _WRONG_STATUS_MSG % {
+                              'method': 'GET',
                               'url': url,
                               'user': user.username,
                               'expected': expected_status,
                               'observed': response.status_code})
         self.client.logout()
 
-    def _require_authenticated_get_access_allowed(self, url, user):
+    def _require_authenticated_get_access_allowed(self, url, user, expected_strains=None):
+        self._do_get(url, user, HTTP_200_OK, expected_strains)
+
+    def _do_get(self, url, user, expected_status, expected_strains=None):
         logged_in = self.client.login(username=user.username,
                                       password=PLAINTEXT_TEMP_USER_PASSWORD)
         self.assertTrue(logged_in, 'Client login failed. Unable to continue with the test.')
 
         response = self.client.get(url)
-        required_result_status = HTTP_200_OK
-        self.assertEquals(required_result_status, response.status_code,
-                          'Wrong response status code from %(url)s for user %(user)s. Expected '
-                          '%(expected)d status but got %(observed)d' % {
-                              'url': url,
-                              'user': user.username,
-                              'expected': required_result_status,
-                              'observed': response.status_code})
+        self.assertEquals(expected_status, response.status_code, _WRONG_STATUS_MSG % {
+            'method':   'GET',
+            'url': url,
+            'user': user.username,
+            'expected': expected_status,
+            'observed': response.status_code
+        })
+
+        if expected_strains is not None:
+            expected = self.json_comparable(expected_strains, strain_to_dict)
+            observed = json.loads(response.content)
+            self.assertEqual(expected, observed, ("Response content didn't match required value("
+                                                  "s).\n\n "
+                                                  "Expected: %(expected)s\n\n"
+                                                  "Observed: %(observed)s" % {
+                                                      'expected': pformat(str(expected)),
+                                                      'observed': pformat(str(observed)), }))
         self.client.logout()
+
+    @staticmethod
+    def json_comparable(expected_values, values_converter):
+        if isinstance(expected_values, collections.Iterable):
+            return paged_result(expected_values, values_converter)
+        else:
+            return values_converter(expected_values)
 
     def _require_authenticated_get_access_not_found(self, url, user):
         logged_in = self.client.login(username=user.username,
@@ -531,9 +566,9 @@ class StrainResourceTests(APITestCase):
 
         response = self.client.get(url)
         required_result_status = HTTP_404_NOT_FOUND
-        self.assertEquals(required_result_status, response.status_code,
-                          'Wrong response status code from %(url)s for user %(user)s. Expected '
-                          '%(expected)d status but got %(observed)d' % {
+        self.assertEquals(required_result_status, response.status_code, _WRONG_STATUS_MSG
+                          % {
+                              'method': 'GET',
                               'url': url,
                               'user': user.username,
                               'expected': required_result_status,
@@ -547,9 +582,12 @@ class StrainResourceTests(APITestCase):
 
         response = self.client.get(url)
         required_result_status = HTTP_200_OK
-        self.assertEquals(required_result_status, response.status_code,
-                          "Wrong response status code. Expected %d status but got %d" % (
-                              required_result_status, response.status_code))
+        self.assertEquals(required_result_status, response.status_code, _WRONG_STATUS_MSG % {
+                                'method':   'GET',
+                                'url': url,
+                                'user': user.username,
+                                'expected': required_result_status,
+                                'observed': response.status_code})
 
         self.assertFalse(bool(response.content),
                          'GET %(url)s. Expected an empty list, but got "%(response)s"' % {
@@ -562,20 +600,18 @@ class StrainResourceTests(APITestCase):
 
         self.assertTrue(logged_in, 'Client login failed. Unable to continue with the test.')
 
-        # request = request_factory.get(self.STRAIN_RESOURCE_URL, user=user)
-        # response = StrainViewSet.as_view({'get': 'list'})(request)  # TODO: expand actions tested
-
         response = self.client.get(url)
         required_result_status = HTTP_200_OK
-        self.assertEquals(required_result_status, response.status_code,
-                          "Wrong response status code. Expected %d status but got %d" % (
-                              required_result_status, response.status_code))
+        self.assertEquals(required_result_status, response.status_code, _WRONG_STATUS_MSG % {
+                                'method':   'GET',
+                                'url': url,
+                                'user': user.username,
+                                'expected': required_result_status,
+                                'observed': response.status_code})
 
-        # TODO:
-        logger.debug('Response content (empty paged result expected): %s' % str(response.content))
-        # remove debug stmt
         content_dict = json.loads(response.content)
-        self.assertFalse(bool(content_dict['results']))
+        self.assertFalse(bool(content_dict['results']), 'Expected zero result, but got %d' %
+                         len(content_dict['results']))
         self.assertEquals(0, content_dict['count'])
         self.assertEquals(None, content_dict['previous'])
         self.assertEquals(None, content_dict['next'])
@@ -595,6 +631,42 @@ class StrainResourceTests(APITestCase):
         print("Testing read access for %s" % list_url)
         self._enforce_strain_read_access(list_url, True)
 
+        # create / configure studies and related strains to test strain access via
+        # the "everyone" permissions. Note these aren't included in setUpTestData() since that
+        # config sets us up for initial tests for results where no strain access is allowed / no
+        # results are returned.
+
+        # everyone read
+        everyone_read_study = Study.objects.create(name='Readable by everyone')
+        EveryonePermission.objects.create(study=everyone_read_study,
+                                          permission_type=StudyPermission.READ)
+        everyone_read_strain = Strain.objects.create(name='Readable by everyone via study '
+                                                          'read')
+        line1 = Line.objects.create(name='Everyone read line', study=everyone_read_study)
+        line1.strains.add(everyone_read_strain)
+        line1.save()
+
+        self._require_authenticated_get_access_allowed(list_url, self.unprivileged_user,
+                                                       expected_strains=[everyone_read_strain,
+                                                           everyone_read_strain])
+
+        # everyone write
+        everyone_write_study = Study.objects.create(name='Writable be everyone')
+        EveryonePermission.objects.create(study=everyone_write_study,
+                                          permission_type=StudyPermission.WRITE)
+        everyone_write_strain = Strain.objects.create(name='Readable by everyone via study '
+                                                           'write')
+        line2 = Line.objects.create(name='Everyone write line', study=everyone_write_study)
+        line2.strains.add(everyone_write_strain)
+        line2.save()
+
+        # test access to strain details via "everyone" read permission
+
+        self._require_authenticated_get_access_allowed(list_url, self.unprivileged_user,
+                                                       expected_strains=[
+                                                           everyone_read_strain,
+                                                           everyone_write_strain])
+
     def test_strain_detail_read_access(self):
         """
             Tests GET /rest/strains
@@ -603,8 +675,22 @@ class StrainResourceTests(APITestCase):
         print('%s(): ' % self.test_strain_detail_read_access.__name__)
         print(SEPARATOR)
 
+        # verify database state set by the setup, whose enforcement by the REST API we'll be
+        # testing later on
+        # TODO: remove following initial testing
+        self.assertTrue(self.study.user_can_read(self.study_owner))
+        self.assertTrue(self.study.user_can_read(self.study_write_only_user))
+        self.assertTrue(self.study.user_can_write(self.study_write_only_user))
+        self.assertTrue(self.study.user_can_read(self.study_read_only_user))
+        self.assertFalse(self.study.user_can_write(self.study_read_only_user))
+        self.assertTrue(self.study.user_can_read(self.study_write_group_user))
+        self.assertTrue(self.study.user_can_write(self.study_write_group_user))
+        self.assertTrue(self.study.user_can_read(self.study_read_group_user))
+        self.assertFalse(self.study.user_can_write(self.study_read_group_user))
+
         strain_detail_url = '%(base_strain_url)s/%(pk)d/' % {
-            'base_strain_url': STRAINS_RESOURCE_URL, 'pk': self.study_strain1.pk,
+            'base_strain_url': STRAINS_RESOURCE_URL,
+            'pk': self.study_strain1.pk,
         }
 
         self._enforce_strain_read_access(strain_detail_url, False)
@@ -614,7 +700,8 @@ class StrainResourceTests(APITestCase):
                                        description='Description goes here')
 
         # construct the URL for the strain detail view
-        strain_detail_url = '%(base_strain_url)s/%(pk)d/' % {
+        strain_detail_pattern = '%(base_strain_url)s/%(pk)d/'
+        strain_detail_url = strain_detail_pattern % {
             'base_strain_url': STRAINS_RESOURCE_URL,
             'pk':              strain.pk, }
 
@@ -629,3 +716,69 @@ class StrainResourceTests(APITestCase):
                                          False,
                                          strain_in_study=False,
                                          drf_action=DRF_RETRIEVE_ACTION)
+
+        # create / configure studies and related strains to test strain access via
+        # the "everyone" permissions. Note these aren't included in setUpTestData() since that
+        # config sets us up for initial tests for results where no strain access is allowed / no
+        # results are returned.
+
+        # everyone read
+        everyone_read_study = Study.objects.create(name='Readable by everyone')
+        EveryonePermission.objects.create(study=everyone_read_study,
+                                          permission_type=StudyPermission.READ)
+        everyone_read_strain = Strain.objects.create(name='Readable by everyone via study '
+                                                          'read')
+        line1 = Line.objects.create(name='Everyone read line', study=everyone_read_study)
+        line1.strains.add(everyone_read_strain)
+        line1.save()
+
+        everyone_read_url = strain_detail_pattern % {
+            'base_strain_url': STRAINS_RESOURCE_URL,
+            'pk': everyone_read_strain.pk,
+        }
+
+        # verify that an un-authenticated request gets a 404
+        self._require_unauthenticated_get_access_denied(everyone_read_url, DRF_RETRIEVE_ACTION)
+
+        self._require_authenticated_get_access_allowed(everyone_read_url, self.unprivileged_user,
+                                                       expected_strains=[everyone_read_strain])
+
+        # everyone write
+        everyone_write_study = Study.objects.create(name='Writable be everyone')
+        EveryonePermission.objects.create(study=everyone_write_study,
+                                          permission_type=StudyPermission.WRITE)
+        everyone_write_strain = Strain.objects.create(name='Readable by everyone via study '
+                                                           'write')
+        line2 = Line.objects.create(name='Everyone write line', study=everyone_write_study)
+        line2.strains.add(everyone_write_strain)
+        line2.save()
+
+        everyone_write_url = strain_detail_pattern % {
+            'base_strain_url': STRAINS_RESOURCE_URL,
+            'pk': everyone_write_strain.pk,
+        }
+
+        # verify that an un-authenticated request gets a 404
+        self._require_unauthenticated_get_access_denied(everyone_read_url, DRF_RETRIEVE_ACTION)
+
+        self._require_authenticated_get_access_allowed(everyone_write_url, self.unprivileged_user,
+                                                       expected_strains=[everyone_read_strain,
+                                                                         everyone_write_strain])
+
+
+def paged_result(expected_values, values_converter):
+    return {
+        'results': [values_converter(value) for value in expected_values]
+    }
+
+def strain_to_dict(strain):
+    if not strain:
+        return {}
+
+    return {
+        'name':         strain.name,
+        'description': strain.description,
+        'registry_url': strain.registry_url,
+        'registry_id': strain.registry_id,
+        'pk': strain.pk
+    }
