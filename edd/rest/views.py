@@ -573,10 +573,12 @@ class StrainViewSet(viewsets.ModelViewSet):
         # build a query, filtering by the provided user inputs (starting out unfiltered)
         query = Strain.objects.all()
 
-        # if a strain UUID or local numeric pk was provided, get it
+        # if a strain UUID or local numeric pk was provided via the URL, get it
         if self.kwargs:
             strain_id_filter = self.kwargs.get(self.lookup_url_kwarg)
             if is_numeric_pk(strain_id_filter):
+                logger.debug(
+                    'filtering strain by URL paramater pk=%s' % strain_id_filter)  # TODO remove
                 query = query.filter(pk=strain_id_filter)
             else:
                 query = query.filter(registry_id=strain_id_filter)
@@ -584,7 +586,7 @@ class StrainViewSet(viewsets.ModelViewSet):
         else:
             # parse optional query parameters
             query_params = self.request.query_params
-            strain_id_filter = query_params.get(self.lookup_url_kwarg)  # TODO: remove?
+            strain_id_filter = query_params.get(self.lookup_url_kwarg)
             local_pk_filter = query_params.get('pk')
             registry_id_filter = query_params.get(STRAIN_REGISTRY_ID)
             registry_url_regex_filter = query_params.get(STRAIN_REGISTRY_URL_REGEX)
@@ -594,6 +596,7 @@ class StrainViewSet(viewsets.ModelViewSet):
             # if provided an ambiguously-defined unique ID for the strain, apply it based
             # on the format of the provided value
             if strain_id_filter:
+                logger.debug('filtering strain by identifier pk=%s' % local_pk_filter)  # TODO remove
                 if is_numeric_pk(strain_id_filter):
                     query = query.filter(pk=strain_id_filter)
                 else:
@@ -624,22 +627,18 @@ class StrainViewSet(viewsets.ModelViewSet):
         # prevent some users from accessing strains, depending on how EDD's permissions are set up,
         # but the present alternative is to create a potential leak of experimental strain names /
         # descriptions to potentially competing researchers that use the same EDD instance
-        logger.debug('User: %s' % str(user))  # TODO: remove debug stmt
 
-        # test whether explicit "manager" permissions allow user to see strains without
-        # having to drill down into study/line/strain relationships that would grant access
-        # to view these strains
         requested_permission = get_requested_study_permission(self.request.method)
-
         has_role_based_permission = (requested_permission == StudyPermission.READ and
-                                        Study.user_role_can_read(user))
+                                     Study.user_role_can_read(user))
 
         # if user role (e.g. admin) doesn't grant access to all strains, do additional queries
         # to determine which (if any) strains to expose
         if not has_role_based_permission:
 
-            # test whether user has explicit manager permissions that enable access to all
-            # strains
+            # test whether explicit "manager" permissions allow user to access all strains without
+            # having to drill down into case-by-case study/line/strain relationships that would
+            # grant access to a subset of strains
             has_explicit_manage_permission = False
             enabling_manage_permissions = (
                 ModelImplicitViewOrResultImpliedPermissions.get_enabling_permissions(
@@ -658,8 +657,9 @@ class StrainViewSet(viewsets.ModelViewSet):
 
             # if user has no global permissions that grant access to all strains, filter
             # results to only the strains already exposed in studies the user has read/write
-            # access to. This is significantly more expensive, but exposes the data available
-            # via the UI.
+            # access to. This is significantly more expensive, but exposes the same data available
+            # via the UI. Where possible, we should encourage clients to access strains via
+            # /rest/studies/X/strains instead of this resource to avoid these joins.
             if not has_explicit_manage_permission:
                 # if user is only requesting read access to the strain, construct a query that
                 # will infer read permission from the existing of either read or write
@@ -671,7 +671,7 @@ class StrainViewSet(viewsets.ModelViewSet):
                                                             keyword_prefix='line__study__')
                 query = query.filter(user_permission_q).distinct()
 
-        result_count = len(query)  # Note: more efficient for logging than qs.count()
+        result_count = len(query)
         logger.debug('StrainViewSet query count=%d' % len(query))
         if result_count < 10:
             logger.debug(query)

@@ -1306,7 +1306,7 @@ def study_import_table(request, pk=None, slug=None):
     """ View for importing tabular data (replaces AssayTableData.cgi).
     :raises: Exception if an error occurrs during the import attempt
     """
-    study = load_study(request, pk=pk, slug=slug, permission_type=CAN_EDIT)
+    study = load_study(request, pk=pk, slug=slug, permission_type=StudyPermission.CAN_EDIT)
     lines = study.line_set.all()
     assays = study.line_set.count()
     user = study.user_can_write(request.user)

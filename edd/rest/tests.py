@@ -647,8 +647,7 @@ class StrainResourceTests(APITestCase):
         line1.save()
 
         self._require_authenticated_get_access_allowed(list_url, self.unprivileged_user,
-                                                       expected_strains=[everyone_read_strain,
-                                                           everyone_read_strain])
+                                                       expected_strains=[everyone_read_strain])
 
         # everyone write
         everyone_write_study = Study.objects.create(name='Writable be everyone')
@@ -761,6 +760,7 @@ class StrainResourceTests(APITestCase):
         # verify that an un-authenticated request gets a 404
         self._require_unauthenticated_get_access_denied(everyone_read_url, DRF_RETRIEVE_ACTION)
 
+        # verify study-level "everyone" permissions allow access to view associated strains
         self._require_authenticated_get_access_allowed(everyone_write_url, self.unprivileged_user,
                                                        expected_strains=[everyone_read_strain,
                                                                          everyone_write_strain])
@@ -768,7 +768,10 @@ class StrainResourceTests(APITestCase):
 
 def paged_result(expected_values, values_converter):
     return {
-        'results': [values_converter(value) for value in expected_values]
+        'count': len(expected_values),
+        'results': [values_converter(value) for value in expected_values],
+        'previous': None,
+        'next': None,
     }
 
 def strain_to_dict(strain):
