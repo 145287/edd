@@ -10,7 +10,7 @@ Note that many of the docstrings in this module use specific YAML formatting to 
 endpoint documentation viewable in the browser. See
 http://django-rest-swagger.readthedocs.io/en/latest/yaml.html
 """
-
+from __future__ import unicode_literals
 import logging
 import re
 from uuid import UUID
@@ -578,7 +578,7 @@ class StrainViewSet(viewsets.ModelViewSet):
             strain_id_filter = self.kwargs.get(self.lookup_url_kwarg)
             if is_numeric_pk(strain_id_filter):
                 logger.debug(
-                    'filtering strain by URL paramater pk=%s' % strain_id_filter)  # TODO remove
+                    'filtering strain by URL parameter pk=%s' % strain_id_filter)  # TODO remove
                 query = query.filter(pk=strain_id_filter)
             else:
                 query = query.filter(registry_id=strain_id_filter)
@@ -664,6 +664,14 @@ class StrainViewSet(viewsets.ModelViewSet):
                 # if user is only requesting read access to the strain, construct a query that
                 # will infer read permission from the existing of either read or write
                 # permission
+                logger.debug('Testing user %(user)s implied permission to %(requested_perm)s '
+                             'strains via explicit permission on linked studies. Prior to '
+                             'permissions filter, queryset returned %(pre_permissions_filter)d' % {
+                                 'user':           user.username,
+                                 'requested_perm': requested_permission,
+                                 'pre_permissions_filter': query.count(),
+                             })
+                logger.debug('Pre-filter query: %s' % query.query)
                 if requested_permission == StudyPermission.READ:
                     requested_permission = StudyPermission.CAN_VIEW
                 user_permission_q = Study.user_permission_q(user,
@@ -671,6 +679,7 @@ class StrainViewSet(viewsets.ModelViewSet):
                                                             keyword_prefix='line__study__')
                 query = query.filter(user_permission_q).distinct()
 
+        logger.debug('StrainViewSet query = %s' % query.query)
         result_count = len(query)
         logger.debug('StrainViewSet query count=%d' % len(query))
         if result_count < 10:

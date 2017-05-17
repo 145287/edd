@@ -40,6 +40,14 @@ PAGE_NUMBER_QUERY_PARAM = 'page'
 RESULTS_OFFSET_QUERY_PARAM = 'offset'
 
 ###################################################################################################
+# DRF page result key names
+###################################################################################################
+RESULT_COUNT_KEY = 'count'
+RESULTS_KEY = 'results'
+NEXT_PAGE_KEY = 'next'
+PREVIOUS_PAGE_KEY = 'previous'
+
+###################################################################################################
 # Parameter names & values for /rest/metadata_types
 ###################################################################################################
 METADATA_TYPE_GROUP = 'group'
