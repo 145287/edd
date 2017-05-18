@@ -18,11 +18,13 @@ from uuid import UUID
 from rest_framework.exceptions import ParseError
 
 
+from rest_framework import mixins
 from django.core.exceptions import PermissionDenied
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from rest_framework.permissions import DjangoModelPermissions, IsAuthenticated, BasePermission
 from rest_framework.status import HTTP_403_FORBIDDEN
+from rest_framework.viewsets import GenericViewSet
 
 from edd.rest.serializers import (LineSerializer, MetadataGroupSerializer, MetadataTypeSerializer,
                                   StrainSerializer, StudySerializer, UserSerializer,
@@ -41,7 +43,7 @@ from jbei.rest.clients.edd.constants import (CASE_SENSITIVE_PARAM, LINE_ACTIVE_S
 from jbei.rest.utils import is_numeric_pk
 from jbei.utils import PK_OR_TYPICAL_UUID_REGEX
 from rest_framework import (response, schemas, status, viewsets)
-from rest_framework.decorators import api_view, renderer_classes
+from rest_framework.decorators import api_view, renderer_classes, permission_classes
 from main.models import (Line, MeasurementUnit, MetadataGroup, MetadataType, Protocol, Strain,
                          Study, StudyPermission, User)
 from rest_framework.exceptions import APIException
@@ -519,17 +521,16 @@ PAGING_PARAMETER_DESCRIPTIONS = """
     """
 
 
-class StrainViewSet(viewsets.ModelViewSet):
+class StrainViewSet(mixins.CreateModelMixin,
+                   mixins.RetrieveModelMixin,
+                   mixins.UpdateModelMixin,
+                   # mixins.DestroyModelMixin,  TODO: implement & test later as a low priority
+                   mixins.ListModelMixin,
+                   GenericViewSet):
     """
     Defines the set of REST API views available for the base /rest/strain/ resource. Nested views
     are defined elsewhere (e.g. StrainStudiesView).
     """
-    # TODO: as a future improvement, limit strain creation input to only ICE part identifier (part
-    # ID, local pk, or UUID), except by apps with additional privileges (e.g. those granted to ICE
-    # itself to update strain data for ICE-72).  For now, we can just limit strain creation
-    # privileges to control consistency of newly-created strains (which should be created via
-    # the UI in most cases anyway).
-
     permission_classes = [ModelImplicitViewOrResultImpliedPermissions]
 
     # Note: queryset must be defined for DjangoModelPermissions in addition to get_queryset(). See
@@ -577,8 +578,6 @@ class StrainViewSet(viewsets.ModelViewSet):
         if self.kwargs:
             strain_id_filter = self.kwargs.get(self.lookup_url_kwarg)
             if is_numeric_pk(strain_id_filter):
-                logger.debug(
-                    'filtering strain by URL parameter pk=%s' % strain_id_filter)  # TODO remove
                 query = query.filter(pk=strain_id_filter)
             else:
                 query = query.filter(registry_id=strain_id_filter)
@@ -596,7 +595,6 @@ class StrainViewSet(viewsets.ModelViewSet):
             # if provided an ambiguously-defined unique ID for the strain, apply it based
             # on the format of the provided value
             if strain_id_filter:
-                logger.debug('filtering strain by identifier pk=%s' % local_pk_filter)  # TODO remove
                 if is_numeric_pk(strain_id_filter):
                     query = query.filter(pk=strain_id_filter)
                 else:
@@ -628,68 +626,69 @@ class StrainViewSet(viewsets.ModelViewSet):
         # but the present alternative is to create a potential leak of experimental strain names /
         # descriptions to potentially competing researchers that use the same EDD instance
 
-        requested_permission = get_requested_study_permission(self.request.method)
+        query = self._filter_for_permissions(self.request, query)
+        logger.debug('StrainViewSet query count=%d' % len(query))
+        return query
+
+    @staticmethod
+    def _filter_for_permissions(request, query):
+        """
+        A helper method to filter a Strain Queryset to only strains the requesting user should 
+        have access to
+        """
+        user = request.user
+
+        requested_permission = get_requested_study_permission(request.method)
+
+        # if user role (e.g. admin) grants access to all studies, we can expose all strains
+        # without additional queries
         has_role_based_permission = (requested_permission == StudyPermission.READ and
                                      Study.user_role_can_read(user))
+        if has_role_based_permission:
+            return query
 
-        # if user role (e.g. admin) doesn't grant access to all strains, do additional queries
-        # to determine which (if any) strains to expose
-        if not has_role_based_permission:
+        # test whether explicit "manager" permissions allow user to access all strains without
+        # having to drill down into case-by-case study/line/strain relationships that would
+        # grant access to a subset of strains
+        has_explicit_manage_permission = False
+        enabling_manage_permissions = (
+            ModelImplicitViewOrResultImpliedPermissions.get_enabling_permissions(
+                    request.method, Strain))
 
-            # test whether explicit "manager" permissions allow user to access all strains without
-            # having to drill down into case-by-case study/line/strain relationships that would
-            # grant access to a subset of strains
-            has_explicit_manage_permission = False
-            enabling_manage_permissions = (
-                ModelImplicitViewOrResultImpliedPermissions.get_enabling_permissions(
-                        self.request.method, Strain))
-            for manage_permission in enabling_manage_permissions:
-                if user.has_perm(manage_permission):
-                    has_explicit_manage_permission = True
-                    logger.debug('User %(user)s has explicit permission to %(requested_perm)s '
-                                 'all Strain objects, implied via the "%(granting_perm)s" '
-                                 'permission' % {
-                                     'user':           user.username,
-                                     'requested_perm': requested_permission,
-                                     'granting_perm':  manage_permission,
-                                 })
-                    break
-
-            # if user has no global permissions that grant access to all strains, filter
-            # results to only the strains already exposed in studies the user has read/write
-            # access to. This is significantly more expensive, but exposes the same data available
-            # via the UI. Where possible, we should encourage clients to access strains via
-            # /rest/studies/X/strains instead of this resource to avoid these joins.
-            if not has_explicit_manage_permission:
-                # if user is only requesting read access to the strain, construct a query that
-                # will infer read permission from the existing of either read or write
-                # permission
-                logger.debug('Testing user %(user)s implied permission to %(requested_perm)s '
-                             'strains via explicit permission on linked studies. Prior to '
-                             'permissions filter, queryset returned %(pre_permissions_filter)d' % {
+        for manage_permission in enabling_manage_permissions:
+            if user.has_perm(manage_permission):
+                has_explicit_manage_permission = True
+                logger.debug('User %(user)s has explicit permission to %(requested_perm)s '
+                             'all Strain objects, implied via the "%(granting_perm)s" '
+                             'permission' % {
                                  'user':           user.username,
                                  'requested_perm': requested_permission,
-                                 'pre_permissions_filter': query.count(),
+                                 'granting_perm':  manage_permission,
                              })
-                logger.debug('Pre-filter query: %s' % query.query)
-                if requested_permission == StudyPermission.READ:
-                    requested_permission = StudyPermission.CAN_VIEW
-                user_permission_q = Study.user_permission_q(user,
-                                                            requested_permission,
-                                                            keyword_prefix='line__study__')
-                query = query.filter(user_permission_q).distinct()
+                break
 
-        logger.debug('StrainViewSet query = %s' % query.query)
-        result_count = len(query)
-        logger.debug('StrainViewSet query count=%d' % len(query))
-        if result_count < 10:
-            logger.debug(query)
+        if has_explicit_manage_permission:
+            return query
 
+        # if user has no global permissions that grant access to all strains, filter
+        # results to only the strains already exposed in studies the user has read/write
+        # access to. This is significantly more expensive, but exposes the same data available
+        # via the UI. Where possible, we should encourage clients to access strains via
+        # /rest/studies/X/strains instead of this resource to avoid these joins.
+
+        # if user is only requesting read access to the strain, construct a query that
+        # will infer read permission from the existing of either read or write
+        # permission
+        if requested_permission == StudyPermission.READ:
+            requested_permission = StudyPermission.CAN_VIEW
+        user_permission_q = Study.user_permission_q(user, requested_permission,
+                                                    keyword_prefix='line__study__')
+        query = query.filter(user_permission_q).distinct()
         return query
 
     def list(self, request, *args, **kwargs):
         """
-            List strains the user has access to.
+            List strains the requesting user has access to.
 
             Strain access is defined by:
 
@@ -756,6 +755,11 @@ class StrainViewSet(viewsets.ModelViewSet):
                - code: 500
                  message: Internal server error
         """
+        # TODO: as a future improvement, limit strain creation input to only ICE part identifier
+        #  (part ID, local pk, or UUID), except by apps with additional privileges (e.g. those
+        # granted to ICE itself to update strain data for ICE-72).  For now, we can just limit
+        # strain creation privileges to control consistency of newly-created strains (which
+        # should be created via the UI in most cases anyway).
         return super(StrainViewSet, self).create(request, *args, **kwargs)
 
     def update(self, request, *args, **kwargs):
@@ -792,25 +796,6 @@ class StrainViewSet(viewsets.ModelViewSet):
                    - code: 500
                      message: Internal server error
             """
-
-    def destroy(self, request, *args, **kwargs):
-        """
-            Delete an existing strain.
-            ---
-                omit_serializer: true
-                responseMessages:
-                   - code: 400
-                     message: Bad client request
-                   - code: 401
-                     message: Unauthenticated
-                   - code: 403
-                     message: Forbidden. User is authenticated but lacks the required permissions.
-                   - code: 404
-                     message: Strain doesn't exist
-                   - code: 500
-                     message: Internal server error
-            """
-
 
 HTTP_TO_STUDY_PERMISSION_MAP = {
     'POST': StudyPermission.WRITE,
@@ -913,6 +898,7 @@ class StudyViewSet(viewsets.ReadOnlyModelViewSet):  # read-only for now...see TO
     """
     serializer_class = StudySerializer
     contact = StringRelatedField(many=False)
+    permission_classes = [ModelImplicitViewOrResultImpliedPermissions]
 
     def get_queryset(self):
 
@@ -1215,7 +1201,7 @@ class StudyLineView(viewsets.ModelViewSet):  # LineView(APIView):
         try:
             study = Study.objects.get(pk=study_pk)
             if study.user_can_write(user):
-                return None
+                return
         except Study.DoesNotExist:
             logger.warning('Got request to modify non-existent study %s', study_pk)
         raise PermissionDenied()

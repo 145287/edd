@@ -239,6 +239,7 @@ REST_FRAMEWORK = {
     # could also optionally override our model managers for more safety at the cost of
     # convenience for developers (e.g. while using the Django ORM via the command line).
     'DEFAULT_PERMISSION_CLASSES': (
+        # Note: DjangoModelPermissions would be better, but documentation won't support it
         'rest_framework.permissions.IsAuthenticated',
     ),
 

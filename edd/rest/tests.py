@@ -16,13 +16,11 @@ import logging
 from pprint import pformat
 from uuid import UUID
 
-from django.template import Template, Context
 import collections
-from django.db import connection
-from django.conf import settings
 from django.contrib.auth.models import AnonymousUser, Permission, Group
 from rest_framework.status import (HTTP_200_OK, HTTP_201_CREATED, HTTP_400_BAD_REQUEST,
-                                   HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN, HTTP_404_NOT_FOUND)
+                                   HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN, HTTP_404_NOT_FOUND,
+                                   HTTP_405_METHOD_NOT_ALLOWED)
 from rest_framework.test import (APIRequestFactory, APITestCase)
 
 from edd.rest.views import StrainViewSet
@@ -70,6 +68,7 @@ DRF_UPDATE_ACTION = 'update'
 DRF_CREATE_ACTION = 'create'
 DRF_LIST_ACTION = 'list'
 DRF_RETRIEVE_ACTION = 'retrieve'
+DRF_DELETE_ACTION = 'delete'
 
 _WRONG_STATUS_MSG = ('Wrong response status code from %(method)s %(url)s for user %(user)s. '
                      'Expected %(expected)d status but got %(observed)d')
@@ -77,7 +76,9 @@ _WRONG_STATUS_MSG = ('Wrong response status code from %(method)s %(url)s for use
 
 class StrainResourceTests(APITestCase):
     """
-    Tests access controls and HTTP return codes for queries to the /rest/strains REST API resource.
+    Tests access controls and HTTP return codes for queries to the /rest/strains REST API resource
+    (not any nested resources).
+    
     Strains should only be accessible by:
     1) Superusers
     2) Users who have explicit class-level mutator permissions on Strains via a django.contrib.auth
@@ -231,8 +232,9 @@ class StrainResourceTests(APITestCase):
         """
         A helper method that does the work to test permissions for both list and individual strain 
         GET access. Note that the way we've constructed test data above, 
-        :param strain_in_study: True if the provided URL references a strain in a study owned by
-            the user, False otherwise
+        :param strain_in_study: True if the provided URL references a strain in our test study, 
+        False if the strain isn't in the test study, and should only be visible to 
+        superusers/managers.
         """
 
         # verify that an un-authenticated request gets a 404
@@ -279,8 +281,7 @@ class StrainResourceTests(APITestCase):
             self._require_authenticated_get_access_denied(url, self.study_owner)
 
         # test that user group members with any access to the study have implied read
-        # permission
-        # on the strains used in it
+        # permission on the strains used in it
         if strain_in_study:
             self._require_authenticated_get_access_allowed(url, self.study_read_group_user)
             self._require_authenticated_get_access_allowed(url, self.study_write_group_user)
@@ -293,6 +294,34 @@ class StrainResourceTests(APITestCase):
         # to enforce matching for UUID's returned by EDD's REST API, which is pretty weird after
         # prior successful tests.
         pass
+
+    def test_strain_delete(self):
+
+        # create a strain to be deleted
+        strain = Strain.objects.create(name='To be deleted')
+
+        strain_detail_pattern = '%(base_strain_url)s/%(pk)d/'
+        url = strain_detail_pattern % {
+            'base_strain_url': STRAINS_RESOURCE_URL,
+            'pk': strain.pk,
+        }
+
+        # for now, verify that NO ONE can delete a strain via the API. Easier as a stopgap than
+        # learning how to ensure that only strains with no foreign keys can be deleted,
+        # or implementing / testing a capability to override that check
+
+        # unauthenticated user and unprivileged users get 403
+        self.client.logout()
+        response = self.client.delete(url)
+        self.assertEqual(response.status_code, HTTP_403_FORBIDDEN)
+        self._do_delete(url, self.unprivileged_user, HTTP_403_FORBIDDEN)
+
+        # privileged users got 405
+        self._do_delete(url, self.staff_strain_deleter, HTTP_405_METHOD_NOT_ALLOWED)
+        self._do_delete(url, self.superuser, HTTP_405_METHOD_NOT_ALLOWED)
+
+        # manually delete the strain
+        strain.delete()
 
     def test_strain_add(self):
         """
@@ -327,6 +356,9 @@ class StrainResourceTests(APITestCase):
 
         # verify that staff permission alone isn't enough to create a strain
         self._require_authenticated_post_access_denied(_URL, self.staff_user, post_data)
+
+        # verify that strain change permission doesn't allow addition of new strains
+        self._require_authenticated_post_access_denied(_URL, self.staff_strain_changer, post_data)
 
         # verify that an administrator can create a strain
         self._require_authenticated_post_access_allowed(_URL,
@@ -391,7 +423,7 @@ class StrainResourceTests(APITestCase):
         self._require_authenticated_put_access_denied(url, self.staff_user, put_data)
 
         # verify that a user can't update an existing strain with the 'create' permission.
-        # http://www.django-rest-framework.org/api-guide/generic-views/#put-as-create
+        # See http://www.django-rest-framework.org/api-guide/generic-views/#put-as-create
         self._do_put(url, self.staff_strain_creator, put_data, HTTP_403_FORBIDDEN)
 
         # verify that the explicit 'change' permission allows access to update the strain
@@ -412,6 +444,11 @@ class StrainResourceTests(APITestCase):
         factory = APIRequestFactory()
         request = factory.get(url, user=AnonymousUser())
         response = StrainViewSet.as_view({'get': drf_action})(request)
+        self.assertTrue(response.status_code in DRF_UNAUTHENTICATED_PERMISSION_DENIED_CODES)
+
+    def _require_unauthenticated_delete_access_denied(self, url):
+        self.client.logout()
+        response = self.client.delete(url)
         self.assertTrue(response.status_code in DRF_UNAUTHENTICATED_PERMISSION_DENIED_CODES)
 
     def _require_unauthenticated_post_access_denied(self, url, post_data):
@@ -516,6 +553,21 @@ class StrainResourceTests(APITestCase):
                                      'expected': expected,
                                      'observed': observed,
                                  })
+        self.client.logout()
+
+    def _do_delete(self, url, user, expected_status):
+        logged_in = self.client.login(username=user.username,
+                                      password=PLAINTEXT_TEMP_USER_PASSWORD)
+        self.assertTrue(logged_in, 'Client login failed. Unable to continue with the test.')
+
+        response = self.client.delete(url)
+        self.assertEquals(expected_status, response.status_code, _WRONG_STATUS_MSG % {
+            'method':   'GET',
+            'url': url,
+            'user': user.username,
+            'expected': expected_status,
+            'observed': response.status_code
+        })
         self.client.logout()
 
     def _require_authenticated_get_access_not_found(self, url, user):
@@ -632,18 +684,6 @@ class StrainResourceTests(APITestCase):
         print(SEPARATOR)
         print('%s(): ' % self.test_strain_detail_read_access.__name__)
         print(SEPARATOR)
-
-        # verify database state set by the setup, whose enforcement by the REST API we'll be
-        # testing later on\
-        self.assertTrue(self.study.user_can_read(self.study_owner))
-        self.assertTrue(self.study.user_can_read(self.study_write_only_user))
-        self.assertTrue(self.study.user_can_write(self.study_write_only_user))
-        self.assertTrue(self.study.user_can_read(self.study_read_only_user))
-        self.assertFalse(self.study.user_can_write(self.study_read_only_user))
-        self.assertTrue(self.study.user_can_read(self.study_write_group_user))
-        self.assertTrue(self.study.user_can_write(self.study_write_group_user))
-        self.assertTrue(self.study.user_can_read(self.study_read_group_user))
-        self.assertFalse(self.study.user_can_write(self.study_read_group_user))
 
         strain_detail_url = '%(base_strain_url)s/%(pk)d/' % {
             'base_strain_url': STRAINS_RESOURCE_URL,
