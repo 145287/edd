@@ -1,13 +1,13 @@
 """
-Unit tests for EDD's REST API. 
+Unit tests for EDD's REST API.
 
-Tests in this module operate directly on the REST API itself, on and its HTTP responses, and 
-purposefully don't use Python API client code in jbei.rest.clients.edd.api. This focus on unit 
-testing of REST API resources enables finer-grained checks, e.g. for permissions / 
+Tests in this module operate directly on the REST API itself, on and its HTTP responses, and
+purposefully don't use Python API client code in jbei.rest.clients.edd.api. This focus on unit
+testing of REST API resources enables finer-grained checks, e.g. for permissions /
 security and for HTTP return codes that should verified independently of any specific client.
 
-Note that tests here purposefully hard-code simple object serialization that's also coded 
-seperately in EDD's REST API.  This should help to detect when REST API code changes in EDD 
+Note that tests here purposefully hard-code simple object serialization that's also coded
+seperately in EDD's REST API.  This should help to detect when REST API code changes in EDD
 accidentally affect client code.
 """
 from __future__ import unicode_literals
@@ -17,13 +17,12 @@ from pprint import pformat
 from uuid import UUID
 
 import collections
-from django.contrib.auth.models import AnonymousUser, Permission, Group
+from django.contrib.auth.models import Permission, Group
 from rest_framework.status import (HTTP_200_OK, HTTP_201_CREATED, HTTP_400_BAD_REQUEST,
                                    HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN, HTTP_404_NOT_FOUND,
                                    HTTP_405_METHOD_NOT_ALLOWED)
-from rest_framework.test import (APIRequestFactory, APITestCase)
+from rest_framework.test import APITestCase
 
-from edd.rest.views import StrainViewSet
 from jbei.rest.clients.edd.constants import (STRAINS_RESOURCE_NAME, STRAIN_DESCRIPTION_KEY,
                                              STRAIN_NAME_KEY, STRAIN_REG_ID_KEY,
                                              STRAIN_REG_URL_KEY, NEXT_PAGE_KEY, PREVIOUS_PAGE_KEY,
@@ -67,7 +66,6 @@ STRAINS_RESOURCE_URL = '/rest/%(resource)s' % {'resource': STRAINS_RESOURCE_NAME
 DRF_UPDATE_ACTION = 'update'
 DRF_CREATE_ACTION = 'create'
 DRF_LIST_ACTION = 'list'
-DRF_RETRIEVE_ACTION = 'retrieve'
 DRF_DELETE_ACTION = 'delete'
 
 _WRONG_STATUS_MSG = ('Wrong response status code from %(method)s %(url)s for user %(user)s. '
@@ -78,7 +76,7 @@ class StrainResourceTests(APITestCase):
     """
     Tests access controls and HTTP return codes for queries to the /rest/strains REST API resource
     (not any nested resources).
-    
+
     Strains should only be accessible by:
     1) Superusers
     2) Users who have explicit class-level mutator permissions on Strains via a django.contrib.auth
@@ -106,7 +104,6 @@ class StrainResourceTests(APITestCase):
         """
         super(StrainResourceTests, StrainResourceTests).setUpTestData()
 
-        # TODO: do a more granular test of exactly which is required for each resource method
         cls.add_strain_permission = Permission.objects.get(codename='add_strain')
         cls.change_strain_permission = Permission.objects.get(codename='change_strain')
         cls.delete_strain_permission = Permission.objects.get(codename='delete_strain')
@@ -219,26 +216,22 @@ class StrainResourceTests(APITestCase):
         cls.study_strain1.registry_url = 'https://registry-test.jbei.org/entry/55349'
         cls.study_strain1.save()
 
-        cls.non_study_strain = Strain(name='Non-study strain')  # TODO: use in the test, or remove
-        cls.non_study_strain.save()
-
         line = Line(name='Study strain1 line', study=cls.study)
         line.save()
         line.strains.add(cls.study_strain1)
         line.save()
 
-    def _enforce_study_strain_read_access(self, url, is_list, drf_action=DRF_LIST_ACTION,
-                                          strain_in_study=True):
+    def _enforce_study_strain_read_access(self, url, is_list, strain_in_study=True):
         """
-        A helper method that does the work to test permissions for both list and individual strain 
-        GET access. Note that the way we've constructed test data above, 
-        :param strain_in_study: True if the provided URL references a strain in our test study, 
-        False if the strain isn't in the test study, and should only be visible to 
+        A helper method that does the work to test permissions for both list and individual strain
+        GET access. Note that the way we've constructed test data above,
+        :param strain_in_study: True if the provided URL references a strain in our test study,
+        False if the strain isn't in the test study, and should only be visible to
         superusers/managers.
         """
 
         # verify that an un-authenticated request gets a 404
-        self._require_unauthenticated_get_access_denied(url, drf_action)
+        self._require_unauthenticated_get_access_denied(url)
 
         # verify that various authenticated, but unprivileged users
         # are denied access to strains without class level permission or access to a study that
@@ -435,15 +428,13 @@ class StrainResourceTests(APITestCase):
                                                        put_data)
 
     def _require_unauthenticated_put_access_denied(self, url, put_data):
-        factory = APIRequestFactory()
-        request = factory.post(url, put_data, format='json', user=AnonymousUser())
-        response = StrainViewSet.as_view({'put': DRF_UPDATE_ACTION})(request)
+        self.client.logout()
+        response = self.client.put(url, put_data)
         self.assertTrue(response.status_code in DRF_UNAUTHENTICATED_PERMISSION_DENIED_CODES)
 
-    def _require_unauthenticated_get_access_denied(self, url, drf_action):
-        factory = APIRequestFactory()
-        request = factory.get(url, user=AnonymousUser())
-        response = StrainViewSet.as_view({'get': drf_action})(request)
+    def _require_unauthenticated_get_access_denied(self, url):
+        self.client.logout()
+        response = self.client.get(url)
         self.assertTrue(response.status_code in DRF_UNAUTHENTICATED_PERMISSION_DENIED_CODES)
 
     def _require_unauthenticated_delete_access_denied(self, url):
@@ -452,9 +443,8 @@ class StrainResourceTests(APITestCase):
         self.assertTrue(response.status_code in DRF_UNAUTHENTICATED_PERMISSION_DENIED_CODES)
 
     def _require_unauthenticated_post_access_denied(self, url, post_data):
-        factory = APIRequestFactory()
-        request = factory.post(url, post_data, format='json', user=AnonymousUser())
-        response = StrainViewSet.as_view({'post': DRF_CREATE_ACTION})(request)
+        self.client.logout()
+        response = self.client.post(url, post_data, format='json')
         self.assertTrue(response.status_code in DRF_UNAUTHENTICATED_PERMISSION_DENIED_CODES)
 
     def _require_authenticated_post_access_denied(self, url, user, post_data):
@@ -711,8 +701,7 @@ class StrainResourceTests(APITestCase):
         # test the strain detail view
         self._enforce_study_strain_read_access(strain_detail_url,
                                                False,
-                                               strain_in_study=False,
-                                               drf_action=DRF_RETRIEVE_ACTION)
+                                               strain_in_study=False)
 
         # create / configure studies and related strains to test strain access via
         # the "everyone" permissions. Note these aren't included in setUpTestData() since that
@@ -735,7 +724,7 @@ class StrainResourceTests(APITestCase):
         }
 
         # verify that an un-authenticated request gets a 404
-        self._require_unauthenticated_get_access_denied(everyone_read_url, DRF_RETRIEVE_ACTION)
+        self._require_unauthenticated_get_access_denied(everyone_read_url)
 
         self._require_authenticated_get_access_allowed(everyone_read_url, self.unprivileged_user,
                                                        expected_strains=everyone_read_strain)
@@ -756,13 +745,11 @@ class StrainResourceTests(APITestCase):
         }
 
         # verify that an un-authenticated request gets a 404
-        self._require_unauthenticated_get_access_denied(everyone_read_url, DRF_RETRIEVE_ACTION)
+        self._require_unauthenticated_get_access_denied(everyone_read_url)
 
         # verify study-level "everyone" permissions allow access to view associated strains
         self._require_authenticated_get_access_allowed(everyone_write_url, self.unprivileged_user,
                                                        expected_strains=everyone_write_strain)
-
-
 
 
 def to_paged_result_dict(expected_values, values_converter):
@@ -777,10 +764,10 @@ def to_paged_result_dict(expected_values, values_converter):
 
 def compare_paged_result_dict(testcase, expected, observed, order_agnostic=True):
     """
-    A helper method for comparing deserialized JSON result dicts of paged results returned from 
-    EDD's REST API. 
-    Provides a  helpful error message if just performing simple exact-match comparison, 
-    or also supports order agnostic result comparison for cases where a single page of results 
+    A helper method for comparing deserialized JSON result dicts of paged results returned from
+    EDD's REST API.
+    Provides a  helpful error message if just performing simple exact-match comparison,
+    or also supports order agnostic result comparison for cases where a single page of results
     can be reasonably expected to be returned in any order (e.g. when unsorted).
     """
     if order_agnostic:
@@ -809,9 +796,9 @@ def compare_paged_result_dict(testcase, expected, observed, order_agnostic=True)
 
 def to_json_comparable_dict(expected_values, values_converter):
     """
-    Converts expected value(s) for a REST API request into a dictionary that's easily 
+    Converts expected value(s) for a REST API request into a dictionary that's easily
     comparable against deserialized JSON results actually returned by the API during the test.
-    :param expected_values: a single expected value or an iterable of expected values to 
+    :param expected_values: a single expected value or an iterable of expected values to
     structure in the arrangement as a deserialized JSON string received from the REST API.
     :param values_converter: a function to use for converting expected values specified in the
     test into the expected dictionary form to match deserialized JSON
@@ -822,11 +809,12 @@ def to_json_comparable_dict(expected_values, values_converter):
     else:
         return values_converter(expected_values)
 
+
 err_msg = 'Expected %(key)s "%(expected)s", but observed "%(observed)s"'
 
 
 def compare_value(testcase, key, expected_values, observed_values):
-    """ 
+    """
         A helper method to provide a more clear error message when a test assertion fails
     """
     expected = expected_values[key]
@@ -841,10 +829,10 @@ def compare_value(testcase, key, expected_values, observed_values):
 def order_agnostic_result_comparison(testcase, expected_values_list, observed_values_list,
                                      unique_key_name='pk'):
     """
-    A helper method for comparing query results in cases where result order doesn't matter, 
+    A helper method for comparing query results in cases where result order doesn't matter,
     only content. For example, if user didn't specify any sort parameter in the query, order
     of results is unpredictable.
-    
+
     Note that this method is only appropriate to use when there's only a single page of results,
     otherwise there's no guarantee of which results appear in the first page.
     """
@@ -868,7 +856,10 @@ def order_agnostic_result_comparison(testcase, expected_values_list, observed_va
 
     testcase.assertEqual(expected_values_dict, observed_values_dict,
                          "Query results didn't match expected values.\n"
-                         "%(title)s\n\n%(results_summary)s")
+                         "%(header)s\n\n%(results_summary)s" % {
+                             'header': header,
+                             'results_summary': results_summary,
+                         })
 
 
 def strain_to_json_dict(strain):

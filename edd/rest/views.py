@@ -11,45 +11,43 @@ endpoint documentation viewable in the browser. See
 http://django-rest-swagger.readthedocs.io/en/latest/yaml.html
 """
 from __future__ import unicode_literals
+
 import logging
 import re
 from uuid import UUID
 
-from rest_framework.exceptions import ParseError
-
-
-from rest_framework import mixins
 from django.core.exceptions import PermissionDenied
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
-from rest_framework.permissions import DjangoModelPermissions, IsAuthenticated, BasePermission
+from rest_framework import mixins, response, schemas, status, viewsets
+from rest_framework.decorators import api_view, renderer_classes
+from rest_framework.exceptions import APIException, ParseError
+from rest_framework.permissions import BasePermission, DjangoModelPermissions, IsAuthenticated
+from rest_framework.relations import StringRelatedField
+from rest_framework.response import Response
 from rest_framework.status import HTTP_403_FORBIDDEN
 from rest_framework.viewsets import GenericViewSet
+from rest_framework_swagger.renderers import OpenAPIRenderer, SwaggerUIRenderer
 
-from edd.rest.serializers import (LineSerializer, MetadataGroupSerializer, MetadataTypeSerializer,
-                                  StrainSerializer, StudySerializer, UserSerializer,
-                                  ProtocolSerializer, MeasurementUnitSerializer)
-from jbei.rest.clients.edd.constants import (CASE_SENSITIVE_PARAM, LINE_ACTIVE_STATUS_PARAM,
-                                             LINES_ACTIVE_DEFAULT, METADATA_TYPE_CONTEXT,
+from edd.rest.serializers import (LineSerializer, MeasurementUnitSerializer,
+                                  MetadataGroupSerializer, MetadataTypeSerializer,
+                                  ProtocolSerializer, StrainSerializer, StudySerializer,
+                                  UserSerializer)
+from jbei.rest.clients.edd.constants import (CASE_SENSITIVE_PARAM, CREATED_AFTER_PARAM,
+                                             CREATED_BEFORE_PARAM, LINES_ACTIVE_DEFAULT,
+                                             LINE_ACTIVE_STATUS_PARAM, METADATA_TYPE_CONTEXT,
                                              METADATA_TYPE_GROUP, METADATA_TYPE_I18N,
                                              METADATA_TYPE_LOCALE, METADATA_TYPE_NAME_REGEX,
                                              QUERY_ACTIVE_OBJECTS_ONLY, QUERY_ALL_OBJECTS,
                                              QUERY_INACTIVE_OBJECTS_ONLY, STRAIN_CASE_SENSITIVE,
                                              STRAIN_NAME, STRAIN_NAME_REGEX, STRAIN_REGISTRY_ID,
-                                             STUDY_LINE_NAME_REGEX, STRAIN_REGISTRY_URL_REGEX,
-                                             CREATED_AFTER_PARAM, CREATED_BEFORE_PARAM,
-                                             UPDATED_BEFORE_PARAM, UPDATED_AFTER_PARAM,
-                                             STUDIES_RESOURCE_NAME)
+                                             STRAIN_REGISTRY_URL_REGEX, STUDIES_RESOURCE_NAME,
+                                             STUDY_LINE_NAME_REGEX, UPDATED_AFTER_PARAM,
+                                             UPDATED_BEFORE_PARAM)
 from jbei.rest.utils import is_numeric_pk
 from jbei.utils import PK_OR_TYPICAL_UUID_REGEX
-from rest_framework import (response, schemas, status, viewsets)
-from rest_framework.decorators import api_view, renderer_classes, permission_classes
 from main.models import (Line, MeasurementUnit, MetadataGroup, MetadataType, Protocol, Strain,
                          Study, StudyPermission, User)
-from rest_framework.exceptions import APIException
-from rest_framework.relations import StringRelatedField
-from rest_framework.response import Response
-from rest_framework_swagger.renderers import OpenAPIRenderer, SwaggerUIRenderer
 
 logger = logging.getLogger(__name__)
 
@@ -120,15 +118,15 @@ class ModelImplicitViewOrResultImpliedPermissions(BasePermission):
          1) Unauthenticated users are always denied access
          2) A user who has class-level add/change/delete permissions explicitly granted via
             django.contrib.auth permissions may exercise those capabilities
-         2) A user who has any add/change/delete class-level permission explicitly granted also 
-            has implied class-level view access (though view isn't explicitly defined as an auth 
+         2) A user who has any add/change/delete class-level permission explicitly granted also
+            has implied class-level view access (though view isn't explicitly defined as an auth
             permission)
-         3) If the inferred_permissions property is defined / non-empty, the existence of one or 
-         more results  in the queryset implies that the user has a level of inferred permission 
-         only on the objects returned by queryset. This inference should align with DRF's 
-         pattern of queryset filtering based on only the objects a user has access to. In most 
-         cases, this feature will probably only be used to infer view access to queryset results 
-         while avoiding a separate DB query in this class to check user permissions that are 
+         3) If the inferred_permissions property is defined / non-empty, the existence of one or
+         more results  in the queryset implies that the user has a level of inferred permission
+         only on the objects returned by queryset. This inference should align with DRF's
+         pattern of queryset filtering based on only the objects a user has access to. In most
+         cases, this feature will probably only be used to infer view access to queryset results
+         while avoiding a separate DB query in this class to check user permissions that are
          already checked as part of queryset result filtering.
     """
 
@@ -522,11 +520,11 @@ PAGING_PARAMETER_DESCRIPTIONS = """
 
 
 class StrainViewSet(mixins.CreateModelMixin,
-                   mixins.RetrieveModelMixin,
-                   mixins.UpdateModelMixin,
-                   # mixins.DestroyModelMixin,  TODO: implement & test later as a low priority
-                   mixins.ListModelMixin,
-                   GenericViewSet):
+                    mixins.RetrieveModelMixin,
+                    mixins.UpdateModelMixin,
+                    # mixins.DestroyModelMixin,  TODO: implement & test later as a low priority
+                    mixins.ListModelMixin,
+                    GenericViewSet):
     """
     Defines the set of REST API views available for the base /rest/strain/ resource. Nested views
     are defined elsewhere (e.g. StrainStudiesView).
@@ -633,7 +631,7 @@ class StrainViewSet(mixins.CreateModelMixin,
     @staticmethod
     def _filter_for_permissions(request, query):
         """
-        A helper method to filter a Strain Queryset to only strains the requesting user should 
+        A helper method to filter a Strain Queryset to only strains the requesting user should
         have access to
         """
         user = request.user
@@ -796,6 +794,7 @@ class StrainViewSet(mixins.CreateModelMixin,
                    - code: 500
                      message: Internal server error
             """
+
 
 HTTP_TO_STUDY_PERMISSION_MAP = {
     'POST': StudyPermission.WRITE,
