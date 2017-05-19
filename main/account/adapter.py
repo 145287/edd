@@ -99,6 +99,10 @@ class AllauthLDAPBackend(LDAPBackend):
 
 
 class LocalTestBackend(ModelBackend):
+    """ 
+        A simple workaround to facilitate offsite EDD Testing. When enabled, login attempts that
+        use a valid username will always succeed (e.g. without an Internet connection) to LDAP. 
+    """
 
     def authenticate(self, username=None, password=None, **kwargs):
         queryset = User.objects.filter(username=username)

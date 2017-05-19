@@ -43,9 +43,6 @@ class UserFactory(factory.django.DjangoModelFactory):
 
 
 class UserTests(TestCase):
-    fixtures = ['unit_test_user', ]  # prevents ICE notifications
-
-    USERNAME = "Jane Smith"
     EMAIL = "jsmith@localhost"
     EMAIL2 = "jdoe@localhost"
     FIRST_NAME = "Jane"
@@ -105,8 +102,6 @@ class UserTests(TestCase):
 
 
 class StudyTests(TestCase):
-    fixtures = ['unit_test_user', ]  # prevents ICE notifications
-
     def setUp(self):
         super(StudyTests, self).setUp()
         email = 'wcmorrell@lbl.gov'
@@ -208,7 +203,6 @@ class StudyTests(TestCase):
 
 
 class SolrTests(TestCase):
-    # fixtures = ['unit_test_user', ]  # prevents ICE/SOLR notifications
 
     def setUp(self):
         super(SolrTests, self).setUp()
@@ -241,8 +235,6 @@ class SolrTests(TestCase):
 
 
 class LineTests (TestCase):  # XXX also Strain, CarbonSource
-    fixtures = ['unit_test_user', ]  # prevents ICE notifications
-
     def setUp(self):
         super(LineTests, self).setUp()
         user1 = User.objects.create_user(
@@ -355,7 +347,6 @@ class LineTests (TestCase):  # XXX also Strain, CarbonSource
 #
 # TODO also test MeasurementVector
 class AssayDataTests(TestCase):
-    fixtures = ['unit_test_user', ]  # prevents ICE notifications
 
     def setUp(self):
         super(AssayDataTests, self).setUp()
@@ -495,8 +486,6 @@ class AssayDataTests(TestCase):
 
 
 class ImportTests(TestCase):
-    fixtures = ['unit_test_user', ]  # prevents ICE notifications
-
     """ Test import of assay measurement data. """
     def setUp(self):
         super(ImportTests, self).setUp()
@@ -825,8 +814,6 @@ b0006                     5683            6459           183.9             565  
 
 
 class SBMLUtilTests(TestCase):
-    fixtures = ['unit_test_user', ]  # prevents ICE notifications
-
     """ Unit tests for various utilities used in SBML export """
 
     def test_sbml_notes(self):
@@ -853,8 +840,7 @@ class SBMLUtilTests(TestCase):
 
 class ExportTests(TestCase):
     """ Test export of assay measurement data, either as simple tables or SBML. """
-    fixtures = ['unit_test_user',  # prevents ICE notifications
-                'export_data_1', ]
+    fixtures = ['export_data_1', ]
 
     def test_data_export(self):
         # TODO tests using main.forms.ExportSelectionForm, main.forms.ExportOptionForm, and
@@ -877,9 +863,7 @@ class ExportTests(TestCase):
 
 class UtilityTests(TestCase):
     # TODO: regenerate export_data_1 fixture to be compatible with bootstrap fixture
-    fixtures = ['unit_test_user', 'export_data_1', ] # prevents ICE notifications
-    fixtures = ['unit_test_user',  # prevents ICE notifications
-                'export_data_1', ]
+    fixtures = ['export_data_1', ]
 
     def test_get_edddata(self):
         # users = get_edddata_users()
@@ -927,7 +911,6 @@ class UtilityTests(TestCase):
 
 
 class IceTests(TestCase):
-    fixtures = ['unit_test_user', ]  # prevents ICE notifications
 
     def test_entry_uri_pattern(self):
         from jbei.rest.clients.ice.api import ICE_ENTRY_URL_PATTERN

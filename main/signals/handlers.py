@@ -21,7 +21,7 @@ from . import study_modified, user_modified
 from .. import models as edd_models
 from ..models import (
     Line, MetaboliteExchange, MetaboliteSpecies, SBMLTemplate, Strain, Study, Update,
-    UserPermission, GroupPermission, User, UNIT_TEST_FIXTURE_USERNAME)
+)
 from ..solr import StudySearch, UserSearch
 from ..utilities import get_absolute_url
 
@@ -111,14 +111,6 @@ def _schedule_post_commit_study_permission_index(study_permission):
 
 @receiver(study_modified)
 def index_study(sender, study, **kwargs):
-    # return early if this change was triggered during a unit test
-    if Update.is_unit_test_update():
-        logger.info('Skipping solr updates for study pk=%(pk)s (name="%(name)s"). Changes were '
-                    'detected to be part of a unit test.' % {
-            'pk': str(study.pk),  # may be None!?
-            'name': study.name,
-        })
-        return
     # package up work to be performed when the database change commits
     partial = functools.partial(_post_commit_index_study, study)
     # schedule the work for after the commit (or immediately if there's no transaction)
@@ -158,13 +150,6 @@ def study_pre_delete(sender, instance, **kwargs):
 
 @receiver(post_delete, sender=Study, dispatch_uid="main.signals.handlers.study_post_delete")
 def study_post_delete(sender, instance, **kwargs):
-    # return early if this change was triggered during a unit test
-    if Update.is_unit_test_update():
-        logger.info('Skipping solr updates for study pk=%(pk)s (name="%(name)s"). Changes were '
-                    'detected to be part of a unit test.' % {
-                        'pk': str(study.pk),  # may be None!?
-                        'name': study.name,
-                    })
     # schedule the work for after the commit (or immediately if there's no transaction)
     study = instance
     partial = functools.partial(_post_commit_unindex_study, study.post_remove_pk_cache)
@@ -794,23 +779,6 @@ def handle_line_strain_changed(sender, instance, action, reverse, model, pk_set,
     if not settings.ICE_URL:
         logger.warning('ICE URL is not configured. Skipping ICE experiment link updates.')
         return
-
-    # find which user made the update that caused this signal
-    update = Update.load_update()
-    if update.mod_by and (update.mod_by.username == UNIT_TEST_FIXTURE_USERNAME):
-        logger.warning("Detected line/strain relationship changes that originated from "
-                       "unit test code. Skipping ICE notifications.")
-        return
-    # detect changes made by improper unit test configuration and/or another integration error
-    if update.mod_by is None:
-        logger.error("Detected improper unit test configuration or another integration "
-                     "error. Unable to attribute line/strain relationship changes to a "
-                     "user, so ICE notifications that require a username will be skipped. "
-                     "As a result, manual curation of ICE link(s) for be required for "
-                     "study with pk %d" % line.study_id)
-        return
-    user_email = update.mod_by.email
-    logger.debug("update performed by user " + user_email)
 
     line = instance  # just call it a line for clarity now that we've verified that it is one
     action_function = {
