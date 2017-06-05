@@ -117,19 +117,6 @@ class Update(models.Model, EDDSerialize):
             time = self.mod_time
         return '%s by %s' % (time, self.mod_by)
 
-    @classmethod
-    def is_unit_test_update(cls):
-        """
-        Tests whether the current data change originated in a well-formed unit test.
-        :return:
-        """
-        request = get_current_request()
-
-        if request is not None:
-            return False
-
-        return User.objects.filter(username=UNIT_TEST_FIXTURE_USERNAME).count() == 1
-
 
     @classmethod
     def load_update(cls, user=None, path=None):
@@ -140,13 +127,6 @@ class Update(models.Model, EDDSerialize):
             :param path: the path added to the update; it would be a good idea to put e.g. the
                 script name and arguments here.
             :return: an Update instance persisted to the database
-        """
-        """
-        Creates a new Update attributed to the request's current user, or to the specified user when
-        called from outside the context of an HttpRequest.
-        :param user: the User to attribute the update to (ignored when a request is found)
-        :param path:
-        :return:
         """
         request = get_current_request()
 
@@ -184,8 +164,7 @@ class Update(models.Model, EDDSerialize):
             # TODO this save may be too early?
             update.save()
         else:
-            logger.debug('Update.load_update(): request is NOT None')  # TODO: remove debug stmt
-            print(vars(request))
+            logger.debug('Update.load_update(): request is NOT None')
             update = cls.load_request_update(request)
         return update
 
