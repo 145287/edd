@@ -357,16 +357,13 @@ class AssayDataTests(TestCase):
             name="WT1", description="", experimenter=user1, contact=user1)
         protocol1 = Protocol.objects.create(
             name="gc-ms", categorization=Protocol.CATEGORY_LCMS, owned_by=user1)
-        protocol2 = Protocol.objects.create(
-            name="OD600", categorization=Protocol.CATEGORY_OD, owned_by=user1)
+        protocol2 = Protocol.objects.get(name='OD600')
         Protocol.objects.create(name="New protocol", owned_by=user1, active=False)
         mt1 = Metabolite.objects.get(short_name="ac")
         mt2 = GeneIdentifier.objects.create(
             type_name="Gene name 1", short_name="gen1", type_group="g")
         mt3 = MeasurementType.create_protein(
             type_name="Protein name 2", short_name="prot2")
-        MeasurementType.create_protein(
-            type_name="Protein name 1", short_name="prot1")
         assay1 = line1.assay_set.create(
             name="1", protocol=protocol1, description="GC-MS assay 1", experimenter=user1)
         line1.assay_set.create(
@@ -840,7 +837,7 @@ class SBMLUtilTests(TestCase):
 
 class ExportTests(TestCase):
     """ Test export of assay measurement data, either as simple tables or SBML. """
-    fixtures = ['export_data_1', ]
+    # fixtures = ['export_data_1', ]
 
     def test_data_export(self):
         # TODO tests using main.forms.ExportSelectionForm, main.forms.ExportOptionForm, and
@@ -863,7 +860,7 @@ class ExportTests(TestCase):
 
 class UtilityTests(TestCase):
     # TODO: regenerate export_data_1 fixture to be compatible with bootstrap fixture
-    fixtures = ['export_data_1', ]
+    # fixtures = ['export_data_1', ]
 
     def test_get_edddata(self):
         # users = get_edddata_users()
