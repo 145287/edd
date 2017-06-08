@@ -10,7 +10,6 @@ from .base import env
 # See https://pythonhosted.org/django-auth-ldap/install.html
 # See https://docs.djangoproject.com/en/dev/howto/auth-remote-user/
 AUTHENTICATION_BACKENDS = (
-    #'main.account.adapter.LocalTestBackend', # uncomment to simplify off-site development
     'main.account.adapter.AllauthLDAPBackend',  # 'django_auth_ldap.backend.LDAPBackend',
     'django.contrib.auth.backends.RemoteUserBackend',
     'django.contrib.auth.backends.ModelBackend',

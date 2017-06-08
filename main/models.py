@@ -129,34 +129,10 @@ class Update(models.Model, EDDSerialize):
             :return: an Update instance persisted to the database
         """
         request = get_current_request()
-
-        # gracefully handle updates made via the command line or via the ORM (e.g. in unit tests),
-        # where no request / user credentials are present
         if request is None:
             mod_by = user
             if mod_by is None:
                 mod_by = User.system_user()
-            logger.debug('Update.load_update(): request is None')  # TODO: remove debug stmt
-            if user is None:
-
-                # first check for the 'system' user, which should only exist externally to the unit
-                # tests (so it's the normal case in production)
-                system_username = 'system'
-                user = User.objects.filter(username=system_username)
-                if user:
-                    logger.warn(
-                        'No request or user was associated with this model creation/update. '
-                        'Attributing it to the "%s" user on the assumption the change was made'
-                        'from the Python shell.' % system_username)
-                else:
-                    user = User.objects.get(username=UNIT_TEST_FIXTURE_USERNAME)
-                    logger.warn(
-                        'No request or user was associated with this model creation/update. '
-                        'Attributing it to the %s user on the assumption the change was made'
-                        'in unit test code.' % UNIT_TEST_FIXTURE_USERNAME)
-            else:  # TODO: remove debug block
-                logger.debug('Update.load_update(): user parameter is %s ' % str(user))
-
             update = cls(mod_time=arrow.utcnow(),
                          mod_by=mod_by,
                          path=path,
@@ -164,7 +140,6 @@ class Update(models.Model, EDDSerialize):
             # TODO this save may be too early?
             update.save()
         else:
-            logger.debug('Update.load_update(): request is NOT None')
             update = cls.load_request_update(request)
         return update
 
@@ -1148,7 +1123,7 @@ class StudyPermission(models.Model):
         (WRITE, _('Write')),
     )
     CAN_VIEW = (READ, WRITE)
-    CAN_EDIT = WRITE
+    CAN_EDIT = (WRITE, )
     study = models.ForeignKey(
         Study,
         help_text=_('Study this permission applies to.'),

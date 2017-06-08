@@ -263,8 +263,8 @@ SWAGGER_SETTINGS = {
                        "REST API. Both the REST API and this documentation are evolving "
                        "works-in-progress. This initial API isn't mature, so use / create "
                        "dependencies at your own risk!",
-        # TODO: update once EDD's OSS license is decided
-        # 'license': 'Apache 2.0', 'licenseUrl': 'http://www.apache.org/licenses/LICENSE-2.0.html',
+        'license': 'BSD 3-Clause',
+        'licenseUrl': 'https://raw.githubusercontent.com/JBEI/edd/master/LICENSE.txt',
         'title': 'EDD REST API',
     },
 

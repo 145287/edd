@@ -18,6 +18,7 @@ from uuid import UUID
 
 from django.core.exceptions import PermissionDenied
 from django.db.models import Q
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import mixins, response, schemas, status, viewsets
 from rest_framework.decorators import api_view, renderer_classes
@@ -84,7 +85,6 @@ REVERSE_SORT_VALUE = 'descending'
 
 
 def permission_denied_handler(request):
-    from django.http import HttpResponse
     # same as DRF provides in /rest/
     return HttpResponse('{"detail":"Authentication credentials were not provided."}',
                         HTTP_403_FORBIDDEN)
@@ -118,10 +118,10 @@ class ModelImplicitViewOrResultImpliedPermissions(BasePermission):
          1) Unauthenticated users are always denied access
          2) A user who has class-level add/change/delete permissions explicitly granted via
             django.contrib.auth permissions may exercise those capabilities
-         2) A user who has any add/change/delete class-level permission explicitly granted also
+         3) A user who has any add/change/delete class-level permission explicitly granted also
             has implied class-level view access (though view isn't explicitly defined as an auth
             permission)
-         3) If the inferred_permissions property is defined / non-empty, the existence of one or
+         4) If the inferred_permissions property is defined / non-empty, the existence of one or
          more results  in the queryset implies that the user has a level of inferred permission
          only on the objects returned by queryset. This inference should align with DRF's
          pattern of queryset filtering based on only the objects a user has access to. In most
@@ -135,8 +135,7 @@ class ModelImplicitViewOrResultImpliedPermissions(BasePermission):
     _AUTH_ADD_PERMISSION = '%(app_label)s.add_%(model_name)s'
     _AUTH_CHANGE_PERMISSION = '%(app_label)s.change_%(model_name)s'
     _AUTH_DELETE_PERMISSION = '%(app_label)s.delete_%(model_name)s'
-    _AUTH_IMPLICIT_VIEW_PERMISSION = [_AUTH_ADD_PERMISSION, _AUTH_CHANGE_PERMISSION,
-                                      _AUTH_DELETE_PERMISSION]
+    _AUTH_IMPLICIT_VIEW_PERMISSION = [_AUTH_CHANGE_PERMISSION, _AUTH_DELETE_PERMISSION]
     django_auth_perms_map = {
         'GET': _AUTH_IMPLICIT_VIEW_PERMISSION,
         'HEAD': _AUTH_IMPLICIT_VIEW_PERMISSION,
@@ -564,11 +563,6 @@ class StrainViewSet(mixins.CreateModelMixin,
             'class': self.__class__.__name__,
             'method': self.get_queryset.__name__})
 
-        # never show anything to un-authenticated users
-        user = self.request.user
-        if (not user) or not user.is_authenticated():
-            return Strain.objects.none()
-
         # build a query, filtering by the provided user inputs (starting out unfiltered)
         query = Strain.objects.all()
 
@@ -624,65 +618,10 @@ class StrainViewSet(mixins.CreateModelMixin,
         # but the present alternative is to create a potential leak of experimental strain names /
         # descriptions to potentially competing researchers that use the same EDD instance
 
-        query = self._filter_for_permissions(self.request, query)
+        query = filter_for_study_permission(self.request, query, Strain, 'line__study__')
         logger.debug('StrainViewSet query count=%d' % len(query))
         return query
 
-    @staticmethod
-    def _filter_for_permissions(request, query):
-        """
-        A helper method to filter a Strain Queryset to only strains the requesting user should
-        have access to
-        """
-        user = request.user
-
-        requested_permission = get_requested_study_permission(request.method)
-
-        # if user role (e.g. admin) grants access to all studies, we can expose all strains
-        # without additional queries
-        has_role_based_permission = (requested_permission == StudyPermission.READ and
-                                     Study.user_role_can_read(user))
-        if has_role_based_permission:
-            return query
-
-        # test whether explicit "manager" permissions allow user to access all strains without
-        # having to drill down into case-by-case study/line/strain relationships that would
-        # grant access to a subset of strains
-        has_explicit_manage_permission = False
-        enabling_manage_permissions = (
-            ModelImplicitViewOrResultImpliedPermissions.get_enabling_permissions(
-                    request.method, Strain))
-
-        for manage_permission in enabling_manage_permissions:
-            if user.has_perm(manage_permission):
-                has_explicit_manage_permission = True
-                logger.debug('User %(user)s has explicit permission to %(requested_perm)s '
-                             'all Strain objects, implied via the "%(granting_perm)s" '
-                             'permission' % {
-                                 'user':           user.username,
-                                 'requested_perm': requested_permission,
-                                 'granting_perm':  manage_permission,
-                             })
-                break
-
-        if has_explicit_manage_permission:
-            return query
-
-        # if user has no global permissions that grant access to all strains, filter
-        # results to only the strains already exposed in studies the user has read/write
-        # access to. This is significantly more expensive, but exposes the same data available
-        # via the UI. Where possible, we should encourage clients to access strains via
-        # /rest/studies/X/strains instead of this resource to avoid these joins.
-
-        # if user is only requesting read access to the strain, construct a query that
-        # will infer read permission from the existing of either read or write
-        # permission
-        if requested_permission == StudyPermission.READ:
-            requested_permission = StudyPermission.CAN_VIEW
-        user_permission_q = Study.user_permission_q(user, requested_permission,
-                                                    keyword_prefix='line__study__')
-        query = query.filter(user_permission_q).distinct()
-        return query
 
     def list(self, request, *args, **kwargs):
         """
@@ -949,7 +888,9 @@ class StudyViewSet(viewsets.ReadOnlyModelViewSet):  # read-only for now...see TO
                 study_query = study_query.filter(slug=study_id)
 
         study_query = _optional_timestamp_filter(study_query,
-                                                 self.request.query_params)
+                                                 request.query_params)
+
+        study_query = filter_for_study_permission(request, study_query, Study, '')
 
         return study_query
 
@@ -959,8 +900,74 @@ class StudyViewSet(viewsets.ReadOnlyModelViewSet):  # read-only for now...see TO
 
         return super(StudyViewSet, self).create(request, *args, **kwargs)
 
-    # TODO: test whether update / destroy are protected by get_queryset, or whether they need
-        # separate permissions checks to protect them. Then change back to a ModelViewSet.
+
+def filter_for_study_permission(request, query, result_model_class, study_keyword_prefix):
+    """
+        A helper method to filter a Queryset to return only results that the requesting user 
+        should have access to, based on django.auth permissions and on explicitly-configured 
+        StudyPermissions.
+        :param request: the HttpRequest to access a study-related resource
+        :param query: the queryset as defined by the request (with permissions not yet enforced)
+        :result_model_class: the Django model class returned by the QuerySet. If the user has 
+        class-level django.contrib.auth appropriate permissions to view/modify/create objects of 
+        this type, access will be granted regardless of configured Study-level permissions.
+            
+     """
+    user = request.user
+
+    # never show anything to un-authenticated users
+    user = request.user
+    if (not user) or not user.is_authenticated():
+        return result_model_class.objects.none()
+
+    requested_permission = get_requested_study_permission(request.method)
+
+    # if user role (e.g. admin) grants access to all studies, we can expose all strains
+    # without additional queries
+    has_role_based_permission = (requested_permission == StudyPermission.READ and
+                                 Study.user_role_can_read(user))
+    if has_role_based_permission:
+        return query
+
+    # test whether explicit "manager" permissions allow user to access all results without
+    # having to drill down into case-by-case study or study/line/strain relationships that would
+    # grant access to a subset of results
+    has_explicit_manage_permission = False
+    enabling_manage_permissions = (
+        ModelImplicitViewOrResultImpliedPermissions.get_enabling_permissions(request.method,
+                                                                             result_model_class))
+
+    for manage_permission in enabling_manage_permissions:
+        if user.has_perm(manage_permission):
+            has_explicit_manage_permission = True
+            logger.debug('User %(user)s has explicit permission to %(requested_perm)s '
+                         'all %(manage_perm_class)s objects, implied via the "%(granting_perm)s" '
+                         'permission' % {
+                             'user':              user.username,
+                             'manage_perm_class': result_model_class.__class__.__name__,
+                             'requested_perm':    requested_permission,
+                             'granting_perm':     manage_permission,
+                         })
+            break
+
+    if has_explicit_manage_permission:
+        return query
+
+    # if user has no global permissions that grant access to all strains, filter
+    # results to only the strains already exposed in studies the user has read/write
+    # access to. This is significantly more expensive, but exposes the same data available
+    # via the UI. Where possible, we should encourage clients to access strains via
+    # /rest/studies/X/strains instead of this resource to avoid these joins.
+
+    # if user is only requesting read access to the strain, construct a query that
+    # will infer read permission from the existing of either read or write
+    # permission
+    if requested_permission == StudyPermission.READ:
+        requested_permission = StudyPermission.CAN_VIEW
+    user_permission_q = Study.user_permission_q(user, requested_permission,
+                                                keyword_prefix=study_keyword_prefix)
+    query = query.filter(user_permission_q).distinct()
+    return query
 
 
 NUMERIC_PK_PATTERN = re.compile('^\d+$')
