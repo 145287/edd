@@ -8,16 +8,15 @@ from main.models import Line, MetadataType, MetadataGroup, Strain, Study, Update
 from rest_framework import reverse, serializers
 
 
-####################################################################################################
+###################################################################################################
 # unused
-####################################################################################################
+###################################################################################################
 class UpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Update
         fields = ('mod_time', 'mod_by', 'path', 'origin')
         depth = 0
-
-####################################################################################################
+###################################################################################################
 
 
 class StudySerializer(serializers.ModelSerializer):
@@ -25,7 +24,7 @@ class StudySerializer(serializers.ModelSerializer):
         model = Study
         fields = ('pk', 'name', 'uuid', 'slug', 'description', 'created', 'updated', 'contact',
                   'contact_extra',
-                  'metabolic_map', 'meta_store')
+                  'metabolic_map', 'meta_store', 'active')
         # here after
         # confirming that Lines (our primary concern at the moment) work
         depth = 0

@@ -16,6 +16,7 @@ import logging
 import re
 from uuid import UUID
 
+from django.conf import settings
 from django.core.exceptions import PermissionDenied
 from django.db.models import Q
 from django.http import HttpResponse
@@ -35,7 +36,7 @@ from edd.rest.serializers import (LineSerializer, MeasurementUnitSerializer,
                                   ProtocolSerializer, StrainSerializer, StudySerializer,
                                   UserSerializer)
 from jbei.rest.clients.edd.constants import (CASE_SENSITIVE_PARAM, CREATED_AFTER_PARAM,
-                                             CREATED_BEFORE_PARAM, LINES_ACTIVE_DEFAULT,
+                                             CREATED_BEFORE_PARAM, ACTIVE_STATUS_DEFAULT,
                                              LINE_ACTIVE_STATUS_PARAM, METADATA_TYPE_CONTEXT,
                                              METADATA_TYPE_GROUP, METADATA_TYPE_I18N,
                                              METADATA_TYPE_LOCALE, METADATA_TYPE_NAME_REGEX,
@@ -44,7 +45,7 @@ from jbei.rest.clients.edd.constants import (CASE_SENSITIVE_PARAM, CREATED_AFTER
                                              STRAIN_NAME, STRAIN_NAME_REGEX, STRAIN_REGISTRY_ID,
                                              STRAIN_REGISTRY_URL_REGEX, STUDIES_RESOURCE_NAME,
                                              STUDY_LINE_NAME_REGEX, UPDATED_AFTER_PARAM,
-                                             UPDATED_BEFORE_PARAM)
+                                             UPDATED_BEFORE_PARAM, ACTIVE_STATUS_PARAM)
 from jbei.rest.utils import is_numeric_pk
 from jbei.utils import PK_OR_TYPICAL_UUID_REGEX
 from main.models import (Line, MeasurementUnit, MetadataGroup, MetadataType, Protocol, Strain,
@@ -99,7 +100,7 @@ class DjangoModelImplicitViewPermissions(DjangoModelPermissions):
     _ADD_PERMISSION = '%(app_label)s.add_%(model_name)s'
     _CHANGE_PERMISSION = '%(app_label)s.change_%(model_name)s'
     _DELETE_PERMISSION = '%(app_label)s.delete_%(model_name)s'
-    _IMPLICIT_VIEW_PERMISSION = [_ADD_PERMISSION, _CHANGE_PERMISSION, _DELETE_PERMISSION]
+    _IMPLICIT_VIEW_PERMISSION = [_CHANGE_PERMISSION, _DELETE_PERMISSION]
     perms_map = {
         'GET': _IMPLICIT_VIEW_PERMISSION,
         'HEAD': _IMPLICIT_VIEW_PERMISSION,
@@ -256,6 +257,29 @@ class ModelImplicitViewOrResultImpliedPermissions(BasePermission):
                         'method': request.method,
                         'url': request.path, })
         return has_permission
+
+
+class StudyResourcePermission(ModelImplicitViewOrResultImpliedPermissions):
+    def has_permission(self, request, view):
+
+        # override base permission to allow all authenticated users to create studies, except when
+        # explicitly disabled
+        user = request.user
+
+        if (not user) or (not user.is_authenticated()):
+            print('StudyResourcePermission: User %s is not authenticated' % str(user))
+            # TODO: remove debug stmt
+            return False
+
+        if request.method == 'POST':
+            # TODO: remove debug block
+            can_create = Study.user_can_create(user)
+            print('StudyResourcePermission: User %s can create a study? %s' % (str(user),
+                                                                              can_create))
+            return Study.user_can_create(user)
+
+        print('StudyResourcePermission: calling super.has_permission() for user %s' % str(user))
+        return super(StudyResourcePermission, self).has_permission(request, view)
 
 
 @api_view()
@@ -766,7 +790,7 @@ class LineViewSet(viewsets.ReadOnlyModelViewSet):
 
         # filter by line active status, applying the default (only active lines)
         params = self.request.query_params
-        active_status = params.get(LINE_ACTIVE_STATUS_PARAM, LINES_ACTIVE_DEFAULT)
+        active_status = params.get(ACTIVE_STATUS_PARAM, ACTIVE_STATUS_DEFAULT)
         query = filter_by_active_status(query, active_status, '')
         # TODO: implement / test optional name regex filter
         query = _optional_timestamp_filter(query, params)
@@ -822,79 +846,91 @@ def filter_by_active_status(queryset, active_status=QUERY_ACTIVE_OBJECTS_ONLY, q
     query_keyword = '%sactive' % query_prefix
     # return requested status, or active objects only if input was bad
     active_value = (active_status != QUERY_INACTIVE_OBJECTS_ONLY)
-    # TODO: remove debug stmt
-    print('Active query %s' % str({query_keyword: active_value}))
     active_criterion = Q(**{query_keyword: active_value})
     return queryset.filter(active_criterion)
 
 
-class StudyViewSet(viewsets.ReadOnlyModelViewSet):  # read-only for now...see TODO below
+class StudyViewSet(mixins.CreateModelMixin,
+                    mixins.RetrieveModelMixin,
+                    mixins.UpdateModelMixin,
+                    # TODO: implement & test later as a low priority...study deletion via the
+                    # API should maybe onlymark studies as "disabled" if they have data (or maybe
+                    # should require an override parameter to actually delete.
+                    # mixins.DestroyModelMixin,
+                    mixins.ListModelMixin,
+                    GenericViewSet):
     """
-    API endpoint that provides read-only access to studies, subject to user/role read access
-    controls. Study write access is a TODO. To view the list of nested resources in the
-    browseable API, access this resource, then press the 'Options' button.
+    API endpoint that provides access to studies, subject to user/role read access
+    controls. Note that some privileged 'manager' users may have access to the base study name, 
+    description, etc, but not to the contained experiment description or data.
     """
     serializer_class = StudySerializer
     contact = StringRelatedField(many=False)
-    permission_classes = [ModelImplicitViewOrResultImpliedPermissions]
+    permission_classes = [StudyResourcePermission]
+
+    def get_object(self):
+        """
+        Overrides the default implementation to provide flexible lookup for Study detail
+        views (either based on local numeric primary key, slug, or UUID
+        """
+        queryset = self.get_queryset()
+
+        # unlike the DRF example code: for consistency in permissions enforcement, just do all the
+        # filtering in get_queryset() and pass empty filters here
+        filters = {}
+        obj = get_object_or_404(queryset, **filters)
+        self.check_object_permissions(self.request, obj)
+        return obj
 
     def get_queryset(self):
 
-        user = self.request.user
+        request = self.request
+        params = request.query_params
 
-        permission = StudyPermission.READ
-        if self.request.method in HTTP_MUTATOR_METHODS:
-            permission = StudyPermission.WRITE
+        study_query = Study.objects.all()
 
-        # if the user's admin / staff role gives read access to all Studies, don't bother querying
-        # the database for specific permissions defined on this study
-        if permission == StudyPermission.READ and Study.user_role_can_read(user):
-            logger.debug('User role has study read permission')
-            study_query = Study.objects.all()
-        else:
-            logger.debug('Searching for studies user %s has read access to.' % user.username)
-            user_permission_q = Study.user_permission_q(user, permission)
-            # NOTE: distinct is required since this query can return multiple rows for the same
-            # study, one per permission that gives this user access to it
-            study_query = Study.objects.filter(user_permission_q).distinct()
-
-        # if client provided a study ID, filter based on it
-        # TODO: nice-to-have UUID / slug based lookup drafted here isn't working, but log
-        # statements inserted here imply that the logic is correct/similar queries work from the
-        # command line. circle back to this and to any other related code when revisiting the REST
-        # API... TODO: misleading 'pk' kwarg is set by router...investigate later.
+        # if client provided any study identifier, filter based on it
+        # TODO: misleading 'pk' kwarg is set by router...investigate later.
         study_id = self.kwargs.get('pk', None)
         if study_id:
             # test whether this is an integer pk
             found_identifier_format = False
             try:
-                study_query = study_query.filter(pk=int(study_id))
+                study_query = study_query.filter(pk=study_id)
                 found_identifier_format = True
             except ValueError:
-                logger.debug('Study identifier "%s" is not an integer pk' % study_id)
+                pass
 
             # if format not found, try UUID
             if not found_identifier_format:
                 try:
-                    logger.debug('Trying UUID %s' % study_id)
                     study_query = study_query.filter(uuid=UUID(study_id))
                     found_identifier_format = True
                 except ValueError:
-                    logger.debug('Study identifier "%s" is not a UUID' % study_id)
+                    pass
 
             # otherwise assume it's a slug
             if not found_identifier_format:
                 logger.debug('Treating identifier "%s" as a slug' % study_id)
                 study_query = study_query.filter(slug=study_id)
 
+        # TODO: uncomment / implement / test
+        # active_status = params.get(ACTIVE_STATUS_PARAM, ACTIVE_STATUS_DEFAULT)
+        # filter_by_active_status(study_query, active_status=active_status)
+
         study_query = _optional_timestamp_filter(study_query,
                                                  request.query_params)
 
         study_query = filter_for_study_permission(request, study_query, Study, '')
 
+        logger.debug('Found %d results' % len(study_query))
+
         return study_query
 
     def create(self, request, *args, **kwargs):
+        if not request.user.is_authenticated():
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
         if not Study.user_can_create(request.user):
             return Response(status=status.HTTP_403_FORBIDDEN)
 
@@ -1011,7 +1047,7 @@ class StrainStudiesView(viewsets.ReadOnlyModelViewSet):
         params = self.request.query_params
 
         line_active_status = self.request.query_params.get(
-            LINE_ACTIVE_STATUS_PARAM, LINES_ACTIVE_DEFAULT
+            LINE_ACTIVE_STATUS_PARAM, ACTIVE_STATUS_DEFAULT
         )
         user = self.request.user
 
@@ -1091,7 +1127,7 @@ class StudyStrainsView(viewsets.ReadOnlyModelViewSet):
 
         study_id_is_pk = is_numeric_pk(study_id)
         line_active_status = self.request.query_params.get(LINE_ACTIVE_STATUS_PARAM,
-                                                           LINES_ACTIVE_DEFAULT)
+                                                           ACTIVE_STATUS_DEFAULT)
         user = self.request.user
 
         # build the query, enforcing EDD's custom study access controls. Normally we'd require
@@ -1164,7 +1200,7 @@ class StudyLineView(viewsets.ModelViewSet):  # LineView(APIView):
 
         # filter by line active status, applying the default (only active lines)
         line_active_status = self.request.query_params.get(LINE_ACTIVE_STATUS_PARAM,
-                                                           LINES_ACTIVE_DEFAULT)
+                                                           ACTIVE_STATUS_DEFAULT)
         line_query = filter_by_active_status(line_query, line_active_status)
         # distinct() required by *both* study permissions check and line activity filter above
         line_query = line_query.distinct()

@@ -14,7 +14,7 @@ import requests
 from urlparse import urlparse, urlsplit
 
 from .constants import (CASE_SENSITIVE_DEFAULT, CASE_SENSITIVE_PARAM, LINE_ACTIVE_STATUS_PARAM,
-                        LINES_ACTIVE_DEFAULT, METADATA_CONTEXT_VALUES, METADATA_TYPE_CONTEXT,
+                        ACTIVE_STATUS_DEFAULT, METADATA_CONTEXT_VALUES, METADATA_TYPE_CONTEXT,
                         METADATA_TYPE_GROUP, METADATA_TYPE_I18N, METADATA_TYPE_LOCALE,
                         METADATA_TYPE_NAME_REGEX, PAGE_NUMBER_QUERY_PARAM, PAGE_SIZE_QUERY_PARAM,
                         STRAIN_CASE_SENSITIVE, STRAIN_DESCRIPTION_KEY, STRAIN_NAME,
@@ -490,7 +490,7 @@ class EddApi(RestApiClient):
         if response.status_code == requests.codes.ok:
             return DrfPagedResult.of(response.content, model_class=Study)
 
-    def get_study_lines(self, study_pk, line_active_status=LINES_ACTIVE_DEFAULT, query_url=None,
+    def get_study_lines(self, study_pk, line_active_status=ACTIVE_STATUS_DEFAULT, query_url=None,
                         page_number=None):
 
         """
@@ -530,7 +530,7 @@ class EddApi(RestApiClient):
         return DrfPagedResult.of(response.content, Line)
 
     def get_study_strains(self, study_pk, strain_id='',
-                          line_active_status=LINES_ACTIVE_DEFAULT,
+                          line_active_status=ACTIVE_STATUS_DEFAULT,
                           page_number=None, query_url=None):
         """
 

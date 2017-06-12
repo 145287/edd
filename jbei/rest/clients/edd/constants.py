@@ -17,13 +17,13 @@ METADATA_GROUPS_RESOURCE_NAME = r'metadata_groups'
 ###################################################################################################
 # General parameter names / values that apply to multiple REST resources. Consistency!! :-)
 ###################################################################################################
-
+ACTIVE_STATUS_PARAM = 'active'
 LINE_ACTIVE_STATUS_PARAM = 'lines_active'
 QUERY_ALL_OBJECTS = 'all'
 QUERY_ACTIVE_OBJECTS_ONLY = 'active'
 QUERY_INACTIVE_OBJECTS_ONLY = 'inactive'
 NAME_REGEX = 'name_regex'
-LINES_ACTIVE_DEFAULT = QUERY_ACTIVE_OBJECTS_ONLY
+ACTIVE_STATUS_DEFAULT = QUERY_ACTIVE_OBJECTS_ONLY
 ACTIVE_STATUS_OPTIONS = (QUERY_ALL_OBJECTS, QUERY_ACTIVE_OBJECTS_ONLY, QUERY_INACTIVE_OBJECTS_ONLY)
 
 LOCALE_PARAM = 'locale'
@@ -65,7 +65,7 @@ METADATA_CONTEXT_ASSAY = 'A'
 METADATA_CONTEXT_VALUES = (METADATA_CONTEXT_LINE, METADATA_CONTEXT_STUDY, METADATA_CONTEXT_ASSAY)
 
 ###################################################################################################
-# Parameter names & values for /rest/strains
+# Parameter names & values for /rest/strains/
 ###################################################################################################
 STRAIN_REGISTRY_ID = 'registry_id'
 STRAIN_REGISTRY_URL_REGEX = 'registry_url_regex'
@@ -73,8 +73,15 @@ STRAIN_NAME = 'name'
 STRAIN_NAME_REGEX = NAME_REGEX
 STRAIN_CASE_SENSITIVE = CASE_SENSITIVE_PARAM
 
+###################################################################################################
+# Parameter names & values for /rest/studies/
+###################################################################################################
+STUDY_NAME_KEY = 'name'
+STUDY_DESCRIPTION_KEY = 'description'
+UUID_KEY = 'uuid'
+
 ################
-# /rest/study/lines
+# /rest/studies/lines
 ################
 STUDY_LINE_NAME_REGEX = NAME_REGEX
 

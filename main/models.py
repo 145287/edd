@@ -866,6 +866,8 @@ class Study(EDDObject):
     contact_extra = models.TextField(
         help_text=_('Additional field for contact information about this study (e.g. contact is '
                     'not a User of EDD).'),
+        blank=True,
+        null=True,
         verbose_name=_('Contact (extra)'),
     )
     metabolic_map = models.ForeignKey(
