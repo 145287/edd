@@ -13,8 +13,10 @@ accidentally affect client code.
 from __future__ import unicode_literals
 import json
 import logging
+from datetime import timedelta
 from pprint import pformat
 from uuid import UUID
+from time import sleep
 
 import collections
 from django.conf import settings
@@ -28,7 +30,12 @@ from jbei.rest.clients.edd.constants import (STRAINS_RESOURCE_NAME, STRAIN_DESCR
                                              STRAIN_NAME_KEY, STRAIN_REG_ID_KEY,
                                              STRAIN_REG_URL_KEY, NEXT_PAGE_KEY, PREVIOUS_PAGE_KEY,
                                              RESULT_COUNT_KEY, RESULTS_KEY, STUDIES_RESOURCE_NAME,
-                                             STUDY_DESCRIPTION_KEY, STUDY_NAME_KEY, UUID_KEY)
+                                             STUDY_DESCRIPTION_KEY, STUDY_NAME_KEY, UUID_KEY,
+                                             QUERY_INACTIVE_OBJECTS_ONLY,
+                                             QUERY_ACTIVE_OBJECTS_ONLY, ACTIVE_STATUS_PARAM,
+                                             CREATED_AFTER_PARAM, CREATED_BEFORE_PARAM,
+                                             QUERY_ANY_ACTIVE_STATUS, UPDATED_AFTER_PARAM,
+                                             UPDATED_BEFORE_PARAM)
 from main.models import (Line, Strain, Study, StudyPermission, User, GroupPermission,
                          UserPermission, EveryonePermission)
 
@@ -191,17 +198,21 @@ class MyApiTestCase(APITestCase):
         self.client.logout()
 
     def _require_authenticated_get_allowed(self, url, user, expected_values=None,
-                                           values_converter=None, partial_response=False):
-        self._do_get(url, user, HTTP_200_OK, expected_values, values_converter,
-                     partial_response=partial_response)
+                                           request_params=None, values_converter=None,
+                                           partial_response=False):
+        self._do_get(url, user, HTTP_200_OK,
+                     expected_values=expected_values,
+                     values_converter=values_converter,
+                     partial_response=partial_response,
+                     request_params=request_params)
 
     def _do_get(self, url, user, expected_status, expected_values=None, values_converter=None,
-                partial_response=False):
+                partial_response=False, request_params=None):
         logged_in = self.client.login(username=user.username,
                                       password=PLAINTEXT_TEMP_USER_PASSWORD)
         self.assertTrue(logged_in, 'Client login failed. Unable to continue with the test.')
 
-        response = self.client.get(url)
+        response = self.client.get(url, data=request_params)
         self.assertEquals(expected_status, response.status_code, _WRONG_STATUS_MSG % {
             'method':   'GET',
             'url': url,
@@ -281,13 +292,13 @@ class MyApiTestCase(APITestCase):
             'url': url,
             'response': str(response.content)})
 
-    def _require_authenticated_get_empty_paged_result(self, url, user):
+    def _require_authenticated_get_empty_paged_result(self, url, user, request_params=None):
         logged_in = self.client.login(username=user.username,
                                       password=PLAINTEXT_TEMP_USER_PASSWORD)
 
         self.assertTrue(logged_in, 'Client login failed. Unable to continue with the test.')
 
-        response = self.client.get(url)
+        response = self.client.get(url, data=request_params)
         required_result_status = HTTP_200_OK
         self.assertEquals(required_result_status, response.status_code, _WRONG_STATUS_MSG % {
                                 'method':   'GET',
@@ -1406,16 +1417,34 @@ class StudyResourceTests(MyApiTestCase):
         print('%s(): ' % self.test_study_list_read_access.__name__)
         print(SEPARATOR)
 
+        # test basic use for a single study
         list_url = '%s/' % STUDIES_RESOURCE_URL
         print("Testing read access for %s" % list_url)
         self._enforce_study_read_access(list_url, True, expected_values=[self.study])
 
-        # create / configure studies and related strains to test strain access via
-        # the "everyone" permissions. Note these aren't included in setUpTestData() since that
-        # config sets us up for initial tests for results where no strain access is allowed / no
-        # results are returned.
+        # test study filtering based on active status
+        self.study.active = False
+        self.study.save()
 
-        # everyone read
+        self._require_authenticated_get_empty_paged_result(list_url, self.superuser)
+
+        request_params = {ACTIVE_STATUS_PARAM: QUERY_ACTIVE_OBJECTS_ONLY}
+        self._require_authenticated_get_empty_paged_result(list_url,
+                                                           self.superuser,
+                                                           request_params=request_params)
+
+        request_params = {ACTIVE_STATUS_PARAM: QUERY_INACTIVE_OBJECTS_ONLY}
+        logger.debug('request params: %s' % request_params)  # TODO: remove debug stmt
+        self._require_authenticated_get_allowed(list_url,
+                                                self.superuser,
+                                                request_params=request_params,
+                                                expected_values=[self.study],
+                                                values_converter=study_to_json_dict,
+                                                partial_response=True)
+
+        # create a study everyone can read
+        # wait before saving the study to guarantee a different creation/update timestamp
+        sleep(0.05)
         everyone_read_study = Study.objects.create(name='Readable by everyone')
         EveryonePermission.objects.create(study=everyone_read_study,
                                           permission_type=StudyPermission.READ)
@@ -1425,15 +1454,93 @@ class StudyResourceTests(MyApiTestCase):
                                                 values_converter=study_to_json_dict,
                                                 partial_response=True)
 
-        # everyone write
+        # create a study everyone can write
+        # wait before saving the study to guarantee a different creation/update timestamp
+        sleep(0.05)
         everyone_write_study = Study.objects.create(name='Writable be everyone')
         EveryonePermission.objects.create(study=everyone_write_study,
                                           permission_type=StudyPermission.WRITE)
 
         self._require_authenticated_get_allowed(list_url, self.unprivileged_user,
                                                 expected_values=[
-                                                           everyone_read_study,
-                                                           everyone_write_study, ],
+                                                    everyone_read_study,
+                                                    everyone_write_study, ],
+                                                values_converter=study_to_json_dict,
+                                                partial_response=True)
+
+        # test study filtering for all any active status
+        request_params = {ACTIVE_STATUS_PARAM: QUERY_ANY_ACTIVE_STATUS}
+        self._require_authenticated_get_allowed(list_url,
+                                                self.superuser,
+                                                request_params=request_params,
+                                                expected_values=[self.study,
+                                                                 everyone_read_study,
+                                                                 everyone_write_study],
+                                                values_converter=study_to_json_dict,
+                                                partial_response=True)
+        self.study.active = True
+        self.study.save()
+
+        # test timestamp-based filtering
+        request_params = {
+            CREATED_AFTER_PARAM: self.study.created.mod_time,
+        }
+        expected_values = [self.study,
+                           everyone_read_study,
+                           everyone_write_study, ]
+        self._require_authenticated_get_allowed(list_url, self.study_read_only_user,
+                                                request_params=request_params,
+                                                expected_values=expected_values,
+                                                values_converter=study_to_json_dict,
+                                                partial_response=True)
+
+        request_params = {
+            UPDATED_AFTER_PARAM: self.study.created.mod_time,
+        }
+        self._require_authenticated_get_allowed(list_url, self.study_read_only_user,
+                                                request_params=request_params,
+                                                expected_values=expected_values,
+                                                values_converter=study_to_json_dict,
+                                                partial_response=True)
+
+        # verify that "after" param is inclusive, and "before" is exclusive
+        request_params = {
+            CREATED_AFTER_PARAM: str(self.study.created.mod_time),
+            CREATED_BEFORE_PARAM: self.study.created.mod_time + timedelta(microseconds=1),
+        }
+        self._require_authenticated_get_allowed(list_url, self.study_read_only_user,
+                                                request_params=request_params,
+                                                expected_values=[self.study],
+                                                values_converter=study_to_json_dict,
+                                                partial_response=True)
+
+        request_params = {
+            UPDATED_AFTER_PARAM:  str(self.study.updated.mod_time),
+            UPDATED_BEFORE_PARAM: self.study.updated.mod_time + timedelta(microseconds=1),
+        }
+        self._require_authenticated_get_allowed(list_url, self.study_read_only_user,
+                                                request_params=request_params,
+                                                expected_values=[self.study],
+                                                values_converter=study_to_json_dict,
+                                                partial_response=True)
+
+        request_params = {
+            CREATED_BEFORE_PARAM: everyone_write_study.created.mod_time
+        }
+        expected_values = [self.study, everyone_read_study, ]
+        self._require_authenticated_get_allowed(list_url, self.study_read_only_user,
+                                                request_params=request_params,
+                                                expected_values=expected_values,
+                                                values_converter=study_to_json_dict,
+                                                partial_response=True)
+
+        request_params = {
+            UPDATED_BEFORE_PARAM: self.study.updated.mod_time
+        }
+        expected_values = [everyone_read_study, everyone_write_study, ]
+        self._require_authenticated_get_allowed(list_url, self.study_read_only_user,
+                                                request_params=request_params,
+                                                expected_values=expected_values,
                                                 values_converter=study_to_json_dict,
                                                 partial_response=True)
 

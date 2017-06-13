@@ -40,7 +40,7 @@ from jbei.rest.clients.edd.constants import (CASE_SENSITIVE_PARAM, CREATED_AFTER
                                              LINE_ACTIVE_STATUS_PARAM, METADATA_TYPE_CONTEXT,
                                              METADATA_TYPE_GROUP, METADATA_TYPE_I18N,
                                              METADATA_TYPE_LOCALE, METADATA_TYPE_NAME_REGEX,
-                                             QUERY_ACTIVE_OBJECTS_ONLY, QUERY_ALL_OBJECTS,
+                                             QUERY_ACTIVE_OBJECTS_ONLY, QUERY_ANY_ACTIVE_STATUS,
                                              QUERY_INACTIVE_OBJECTS_ONLY, STRAIN_CASE_SENSITIVE,
                                              STRAIN_NAME, STRAIN_NAME_REGEX, STRAIN_REGISTRY_ID,
                                              STRAIN_REGISTRY_URL_REGEX, STUDIES_RESOURCE_NAME,
@@ -836,7 +836,7 @@ def filter_by_active_status(queryset, active_status=QUERY_ACTIVE_OBJECTS_ONLY, q
     active_status = active_status.lower()
 
     # just return the parameter if no extra filtering is required
-    if active_status == QUERY_ALL_OBJECTS:
+    if active_status == QUERY_ANY_ACTIVE_STATUS:
         return queryset
 
     # construct an ORM query keyword based on the relationship of the filtered model class to the
@@ -914,16 +914,16 @@ class StudyViewSet(mixins.CreateModelMixin,
                 logger.debug('Treating identifier "%s" as a slug' % study_id)
                 study_query = study_query.filter(slug=study_id)
 
-        # TODO: uncomment / implement / test
-        # active_status = params.get(ACTIVE_STATUS_PARAM, ACTIVE_STATUS_DEFAULT)
-        # filter_by_active_status(study_query, active_status=active_status)
+        # filter for active status
+        active_status = params.get(ACTIVE_STATUS_PARAM, ACTIVE_STATUS_DEFAULT)
+        study_query = filter_by_active_status(study_query, active_status=active_status)
 
+        # apply timestamp_based filtering
         study_query = _optional_timestamp_filter(study_query,
                                                  request.query_params)
 
+        # apply study permissions
         study_query = filter_for_study_permission(request, study_query, Study, '')
-
-        logger.debug('Found %d results' % len(study_query))
 
         return study_query
 
@@ -1275,8 +1275,8 @@ def _optional_timestamp_filter(queryset, query_params):
             queryset = queryset.filter(created__mod_time__lt=created_before_value)
 
         # filter by last update timestamp
-        updated_before = query_params.get(UPDATED_BEFORE_PARAM, None)
         updated_after = query_params.get(UPDATED_AFTER_PARAM, None)
+        updated_before = query_params.get(UPDATED_BEFORE_PARAM, None)
         if updated_after:
             query_param_name, value = UPDATED_AFTER_PARAM, updated_after
             queryset = queryset.filter(updated__mod_time__gte=updated_after)
