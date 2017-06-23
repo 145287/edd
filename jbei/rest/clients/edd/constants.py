@@ -10,6 +10,7 @@ maintainability of the API across data member renames in Django's model classes
 ###################################################################################################
 LINES_RESOURCE_NAME = r'lines'
 STUDIES_RESOURCE_NAME = r'studies'
+SEARCH_RESOURCE_NAME = r'search'
 STRAINS_RESOURCE_NAME = r'strains'
 METADATA_TYPES_RESOURCE_NAME = r'metadata_types'
 METADATA_GROUPS_RESOURCE_NAME = r'metadata_groups'
@@ -22,9 +23,15 @@ LINE_ACTIVE_STATUS_PARAM = 'lines_active'
 QUERY_ANY_ACTIVE_STATUS = 'all'
 QUERY_ACTIVE_OBJECTS_ONLY = 'active'
 QUERY_INACTIVE_OBJECTS_ONLY = 'inactive'
-NAME_REGEX = 'name_regex'
+NAME_REGEX_PARAM = 'name_regex'
+DESCRIPTION_REGEX_PARAM = 'description'
+META_SEARCH_PARAM = 'metadata'
+META_KEY_PARAM = 'key'
+META_OPERATOR_PARAM = 'op'
+META_VALUE_PARAM = 'test'
 ACTIVE_STATUS_DEFAULT = QUERY_ACTIVE_OBJECTS_ONLY
-ACTIVE_STATUS_OPTIONS = (QUERY_ANY_ACTIVE_STATUS, QUERY_ACTIVE_OBJECTS_ONLY, QUERY_INACTIVE_OBJECTS_ONLY)
+ACTIVE_STATUS_OPTIONS = (QUERY_ANY_ACTIVE_STATUS, QUERY_ACTIVE_OBJECTS_ONLY,
+                         QUERY_INACTIVE_OBJECTS_ONLY)
 
 LOCALE_PARAM = 'locale'
 CASE_SENSITIVE_PARAM = 'case_sensitive'
@@ -70,7 +77,7 @@ METADATA_CONTEXT_VALUES = (METADATA_CONTEXT_LINE, METADATA_CONTEXT_STUDY, METADA
 STRAIN_REGISTRY_ID = 'registry_id'
 STRAIN_REGISTRY_URL_REGEX = 'registry_url_regex'
 STRAIN_NAME = 'name'
-STRAIN_NAME_REGEX = NAME_REGEX
+STRAIN_NAME_REGEX = NAME_REGEX_PARAM
 STRAIN_CASE_SENSITIVE = CASE_SENSITIVE_PARAM
 
 ###################################################################################################
@@ -78,12 +85,24 @@ STRAIN_CASE_SENSITIVE = CASE_SENSITIVE_PARAM
 ###################################################################################################
 STUDY_NAME_KEY = 'name'
 STUDY_DESCRIPTION_KEY = 'description'
+STUDY_CONTACT_KEY = 'contact'
 UUID_KEY = 'uuid'
 
 ################
 # /rest/studies/lines
 ################
-STUDY_LINE_NAME_REGEX = NAME_REGEX
+STUDY_LINE_NAME_REGEX = NAME_REGEX_PARAM
+
+###################################################################################################
+# Parameter names & values for /rest/search/
+###################################################################################################
+SEARCH_TYPE_LINES = 'lines'
+SEARCH_TYPE_STUDIES = 'studies'
+SEARCH_TYPE_PROTOCOLS = 'protocols'
+SEARCH_TYPE_MEASUREMENT_UNITS = 'measurement_units'
+SEARCH_TYPE_METADATA_GROUPS = 'metadata_groups'
+SEARCH_TYPE_METADATA_TYPES = 'metadata_types'
+SEARCH_TYPE_STRAINS = 'strains'
 
 
 ###################################################################################################

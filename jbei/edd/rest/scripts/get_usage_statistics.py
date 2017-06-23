@@ -57,7 +57,7 @@ def main():
                         help='The first year whose usage statistics should be queried',
                         default=2014)
     parser.add_argument('-end', help='The last year whose usage statistics should be queried.',
-                        default=arrow.utcnow().year)
+                        default=arrow.utcnow().year +1)
     parser.add_argument('-timezone',
                         '-tz',
                         help='Time zone for which date queries apply',
@@ -126,7 +126,6 @@ def main():
     edd_session_auth = edd_login_details.session_auth
 
     edd = EddApi(base_url=EDD_URL, auth=edd_session_auth, verify=VERIFY_EDD_CERT)
-    edd.write_enabled = True
     edd.timeout = EDD_REQUEST_TIMEOUT
 
     # query EDD for studies created each quarter within requested years

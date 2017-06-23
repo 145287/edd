@@ -13,6 +13,8 @@ import requests
 
 from urlparse import urlparse, urlsplit
 
+from arrow import Arrow
+
 from .constants import (CASE_SENSITIVE_DEFAULT, CASE_SENSITIVE_PARAM, LINE_ACTIVE_STATUS_PARAM,
                         ACTIVE_STATUS_DEFAULT, METADATA_CONTEXT_VALUES, METADATA_TYPE_CONTEXT,
                         METADATA_TYPE_GROUP, METADATA_TYPE_I18N, METADATA_TYPE_LOCALE,
@@ -21,7 +23,8 @@ from .constants import (CASE_SENSITIVE_DEFAULT, CASE_SENSITIVE_PARAM, LINE_ACTIV
                         STRAIN_NAME_KEY, STRAIN_NAME_REGEX, STRAIN_REG_ID_KEY, STRAIN_REG_URL_KEY,
                         STRAIN_REGISTRY_ID, STRAIN_REGISTRY_URL_REGEX, CREATED_BEFORE_PARAM,
                         CREATED_AFTER_PARAM, UPDATED_AFTER_PARAM, UPDATED_BEFORE_PARAM,
-                        STRAINS_RESOURCE_NAME)
+                        STRAINS_RESOURCE_NAME, ACTIVE_STATUS_PARAM, NAME_REGEX_PARAM,
+                        DESCRIPTION_REGEX_PARAM)
 from jbei.rest.api import RestApiClient
 from jbei.rest.auth import EddSessionAuth
 from jbei.rest.sessions import Session, PagedResult, PagedSession
@@ -231,6 +234,8 @@ class DrfSession(PagedSession):
 def _set_if_value_valid(dictionary, key, value):
     # utility method to get rid of long blocks of setting dictionary keys only if values valid
     if value:
+        if isinstance(value, Arrow):
+            value = str(value)
         dictionary[key] = value
 
 
@@ -365,20 +370,30 @@ class EddApi(RestApiClient):
 
         return DrfPagedResult.of(response.content, model_class=MetadataType)
 
-    def search_studies(self, created_after=None, created_before=None, updated_after=None,
-                       updated_before=None, page_number=None):
+    def search_studies(self, name_regex=None, description_regex=None, created_after=None,
+                       created_before=None, updated_after=None,
+                       updated_before=None, active=ACTIVE_STATUS_DEFAULT,
+                       case_sensitive=CASE_SENSITIVE_DEFAULT, page_number=None, ):
         # TODO: implement/test other search parameters
-        search_params = {}
+
+        search_params = {'type': 'studies'}
+        _set_if_value_valid(search_params, NAME_REGEX_PARAM, name_regex)
+        _set_if_value_valid(search_params, DESCRIPTION_REGEX_PARAM, description_regex)
+        _set_if_value_valid(search_params, CASE_SENSITIVE_PARAM, case_sensitive)
         _set_if_value_valid(search_params, CREATED_AFTER_PARAM, created_after)
         _set_if_value_valid(search_params, CREATED_BEFORE_PARAM, created_before)
         _set_if_value_valid(search_params, UPDATED_AFTER_PARAM, updated_after)
         _set_if_value_valid(search_params, UPDATED_BEFORE_PARAM, updated_before)
-        _set_if_value_valid(search_params, PAGE_SIZE_QUERY_PARAM, self.result_limit)
-        _set_if_value_valid(search_params, PAGE_NUMBER_QUERY_PARAM, page_number)
+        _set_if_value_valid(search_params, ACTIVE_STATUS_PARAM, active)
+
+        paging_params = {}
+        _set_if_value_valid(paging_params, PAGE_SIZE_QUERY_PARAM, self.result_limit)
+        _set_if_value_valid(paging_params, PAGE_NUMBER_QUERY_PARAM, page_number)
 
         # make the HTTP request
-        url = '%s/rest/study' % self.base_url
-        response = self.session.get(url, params=search_params, headers=self._json_header)
+        url = '%s/rest/search/' % self.base_url
+        response = self.session.post(url, params=paging_params, data=json.dumps(search_params),
+                                     headers=self._json_header)
 
         # throw an error for unexpected reply
         if response.status_code != requests.codes.ok:
