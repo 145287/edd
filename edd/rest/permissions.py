@@ -33,8 +33,8 @@ class DjangoModelImplicitViewPermissions(DjangoModelPermissions):
 
 class ImpliedPermissions(BasePermission):
     """
-    A custom permissions class similar DjangoModelPermissions that allows permissions to a REST
-    resource based on the following:
+    A custom permissions class similar DRF'S DjangoModelPermissions that allows permissions to a
+    REST resource based on the following:
          1) Unauthenticated users are always denied access
          2) A user who has class-level add/change/delete django.contrib.auth permissions
             may exercise those capabilities
@@ -49,9 +49,9 @@ class ImpliedPermissions(BasePermission):
          while avoiding a separate DB query in this class to check user permissions that are
          already checked as part of queryset result filtering.
 
-    Client REST views that use this or derived permissions classes must be unit tested for
-    security, since correct application of permissions depends on how the view's QuerySet
-    filters results.  Once appropriate unit tests are in place, clients can either subclass this
+    Client REST views that use this or derived permissions classes **must be unit tested** for
+    security, since correct application of permissions depends on how the View's QuerySet
+    filters results.
     """
 
     # django.contrib.auth permissions explicitly respected or used as the basis for interring view
@@ -138,7 +138,7 @@ class ImpliedPermissions(BasePermission):
         assert queryset is not None, ('Cannot apply permissions on a view that '
                                       'does not set `.queryset` or have a `.get_queryset()` '
                                       'method. View "%(view)s" does not have either' % {
-                                          'view': view.__class__.__name__ })
+                                          'view': view.__class__.__name__})
         #########################################################
 
         http_method = request.method

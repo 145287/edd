@@ -28,7 +28,6 @@ from rest_framework.exceptions import APIException, ParseError, ValidationError,
 from rest_framework.permissions import DjangoModelPermissions, IsAuthenticated
 from rest_framework.relations import StringRelatedField
 from rest_framework.response import Response
-from rest_framework.settings import api_settings
 from rest_framework.status import HTTP_403_FORBIDDEN
 from rest_framework.viewsets import GenericViewSet
 from rest_framework_swagger.renderers import OpenAPIRenderer, SwaggerUIRenderer
@@ -55,7 +54,9 @@ from jbei.rest.clients.edd.constants import (CASE_SENSITIVE_PARAM, CREATED_AFTER
                                              META_SEARCH_PARAM, SEARCH_TYPE_LINES,
                                              SEARCH_TYPE_STUDIES, SEARCH_TYPE_MEASUREMENT_UNITS,
                                              SEARCH_TYPE_METADATA_TYPES, SEARCH_TYPE_PROTOCOLS,
-                                             SEARCH_TYPE_STRAINS, SEARCH_TYPE_METADATA_GROUPS)
+                                             SEARCH_TYPE_STRAINS, SEARCH_TYPE_METADATA_GROUPS,
+                                             UNIT_NAME_PARAM, ALT_NAMES_PARAM, TYPE_GROUP_PARAM,
+                                             SEARCH_TYPE_PARAM)
 from jbei.rest.utils import is_numeric_pk
 from jbei.utils import PK_OR_TYPICAL_UUID_REGEX
 from main.models import (Line, MeasurementUnit, MetadataGroup, MetadataType, Protocol, Strain,
@@ -91,13 +92,9 @@ REVERSE_SORT_VALUE = 'descending'
 
 USE_STANDARD_PERMISSIONS = None
 
-# TODO: consider for all models below:
-#   # Required for DjangoModelPermissions bc of get_queryset() override.
-#   # See http://www.django-rest-framework.org/api-guide/permissions/#djangomodelpermissions
-#   queryset = Strain.objects.none()
-#   permissionClasses = (IsAuthenticated,) for views dependent on custom Study permissions
-
-SEARCH_TYPE_PARAM = 'type'
+# Subset of Django 1.11-supported HStoreField operators that don't require a key name in
+# order to use them. Note: 'contains'/'contained_by' work both with and without a key
+NON_KEY_DJANGO_HSTORE_COMPARISONS = ('has_key', 'has_any_keys', 'has_keys', 'keys', 'values')
 
 
 def permission_denied_handler(request):
@@ -177,7 +174,7 @@ def build_metadata_type_query(queryset, query_params, identifier=None):
             queryset = queryset.reverse()
 
     queryset = _optional_regex_filter(query_params, queryset, TYPE_NAME_PROPERTY,
-                                          METADATA_TYPE_NAME_REGEX, METADATA_TYPE_LOCALE, )
+                                      METADATA_TYPE_NAME_REGEX, METADATA_TYPE_LOCALE, )
 
     return queryset
 
@@ -202,10 +199,6 @@ class MeasurementUnitViewSet(viewsets.ReadOnlyModelViewSet):
 
         return build_measurement_units_query(self.request.query_params, queryset, pk)
 
-unit_name_param = 'unit_name'
-type_group_param = 'type_group'
-alternate_names_param = 'alternate_names'
-
 
 def build_measurement_units_query(query_params, queryset, identifier=None):
     # Note: at the time of writing, MeasurementUnit doesn't support a UUID
@@ -214,13 +207,13 @@ def build_measurement_units_query(query_params, queryset, identifier=None):
 
     i18n_placeholder = ''
 
-    queryset = _optional_regex_filter(query_params, queryset, 'unit_name', unit_name_param,
+    queryset = _optional_regex_filter(query_params, queryset, 'unit_name', UNIT_NAME_PARAM,
                                       i18n_placeholder)
 
     queryset = _optional_regex_filter(query_params, queryset, 'alternate_names',
-                                      alternate_names_param, i18n_placeholder)
+                                      ALT_NAMES_PARAM, i18n_placeholder)
 
-    queryset = _optional_regex_filter(query_params, queryset, 'type_group', type_group_param,
+    queryset = _optional_regex_filter(query_params, queryset, 'type_group', TYPE_GROUP_PARAM,
                                       i18n_placeholder)
 
     return queryset
@@ -700,8 +693,8 @@ class StudyViewSet(mixins.CreateModelMixin,
     contact = StringRelatedField(many=False)
     permission_classes = [StudyResourcePermissions]
 
-    # TODO: uncomment, set to "id" for clarity, and retest nested resources
-    #lookup_url_kwarg = STUDY_URL_KWARG
+    # TODO: uncomment, set to "id" for clarity, and retest nested resources (after unit testing)
+    # lookup_url_kwarg = STUDY_URL_KWARG
 
     def get_object(self):
         """
@@ -832,10 +825,6 @@ def optional_edd_object_filtering(params, query, identifier_override):
 
         return query
 
-# Subset of Django 1.11-supported HStoreField operators that don't require a key name in
-# order to use them. Note: 'contains'/'contained_by' work both with and without a key
-strictly_non_key_based_comparisons = ('has_key', 'has_any_keys', 'has_keys', 'keys', 'values')
-
 
 def _filter_for_metadata(query, meta_comparison, comparison_num, comparison_count):
     meta_key = meta_comparison.get(META_KEY_PARAM, None)
@@ -870,9 +859,9 @@ def _filter_for_metadata(query, meta_comparison, comparison_num, comparison_coun
             'comp': comparison_desc,
             'op': META_OPERATOR_PARAM})
 
-    if meta_operator in strictly_non_key_based_comparisons or meta_operator.startswith('keys'):
+    if meta_operator in NON_KEY_DJANGO_HSTORE_COMPARISONS or meta_operator.startswith('keys'):
         if meta_key:
-            raise ValidationError("""""%(comp)s%(key)s isn't allowed for operator "%(op)s. 
+            raise ValidationError("""""%(comp)s%(key)s isn't allowed for operator "%(op)s.
             Use "%(value)s" instead.""""" % {
                 'comp': comparison_desc, 'key': META_KEY_PARAM, 'op': meta_operator,
                 'value': META_VALUE_PARAM
@@ -1307,12 +1296,12 @@ class SearchViewSet(GenericViewSet):
     A generic search view that uses code from other API resources to enforce permissions and query
     results based on the requested result type.
     """
-    # TODO: merge/test other extant searches
+    # TODO: Remove/simplify if no additional permissions classes are used during API implementation
     permissions_lookup = {
         SEARCH_TYPE_LINES:   (ImpliedPermissions,),
         SEARCH_TYPE_METADATA_TYPES: (ImpliedPermissions,),
         SEARCH_TYPE_PROTOCOLS: (ImpliedPermissions,),
-        SEARCH_TYPE_STUDIES: (StudyResourcePermissions,),
+        SEARCH_TYPE_STUDIES: (ImpliedPermissions,),
     }
 
     queryset_lookup = {
@@ -1409,8 +1398,9 @@ class SearchViewSet(GenericViewSet):
         # execute the query function.  if result permissions are derived from study permissions,
         # override the default behavior of treating a POST request as requesting mutator permission
         if search_type in self.study_permission_controlled_types:
-            queryset = queryset_function(self.request, request_params, identifier=identifier,
-                                         requested_study_permission_override=StudyPermission.CAN_VIEW)
+            queryset = queryset_function(
+                    self.request, request_params, identifier=identifier,
+                    requested_study_permission_override=StudyPermission.CAN_VIEW)
         else:
             queryset = queryset_function(self.request, request_params, identifier=identifier, )
 

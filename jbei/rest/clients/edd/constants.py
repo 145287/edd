@@ -72,6 +72,13 @@ METADATA_CONTEXT_ASSAY = 'A'
 METADATA_CONTEXT_VALUES = (METADATA_CONTEXT_LINE, METADATA_CONTEXT_STUDY, METADATA_CONTEXT_ASSAY)
 
 ###################################################################################################
+# Parameter names & values for /rest/measurement_units/
+###################################################################################################
+UNIT_NAME_PARAM = 'unit_name'
+TYPE_GROUP_PARAM = 'type_group'
+ALT_NAMES_PARAM = 'alternate_names'
+
+###################################################################################################
 # Parameter names & values for /rest/strains/
 ###################################################################################################
 STRAIN_REGISTRY_ID = 'registry_id'
@@ -93,9 +100,12 @@ UUID_KEY = 'uuid'
 ################
 STUDY_LINE_NAME_REGEX = NAME_REGEX_PARAM
 
+
 ###################################################################################################
 # Parameter names & values for /rest/search/
 ###################################################################################################
+SEARCH_TYPE_PARAM = 'type'
+
 SEARCH_TYPE_LINES = 'lines'
 SEARCH_TYPE_STUDIES = 'studies'
 SEARCH_TYPE_PROTOCOLS = 'protocols'

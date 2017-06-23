@@ -177,9 +177,9 @@ class EddApiTestCase(APITestCase):
         self.client.logout()
 
         return self._compare_expected_values(url, 'PUT', user, response, expected_status,
-                                      expected_values=expected_values,
-                                      values_converter=None,
-                                      partial_response=partial_response)
+                                             expected_values=expected_values,
+                                             values_converter=None,
+                                             partial_response=partial_response)
 
     def _assert_authenticated_get_denied(self, url, user):
         logged_in = self.client.login(username=user.username,
@@ -229,14 +229,13 @@ class EddApiTestCase(APITestCase):
         # compare expected return code
         self.assertEquals(
                 expected_status, response.status_code,
-                (_WRONG_STATUS_MSG + '. Response body was %(response)s')% {
+                (_WRONG_STATUS_MSG + '. Response body was %(response)s') % {
                     'method':   method,
                     'url': url,
                     'user': user.username,
                     'expected': expected_status,
                     'observed': response.status_code,
-                    'response': response.content,
-        })
+                    'response': response.content, })
         observed = json.loads(response.content)
 
         # compare expected response content, if provided
@@ -1261,34 +1260,32 @@ class StudyResourceTests(EddApiTestCase):
                                                values_converter=study_to_json_dict,
                                                partial_response=True)
 
+    def test_study_delete(self):
+        """
+            Enforces that study deletion is not allowed via the API
+        """
 
+        # create a study to be deleted
+        study = Study.objects.create(name='To be deleted')
 
-    # def test_study_delete(self):
-    #     """
-    #         Enforces that study deletion is not allowed via the API
-    #     """
-    #
-    #     # create a study to be deleted
-    #     study = Study.objects.create(name='To be deleted')
-    #
-    #     study_detail_pattern = '%(base_study_url)s/%(pk)d/'
-    #     url = study_detail_pattern % {
-    #         'base_study_url': STUDIES_RESOURCE_URL,
-    #         'pk': study.pk,
-    #     }
-    #
-    #     # unauthenticated user and unprivileged users get 403
-    #     self.client.logout()
-    #     response = self.client.delete(url)
-    #     self.assertEqual(response.status_code, HTTP_403_FORBIDDEN)
-    #     self._do_delete(url, self.unprivileged_user, HTTP_403_FORBIDDEN)
-    #
-    #     # privileged users got 405
-    #     self._do_delete(url, self.staff_study_deleter, HTTP_405_METHOD_NOT_ALLOWED)
-    #     self._do_delete(url, self.superuser, HTTP_405_METHOD_NOT_ALLOWED)
-    #
-    #     # delete the study via the ORM
-    #     study.delete()
+        study_detail_pattern = '%(base_study_url)s/%(pk)d/'
+        url = study_detail_pattern % {
+            'base_study_url': STUDIES_RESOURCE_URL,
+            'pk': study.pk,
+        }
+
+        # unauthenticated user and unprivileged users get 403
+        self.client.logout()
+        response = self.client.delete(url)
+        self.assertEqual(response.status_code, HTTP_403_FORBIDDEN)
+        self._do_delete(url, self.unprivileged_user, HTTP_403_FORBIDDEN)
+
+        # privileged users got 405
+        self._do_delete(url, self.staff_study_deleter, HTTP_405_METHOD_NOT_ALLOWED)
+        self._do_delete(url, self.superuser, HTTP_405_METHOD_NOT_ALLOWED)
+
+        # delete the study via the ORM
+        study.delete()
 
     def test_study_add(self):
         """
@@ -1527,8 +1524,8 @@ class StudyResourceTests(EddApiTestCase):
                                                self.superuser,
                                                request_params=request_params,
                                                expected_values=[self.study,
-                                                                 everyone_read_study,
-                                                                 everyone_write_study],
+                                                                everyone_read_study,
+                                                                everyone_write_study],
                                                values_converter=study_to_json_dict,
                                                partial_response=True)
         self.study.active = True
@@ -1650,10 +1647,6 @@ class StudyResourceTests(EddApiTestCase):
                                                    values_converter=study_to_json_dict,
                                                    partial_response=True)
 
-_META_COMPARISON_KEY = 'metadata'
-_KEY = 'key'
-_OP = 'op'
-_TEST = 'test'
 
 class SearchLinesResourceTest(EddApiTestCase):
 
@@ -1951,6 +1944,10 @@ class SearchLinesResourceTest(EddApiTestCase):
         search_params = {
             SEARCH_TYPE_PARAM: 'lines'
         }
+        _META_COMPARISON_KEY = 'metadata'
+        _KEY = 'key'
+        _OP = 'op'
+        _TEST = 'test'
 
         # add another active line so we know metadata searches are actually applied
         shaking_speed = MetadataType.objects.get(type_name='Shaking speed',
@@ -2048,16 +2045,11 @@ class SearchLinesResourceTest(EddApiTestCase):
         print("Testing edd object timestamp search using %s" % search_url)
 
         # create some lines with a known minimum time gap between their creation times
-        min_time_gap = 0.5  # Note: 0.05 s delay doesn't seem to work consistently
         line1 = Line.objects.create(name='Line 1', study_id=self.study.pk)
-        # sleep(min_time_gap)
-        # line2 = Line.objects.create(name='Line 2', study_id=self.study.pk)
         delta = timedelta(microseconds=1)
-        # sleep(min_time_gap)
-        # line3 = Line.objects.create(name='Line 3', study_id=self.study.pk)
 
         # explicitly set creation timestamps that are normally set by EddObject. Previous
-        # iterations of this test used short calls to sleep() to create the samp effect, but for
+        # iterations of this test used short calls to sleep() to create the same effect, but for
         # unknown reasons it only worked when this test was run in isolation (not when even the
         # whole class was executed).
         time2 = Update.objects.create(mod_time=line1.created.mod_time + delta)
