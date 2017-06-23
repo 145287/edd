@@ -721,7 +721,7 @@ class StudyViewSet(mixins.CreateModelMixin,
 
         params = self.request.query_params
         study_id = self.kwargs.get('pk', None)
-        return build_study_query(self.request, params, identifier_override=study_id)
+        return build_study_query(self.request, params, identifier=study_id)
 
     def create(self, request, *args, **kwargs):
         if not request.user.is_authenticated():
@@ -733,16 +733,16 @@ class StudyViewSet(mixins.CreateModelMixin,
         return super(StudyViewSet, self).create(request, *args, **kwargs)
 
 
-def build_study_query(request, query_params, identifier_override=None):
+def build_study_query(request, query_params, identifier=None):
     study_query = Study.objects.all()
 
     # if client provided any identifier, filter based on it. Note that since studies have a slug
     # that most other EddObjects don't have, we do our id filtering up front
-    if identifier_override:
+    if identifier:
         # test whether this is an integer pk
         found_identifier_format = False
         try:
-            study_query = study_query.filter(pk=identifier_override)
+            study_query = study_query.filter(pk=identifier)
             found_identifier_format = True
         except ValueError:
             pass
@@ -750,15 +750,15 @@ def build_study_query(request, query_params, identifier_override=None):
         # if format not found, try UUID
         if not found_identifier_format:
             try:
-                study_query = study_query.filter(uuid=UUID(identifier_override))
+                study_query = study_query.filter(uuid=UUID(identifier))
                 found_identifier_format = True
             except ValueError:
                 pass
 
         # otherwise assume it's a slug
         if not found_identifier_format:
-            logger.debug('Treating identifier "%s" as a slug' % identifier_override)
-            study_query = study_query.filter(slug=identifier_override)
+            logger.debug('Treating identifier "%s" as a slug' % identifier)
+            study_query = study_query.filter(slug=identifier)
 
     # apply standard filtering options, but skip ID-based filtering we've already done
     study_query = optional_edd_object_filtering(query_params, study_query, identifier_override=None)
@@ -1456,7 +1456,7 @@ class SearchViewSet(GenericViewSet):
     def get_serializer_class(self):
         """
         Overrides the parent implementation to provide serialization that's dynamically determined
-        by the requested result type\
+        by the requested result type
         """
 
         serializer = self.serializer_lookup.get(self.search_type, None)

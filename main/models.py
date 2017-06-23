@@ -13,6 +13,7 @@ from collections import defaultdict
 from django import forms
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import AnonymousUser
 from django.contrib.postgres.fields import ArrayField, HStoreField
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -117,7 +118,6 @@ class Update(models.Model, EDDSerialize):
             time = self.mod_time
         return '%s by %s' % (time, self.mod_by)
 
-
     @classmethod
     def load_update(cls, user=None, path=None):
         """ Sometimes there will be actions happening outside the context of a request; use this
@@ -150,8 +150,15 @@ class Update(models.Model, EDDSerialize):
             request.META.get('REMOTE_ADDR', None),
             request.META.get('REMOTE_HOST', ''))
         if not hasattr(request, 'update_obj'):
+
+            mod_by = request.user
+            if isinstance(request.user, AnonymousUser):
+                print("Anonymous user request detected!!! Assuming system user. Request is %s" %
+                      str(request))
+                mod_by = User.system_user()
+
             update = cls(mod_time=arrow.utcnow(),
-                         mod_by=request.user,
+                         mod_by=mod_by,
                          path=request.get_full_path(),
                          origin=rhost)
             # TODO this save may be too early?
@@ -800,7 +807,8 @@ class EDDObject(EDDMetadata, EDDSerialize):
         self.name = name
 
     def save(self, *args, **kwargs):
-        self.ensure_update(kwargs.get('update', None))
+        update = kwargs.pop('update', None)
+        self.ensure_update(update=update)
         self.ensure_uuid()
         super(EDDObject, self).save(*args, **kwargs)
         # must ensure EDDObject is saved *before* attempting to add to updates
