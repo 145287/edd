@@ -148,15 +148,8 @@ class Update(models.Model, EDDSerialize):
             request.META.get('REMOTE_ADDR', None),
             request.META.get('REMOTE_HOST', ''))
         if not hasattr(request, 'update_obj'):
-
-            mod_by = request.user
-            if isinstance(request.user, AnonymousUser):
-                print("Anonymous user request detected!!! Assuming system user. Request is %s" %
-                      str(request))
-                mod_by = User.system_user()
-
             update = cls(mod_time=arrow.utcnow(),
-                         mod_by=mod_by,
+                         mod_by=request.user,
                          path=request.get_full_path(),
                          origin=rhost)
             # TODO this save may be too early?
