@@ -106,6 +106,15 @@ class EddApiTestCase(APITestCase):
                             'code': response.status_code,
                             'response': response.content, })
 
+    def _assert_unauthenticated_client_error(self, url):
+        self.client.logout()
+        response = self.client.get(url)
+        self.assertEquals(response.status_code, HTTP_400_BAD_REQUEST,
+                          'Expected unauthenticated client error, but got an HTTP %(code)d.  '
+                          'Response: %(response)s' % {
+                              'code': response.status_code,
+                              'response': response.content, })
+
     def _assert_unauthenticated_delete_denied(self, url):
         self.client.logout()
         response = self.client.delete(url)
@@ -285,6 +294,22 @@ class EddApiTestCase(APITestCase):
 
         response = self.client.get(url)
         required_result_status = HTTP_404_NOT_FOUND
+        self.assertEquals(required_result_status, response.status_code, _WRONG_STATUS_MSG
+                          % {
+                              'method': 'GET',
+                              'url': url,
+                              'user': user.username,
+                              'expected': required_result_status,
+                              'observed': response.status_code})
+
+    def _assert_authenticated_get_client_error(self, url, user):
+        logged_in = self.client.login(username=user.username,
+                                      password=PLAINTEXT_TEMP_USER_PASSWORD)
+
+        self.assertTrue(logged_in, 'Client login failed. Unable to continue with the test.')
+
+        response = self.client.get(url)
+        required_result_status = HTTP_400_BAD_REQUEST
         self.assertEquals(required_result_status, response.status_code, _WRONG_STATUS_MSG
                           % {
                               'method': 'GET',
@@ -546,17 +571,20 @@ class StrainResourceTests(EddApiTestCase):
             self._assert_authenticated_get_denied(url, self.study_read_group_user)
             self._assert_authenticated_get_denied(url, self.study_write_group_user)
 
-    def test_uuid_error_response(self):
+    def test_malformed_uri(self):
+        """
+        Tests that the API correctly identifies a client error in URI input, since code has
+        to deliberately avoid a 500 error for invalid ID's
+        """
         # build a URL with purposefully malformed UUID
-        strain_detail_pattern = '%(base_strain_url)s/%(uuid)d/'
+        strain_detail_pattern = '%(base_strain_url)s/%(uuid)s/'
         url = strain_detail_pattern % {
             'base_strain_url': STRAINS_RESOURCE_URL,
             'uuid': 'None',
         }
 
-        self._assert_unauthenticated_get_denied(url)
-
-        self._assert_authenticated_get_not_found(url, self.superuser)
+        self._assert_unauthenticated_client_error(url)
+        self._assert_authenticated_get_client_error(url, self.unprivileged_user)
 
     def test_strain_delete(self):
 
@@ -1318,6 +1346,21 @@ class StudyResourceTests(EddApiTestCase):
                                                expected_values=expected_values,
                                                values_converter=study_to_json_dict,
                                                partial_response=True)
+
+    def test_malformed_uri(self):
+        """
+        Tests that the API correctly identifies a client error in URI input, since code has
+        to deliberately avoid a 500 error for invalid ID's
+        """
+        # build a URL with purposefully malformed UUID
+        strain_detail_pattern = '%(base_strain_url)s/%(uuid)s/'
+        url = strain_detail_pattern % {
+            'base_strain_url': STRAINS_RESOURCE_URL,
+            'uuid': 'None',
+        }
+
+        self._assert_unauthenticated_client_error(url)
+        self._assert_authenticated_get_client_error(url, self.unprivileged_user)
 
     def test_study_delete(self):
         """

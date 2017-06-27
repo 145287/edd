@@ -1312,6 +1312,7 @@ class SearchViewSet(GenericViewSet):
     # TODO: Remove/simplify if no additional permissions classes are used during API implementation
     permissions_lookup = {
         SEARCH_TYPE_LINES:   (ImpliedPermissions,),
+        SEARCH_TYPE_MEASUREMENT_UNITS: (ImpliedPermissions,),
         SEARCH_TYPE_METADATA_TYPES: (ImpliedPermissions,),
         SEARCH_TYPE_PROTOCOLS: (ImpliedPermissions,),
         SEARCH_TYPE_STUDIES: (ImpliedPermissions,),

@@ -32,8 +32,6 @@ from jbei.rest.clients.edd.constants import (
 )
 from .export import table
 
-UNIT_TEST_FIXTURE_USERNAME = 'unit_test_user'
-
 
 logger = logging.getLogger(__name__)
 
