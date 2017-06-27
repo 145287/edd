@@ -8,7 +8,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('main', '0005_default-sbml-template'),
+        ('main', '0006_add-protein-strain-link'),
     ]
 
     operations = [
