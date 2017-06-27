@@ -58,7 +58,6 @@ from jbei.rest.clients.edd.constants import (CASE_SENSITIVE_PARAM, CREATED_AFTER
                                              UNIT_NAME_PARAM, ALT_NAMES_PARAM, TYPE_GROUP_PARAM,
                                              SEARCH_TYPE_PARAM)
 from jbei.rest.utils import is_numeric_pk
-from jbei.utils import PK_OR_TYPICAL_UUID_REGEX
 from main.models import (Line, MeasurementUnit, MetadataGroup, MetadataType, Protocol, Strain,
                          Study, StudyPermission, User)
 
@@ -395,7 +394,6 @@ class StrainViewSet(mixins.CreateModelMixin,
 
     serializer_class = StrainSerializer
     lookup_url_kwarg = BASE_STRAIN_URL_KWARG
-    lookup_value_regex = PK_OR_TYPICAL_UUID_REGEX
 
     def get_object(self):
         """
@@ -418,44 +416,56 @@ class StrainViewSet(mixins.CreateModelMixin,
         * flexible strain detail lookup by local numeric pk OR by UUID from ICE
         """
 
-        logger.debug('in %(class)s.%(method)s' % {
+        logger.debug('Start %(class)s. %(method)s %(url)s' % {
             'class': self.__class__.__name__,
-            'method': self.get_queryset.__name__})
+            'method': self.get_queryset.__name__,
+            'url': self.request.path})
 
         # build a query, filtering by the provided user inputs (starting out unfiltered)
         query = Strain.objects.all()
 
         # if a strain UUID or local numeric pk was provided via the URL, get it
+        identifier = None
         if self.kwargs:
-            strain_id_filter = self.kwargs.get(self.lookup_url_kwarg)
-            if is_numeric_pk(strain_id_filter):
-                query = query.filter(pk=strain_id_filter)
-            else:
-                query = query.filter(registry_id=strain_id_filter)
+            identifier = self.kwargs.get(self.lookup_url_kwarg)
+
+            try:
+                if is_numeric_pk(identifier):
+                    query = query.filter(pk=int(identifier))
+                else:
+                    query = query.filter(registry_id=UUID(identifier))
+            except ValueError:
+                raise ParseError('URL identifier "%s" is neither a valid integer nor UUID' %
+                                 identifier)
         # otherwise, we're searching strains, so filter them according to the provided params
         else:
             # parse optional query parameters
             query_params = self.request.query_params
-            strain_id_filter = query_params.get(self.lookup_url_kwarg)
+            identifier = query_params.get(self.lookup_url_kwarg)
             local_pk_filter = query_params.get('pk')
             registry_id_filter = query_params.get(STRAIN_REGISTRY_ID)
             registry_url_regex_filter = query_params.get(STRAIN_REGISTRY_URL_REGEX)
             case_sensitive = query_params.get(STRAIN_CASE_SENSITIVE)
             name_filter = query_params.get(STRAIN_NAME)
 
-            # if provided an ambiguously-defined unique ID for the strain, apply it based
-            # on the format of the provided value
-            if strain_id_filter:
-                if is_numeric_pk(strain_id_filter):
-                    query = query.filter(pk=strain_id_filter)
-                else:
-                    query = query.filter(registry_id=strain_id_filter)
+            try:
+                # if provided an ambiguously-defined unique ID for the strain, apply it based
+                # on the format of the provided value
+                if identifier:
+                    if is_numeric_pk(identifier):
+                        query = query.filter(pk=identifier)
+                    else:
+                        query = query.filter(registry_id=UUID(identifier))
 
-            if local_pk_filter:
-                query = query.filter(pk=local_pk_filter)
+                if local_pk_filter:
+                    identifier = local_pk_filter
+                    query = query.filter(pk=local_pk_filter)
 
-            if registry_id_filter:
-                query = query.filter(registry_id=registry_id_filter)
+                if registry_id_filter:
+                    identifier = registry_id_filter
+                    query = query.filter(registry_id=UUID(registry_id_filter))
+            except ValueError:
+                raise ParseError('Identifier %s is not a valid integer nor UUID' % identifier)
 
             if registry_url_regex_filter:
                 if case_sensitive:
@@ -483,9 +493,11 @@ class StrainViewSet(mixins.CreateModelMixin,
         http_method = self.request.method
         if http_method in HTTP_MUTATOR_METHODS:
             if not user.is_authenticated():
+                logger.debug('User is not authenticated. Returning zero results')
                 return Strain.objects.none()
             if user_has_admin_or_manage_perm(self.request, query):
-                    return query
+                logger.debug('User %s has manage permissions for ')
+                return query
             return Strain.objects.none()
 
         # if user is requesting to view one or more strains, allow either django auth permissions
@@ -927,6 +939,7 @@ def filter_for_study_permission(request, query, result_model_class, study_keywor
     # never show anything to un-authenticated users
     user = request.user
     if (not user) or not user.is_authenticated():
+        logger.debug('User %s is not authenticated' % user)
         return result_model_class.objects.none()
 
     if requested_study_permission_override is None:

@@ -123,7 +123,7 @@ class ImpliedPermissions(BasePermission):
         }
         return [perm % kwargs for perm in perm_code_patterns]
 
-    def has_permission(self, request, view):  # TODO: adjust logging level after testing complete
+    def has_permission(self, request, view):
         # Workaround to ensure DjangoModelPermissions are not applied
         # to the root view when using DefaultRouter.
         if getattr(view, '_ignore_model_permissions', False):
@@ -207,21 +207,27 @@ def user_has_admin_or_manage_perm(
                      })
         return True
 
-    # if user has been explicitly granted any of the class-level permissions that enable
-    # access, allow access
+    # if user has been explicitly granted any of the class-level django.contrib.auth permissions
+    # that enable access
     enabling_perms = perms_getter(http_method, queryset.model)
     logger.debug('Enabling permissions for %(method)s %(url)s: %(perms)s' % {
         'method': request.method, 'url': request.path, 'perms': ', '.join(enabling_perms)
     })
     for permission in enabling_perms:
         if user.has_perm(permission):
-            logger.debug('User %(username)s has explicitly-granted permission %(permission)s '
+            logger.debug('User %(username)s has class-level django.contrib.auth '
+                         'permission %(permission)s '
                          'on resource %(method)s %(url)s' % {
                              'username': user.username, 'permission': permission,
                              'method':   request.method, 'url': request.path,
                          })
             return True, False
 
+    logger.debug('User %(username)s has no superusr or class-level auth privileges for '
+                 '%(method)s %(url)s.' % {
+                     'username': user.username,
+                     'method':   request.method,
+                     'url': request.path, })
     return False
 
 

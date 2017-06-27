@@ -15,7 +15,7 @@ import json
 import logging
 from datetime import timedelta
 from pprint import pformat
-from uuid import UUID
+from uuid import UUID, uuid4
 from time import sleep
 
 import collections
@@ -90,7 +90,7 @@ _WRONG_STATUS_MSG = ('Wrong response status code from %(method)s %(url)s for use
 class EddApiTestCase(APITestCase):
     """
     Overrides APITestCase to provide helper methods that improve test error messages and simplify
-    client code.
+    repetetive test code.
     """
     def _assert_unauthenticated_put_denied(self, url, put_data):
         self.client.logout()
@@ -100,7 +100,11 @@ class EddApiTestCase(APITestCase):
     def _assert_unauthenticated_get_denied(self, url):
         self.client.logout()
         response = self.client.get(url)
-        self.assertTrue(response.status_code in DRF_UNAUTHENTICATED_PERMISSION_DENIED_CODES)
+        self.assertTrue(response.status_code in DRF_UNAUTHENTICATED_PERMISSION_DENIED_CODES,
+                        'Expected unauthenticated request to be denied, but got an HTTP '
+                        '%(code)d.  Response: %(response)s' % {
+                            'code': response.status_code,
+                            'response': response.content, })
 
     def _assert_unauthenticated_delete_denied(self, url):
         self.client.logout()
@@ -334,26 +338,25 @@ class EddApiTestCase(APITestCase):
 
 class StrainResourceTests(EddApiTestCase):
     """
-    Tests access controls and HTTP return codes for queries to the /rest/strains REST API resource
-    (not any nested resources).
+    Tests access controls and HTTP return codes for queries to the /rest/strains/ REST API resource
 
     Strains should only be accessible by:
     1) Superusers
     2) Users who have explicit class-level mutator permissions on Strains via a django.contrib.auth
-       permission. Any user with a class-level mutator permission has implied read permission on
+       permissions. Any user with a class-level mutator permission has implied read permission on
        all strains.
     3) Users who have strain read access implied by their read access to an associated study. Since
        EDD only caches the strain name, description, and URL, this should be essentially the same
        visibility granted via access to the study.  There's likely little need for API users to
        access strains in this way, which requires more expensive joins to determine.  However,
        it would be strange to *not* grant read-only access to the strain data already visible
-       via the study. Also note that class-level study mutator permissions granted via
-       django.contrib.auth do NOT grant strain access, since that permission only gives access to
-       the study name/description, not the data or metadata.
+       via the study, if requested. Also note that class-level study mutator permissions granted
+       via django.contrib.auth do NOT grant strain access, since that permission only gives
+       access to the study name/description, not the data or metadata.
 
-    Note that these permissions are enfoced by a combination of EDD's custom
-    ModelImplicitViewOrResultImpliedPermissions class and StrainViewSet's get_queryset() method,
-    whose non-empty result implies that the requesting user has access to the returned strains.
+    Note that these permissions are enforced by a combination of EDD's custom
+    ImpliedPermissions class and StrainViewSet's get_queryset() method, whose non-empty result
+    implies that the requesting user has access to the returned strains.
     """
 
     @classmethod
@@ -471,10 +474,10 @@ class StrainResourceTests(EddApiTestCase):
                                        permission_type=StudyPermission.WRITE)
 
         # create some strains / lines in the study
-        cls.study_strain1 = Strain(name='Study Strain 1',
-                                   registry_id=UUID('f120a00f-8bc3-484d-915e-5afe9d890c5f'))
-        cls.study_strain1.registry_url = 'https://registry-test.jbei.org/entry/55349'
-        cls.study_strain1.save()
+        cls.study_strain1 = Strain.objects.create(
+                name='Study Strain 1',
+                registry_id=UUID('f120a00f-8bc3-484d-915e-5afe9d890c5f'),
+                registry_url='https://registry-test.jbei.org/entry/55349')
 
         line = Line(name='Study strain1 line', study=cls.study)
         line.save()
@@ -543,11 +546,17 @@ class StrainResourceTests(EddApiTestCase):
             self._assert_authenticated_get_denied(url, self.study_read_group_user)
             self._assert_authenticated_get_denied(url, self.study_write_group_user)
 
-    def test_strain_uuid_pattern_match(self):
-        # TODO: test pattern matching for UUID's. had to make code changes during initial testing
-        # to enforce matching for UUID's returned by EDD's REST API, which is pretty weird after
-        # prior successful tests.
-        pass
+    def test_uuid_error_response(self):
+        # build a URL with purposefully malformed UUID
+        strain_detail_pattern = '%(base_strain_url)s/%(uuid)d/'
+        url = strain_detail_pattern % {
+            'base_strain_url': STRAINS_RESOURCE_URL,
+            'uuid': 'None',
+        }
+
+        self._assert_unauthenticated_get_denied(url)
+
+        self._assert_authenticated_get_not_found(url, self.superuser)
 
     def test_strain_delete(self):
 
@@ -644,47 +653,77 @@ class StrainResourceTests(EddApiTestCase):
         print(SEPARATOR)
 
         # Note: missing slash causes 301 response when authenticated
-        url_format = '%(resource_url)s/%(id)s/'
+        url_format = STRAINS_RESOURCE_URL + '/%(id)s/'
 
-        url = url_format % {'resource_url': STRAINS_RESOURCE_URL,
-                            'id':           self.study_strain1.pk}
+        # create a temporary strain to test intended changes on, while preventing changes
+        # to the class-level state that could impact other test results
+        study_strain = self.study_strain1
 
-        # define put data for changing every strain field
-        put_data = {
-            STRAIN_NAME_KEY:        'Holoferax volcanii',
-            STRAIN_DESCRIPTION_KEY: 'strain description goes here',
-            STRAIN_REG_ID_KEY:      '124bd9ee-7bb5-4266-91e1-6f16682b2b63',
-            STRAIN_REG_URL_KEY:     'https://registry-test.jbei.org/entry/64194',
-        }
+        strain_to_change = Strain.objects.create(name=study_strain.name,
+                                                 description=study_strain.description,
+                                                 registry_url=study_strain.registry_url,
+                                                 registry_id=uuid4())
 
-        # verify that an un-authenticated request gets a 404
-        self._assert_unauthenticated_put_denied(url, put_data)
+        # define URLs in both pk and UUID format, and run the same tests on both
+        for index, durable_id in enumerate(('pk', 'uuid')):
+            if 'pk' == durable_id:
+                url = url_format % {'id': self.study_strain1.pk}
+            else:
+                url = url_format % {'id': self.study_strain1.registry_id}
 
-        # verify that unprivileged user can't update a strain
-        self._assert_authenticated_put_denied(url, self.unprivileged_user, put_data)
+            # define put data for changing every strain field
+            put_data = {
+                STRAIN_NAME_KEY:        'Holoferax volcanii%d' % index,
+                STRAIN_DESCRIPTION_KEY: 'strain description goes here%d' % index,
+                STRAIN_REG_ID_KEY:      str(uuid4()),
+                STRAIN_REG_URL_KEY:     'https://registry-test.jbei.org/entry/6419%d' % index,
+                'pk':                   self.study_strain1.pk
+            }
 
-        # verify that group-level read/write permission on a related study doesn't grant any access
-        # to update the contained strains
-        self._assert_authenticated_put_denied(url, self.study_read_group_user,
-                                              put_data)
-        self._assert_authenticated_put_denied(url,
-                                              self.study_write_group_user,
-                                              put_data)
+            # verify that an un-authenticated request gets a 404
+            self._assert_unauthenticated_put_denied(url, put_data)
 
-        # verify that staff permission alone isn't enough to update a strain
-        self._assert_authenticated_put_denied(url, self.staff_user, put_data)
+            # verify that unprivileged user can't update a strain
+            self._assert_authenticated_put_denied(url, self.unprivileged_user, put_data)
 
-        # verify that a user can't update an existing strain with the 'create' permission.
-        # See http://www.django-rest-framework.org/api-guide/generic-views/#put-as-create
-        self._do_put(url, self.staff_strain_creator, put_data, HTTP_403_FORBIDDEN)
+            # verify that group-level read/write permission on a related study doesn't grant any
+            # access to update the contained strains
+            self._assert_authenticated_put_denied(url, self.study_read_group_user,
+                                                  put_data)
+            self._assert_authenticated_put_denied(url,
+                                                  self.study_write_group_user,
+                                                  put_data)
 
-        # verify that the explicit 'change' permission allows access to update the strain
-        self._assert_authenticated_put_allowed(url, self.staff_strain_changer, put_data)
+            # verify that staff permission alone isn't enough to update a strain
+            self._assert_authenticated_put_denied(url, self.staff_user, put_data)
 
-        # verify that an administrator can update a strain
-        self._assert_authenticated_put_allowed(url,
-                                               self.superuser,
-                                               put_data)
+            # verify that a user can't update an existing strain with the 'create' permission.
+            # See http://www.django-rest-framework.org/api-guide/generic-views/#put-as-create
+            self._do_put(url, self.staff_strain_creator, put_data, HTTP_403_FORBIDDEN)
+
+            if 'pk' == durable_id:
+                url = url_format % {'id': strain_to_change.pk}
+            else:
+                url = url_format % {'id': strain_to_change.registry_id}
+            put_data['pk'] = strain_to_change.pk
+
+            # verify that the explicit 'change' permission allows access to update the strain
+            self._assert_authenticated_put_allowed(url, self.staff_strain_changer, put_data,
+                                                   expected_values=put_data,
+                                                   partial_response=False)
+
+            if 'uuid' == durable_id:
+                url = url_format % {'id': put_data[STRAIN_REG_ID_KEY]}
+            put_data[STRAIN_REG_ID_KEY] = str(uuid4())
+
+            # verify that an administrator can update a strain
+            self._assert_authenticated_put_allowed(url,
+                                                   self.superuser,
+                                                   put_data,
+                                                   expected_values=put_data,
+                                                   partial_response=False)
+
+            strain_to_change.registry_id = put_data[STRAIN_REG_ID_KEY]
 
     def test_paging(self):
         pass
@@ -710,8 +749,8 @@ class StrainResourceTests(EddApiTestCase):
         everyone_read_study = Study.objects.create(name='Readable by everyone')
         EveryonePermission.objects.create(study=everyone_read_study,
                                           permission_type=StudyPermission.READ)
-        everyone_read_strain = Strain.objects.create(name='Readable by everyone via study '
-                                                          'read')
+        everyone_read_strain = Strain.objects.create(name='Readable by everyone via study read',
+                                                     registry_id=uuid4())
         line1 = Line.objects.create(name='Everyone read line', study=everyone_read_study)
         line1.strains.add(everyone_read_strain)
         line1.save()
@@ -724,8 +763,8 @@ class StrainResourceTests(EddApiTestCase):
         everyone_write_study = Study.objects.create(name='Writable be everyone')
         EveryonePermission.objects.create(study=everyone_write_study,
                                           permission_type=StudyPermission.WRITE)
-        everyone_write_strain = Strain.objects.create(name='Readable by everyone via study '
-                                                           'write')
+        everyone_write_strain = Strain.objects.create(name='Readable by everyone via study write',
+                                                      registry_id=uuid4())
         line2 = Line.objects.create(name='Everyone write line', study=everyone_write_study)
         line2.strains.add(everyone_write_strain)
         line2.save()
@@ -745,29 +784,41 @@ class StrainResourceTests(EddApiTestCase):
         print('%s(): ' % self.test_strain_detail_read_access.__name__)
         print(SEPARATOR)
 
-        strain_detail_url = '%(base_strain_url)s/%(pk)d/' % {
-            'base_strain_url': STRAINS_RESOURCE_URL,
-            'pk': self.study_strain1.pk,
-        }
+        # test access to the study-linked strain configured in setUpTestData(), which should
+        # expose strain details to users with study-specific privileges in addition to users with
+        # admin or class-level django.util.auth privileges
+        strain_detail_pattern = '%(base_strain_url)s/%(id)s/'
+        urls = (strain_detail_pattern % {
+                    'base_strain_url': STRAINS_RESOURCE_URL,
+                    'id': self.study_strain1.pk, },
+                strain_detail_pattern % {
+                    'base_strain_url': STRAINS_RESOURCE_URL,
+                    'id': self.study_strain1.registry_id, }, )
 
-        self._enforce_study_strain_read_access(strain_detail_url, False)
+        for strain_detail_url in urls:
+            # test access to the strain details (via pk)
+            self._enforce_study_strain_read_access(strain_detail_url, False, strain_in_study=True)
 
-        # create a strain so we can test access to its detail view
+        # create a new strain so we can test access to its detail view
         strain = Strain.objects.create(name='Test strain',
-                                       description='Description goes here')
+                                       description='Description goes here',
+                                       registry_id=uuid4())
 
         # construct the URL for the strain detail view
-        strain_detail_pattern = '%(base_strain_url)s/%(pk)d/'
-        strain_detail_url = strain_detail_pattern % {
-            'base_strain_url': STRAINS_RESOURCE_URL,
-            'pk':              strain.pk, }
+        urls = (strain_detail_pattern % {
+                    'base_strain_url': STRAINS_RESOURCE_URL,
+                    'id':              strain.pk, },
+                strain_detail_pattern % {
+                    'base_strain_url': STRAINS_RESOURCE_URL,
+                    'id': strain.registry_id, })
 
-        # test the strain detail view
-        self._enforce_study_strain_read_access(strain_detail_url,
-                                               False,
-                                               strain_in_study=False)
+        for strain_detail_url in urls:
+            # test the strain detail view. Normal users shouldn't have access via the study.
+            self._enforce_study_strain_read_access(strain_detail_url,
+                                                   False,
+                                                   strain_in_study=False)
 
-        # create / configure studies and related strains to test strain access via
+        # create / configure studies and related lines to test strain access via
         # the "everyone" permissions. Note these aren't included in setUpTestData() since that
         # config sets us up for initial tests for results where no strain access is allowed / no
         # results are returned.
@@ -777,45 +828,53 @@ class StrainResourceTests(EddApiTestCase):
         EveryonePermission.objects.create(study=everyone_read_study,
                                           permission_type=StudyPermission.READ)
         everyone_read_strain = Strain.objects.create(name='Readable by everyone via study '
-                                                          'read')
+                                                          'read', registry_id=uuid4())
         line1 = Line.objects.create(name='Everyone read line', study=everyone_read_study)
         line1.strains.add(everyone_read_strain)
         line1.save()
 
-        everyone_read_url = strain_detail_pattern % {
-            'base_strain_url': STRAINS_RESOURCE_URL,
-            'pk': everyone_read_strain.pk,
-        }
+        urls = (strain_detail_pattern % {  # PK
+                    'base_strain_url': STRAINS_RESOURCE_URL,
+                    'id': everyone_read_strain.pk, },
+                strain_detail_pattern % {  # UUID
+                    'base_strain_url': STRAINS_RESOURCE_URL,
+                    'id': everyone_read_strain.registry_id, }, )
 
-        # verify that an un-authenticated request gets a 404
-        self._assert_unauthenticated_get_denied(everyone_read_url)
+        for everyone_read_url in urls:
 
-        self._assert_authenticated_get_allowed(everyone_read_url, self.unprivileged_user,
-                                               expected_values=everyone_read_strain,
-                                               values_converter=strain_to_json_dict)
+            # verify that an un-authenticated request gets a 404
+            self._assert_unauthenticated_get_denied(everyone_read_url)
+
+            self._assert_authenticated_get_allowed(everyone_read_url, self.unprivileged_user,
+                                                   expected_values=everyone_read_strain,
+                                                   values_converter=strain_to_json_dict)
 
         # everyone write
         everyone_write_study = Study.objects.create(name='Writable be everyone')
         EveryonePermission.objects.create(study=everyone_write_study,
                                           permission_type=StudyPermission.WRITE)
         everyone_write_strain = Strain.objects.create(name='Readable by everyone via study '
-                                                           'write')
+                                                           'write', registry_id=uuid4())
         line2 = Line.objects.create(name='Everyone write line', study=everyone_write_study)
         line2.strains.add(everyone_write_strain)
         line2.save()
 
-        everyone_write_url = strain_detail_pattern % {
-            'base_strain_url': STRAINS_RESOURCE_URL,
-            'pk': everyone_write_strain.pk,
-        }
+        urls = (strain_detail_pattern % {  # pk
+                    'base_strain_url': STRAINS_RESOURCE_URL,
+                    'id': everyone_write_strain.pk, },
+                strain_detail_pattern % {  # UUID
+                    'base_strain_url': STRAINS_RESOURCE_URL,
+                    'id': everyone_write_strain.pk, },)
 
-        # verify that an un-authenticated request gets a 404
-        self._assert_unauthenticated_get_denied(everyone_read_url)
+        for everyone_write_url in urls:
 
-        # verify study-level "everyone" permissions allow access to view associated strains
-        self._assert_authenticated_get_allowed(everyone_write_url, self.unprivileged_user,
-                                               expected_values=everyone_write_strain,
-                                               values_converter=strain_to_json_dict)
+            # verify that an un-authenticated request gets a 404
+            self._assert_unauthenticated_get_denied(everyone_write_url)
+
+            # verify study-level "everyone" permissions allow access to view associated strains
+            self._assert_authenticated_get_allowed(everyone_write_url, self.unprivileged_user,
+                                                   expected_values=everyone_write_strain,
+                                                   values_converter=strain_to_json_dict)
 
 
 def to_paged_result_dict(expected_values, values_converter):
@@ -983,7 +1042,7 @@ def strain_to_json_dict(strain):
         'name':         strain.name,
         'description': strain.description,
         'registry_url': strain.registry_url,
-        'registry_id': strain.registry_id,
+        'registry_id': str(strain.registry_id),
         'pk': strain.pk
     }
 
