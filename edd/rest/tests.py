@@ -392,36 +392,6 @@ class StrainResourceTests(EddApiTestCase):
         """
         super(StrainResourceTests, StrainResourceTests).setUpTestData()
 
-        cls.add_strain_permission = Permission.objects.get(codename='add_strain')
-        cls.change_strain_permission = Permission.objects.get(codename='change_strain')
-        cls.delete_strain_permission = Permission.objects.get(codename='delete_strain')
-
-        # plain staff w/ no extra privileges
-        cls.staff_user = _create_user(username=STAFF_USERNAME,
-                                      email='staff@localhost',
-                                      is_staff=True)
-
-        cls.staff_strain_user = _create_user(username='staff.strain.user',
-                                             email='staff.study@localhost',
-                                             is_staff=True,
-                                             manage_perms=(cls.add_strain_permission,
-                                                           cls.change_strain_permission,
-                                                           cls.delete_strain_permission))
-
-        cls.staff_strain_creator = _create_user(username='staff.strain.creator',
-                                                email='staff.study@localhost',
-                                                is_staff=True,
-                                                manage_perms=(cls.add_strain_permission,))
-
-        cls.staff_strain_changer = _create_user(username='staff.strain.changer',
-                                                email='staff.study@localhost',
-                                                is_staff=True,
-                                                manage_perms=(cls.change_strain_permission,))
-
-        cls.staff_strain_deleter = _create_user(username='staff.strain.deleter',
-                                                is_staff=True,
-                                                manage_perms=(cls.delete_strain_permission,))
-
         # define placeholder data members to silence PyCharm style checks for data members
         # created in create_study()
         cls.study = None
@@ -430,7 +400,6 @@ class StrainResourceTests(EddApiTestCase):
         cls.study_write_only_user = None
         cls.study_read_group_user = None
         cls.study_write_group_user = None
-        cls.staff_user = None
         cls.staff_study_creator = None
         cls.staff_study_changer = None
         cls.staff_study_deleter = None
@@ -438,6 +407,31 @@ class StrainResourceTests(EddApiTestCase):
 
         # create the study and associated users & permissions
         create_study(cls)
+
+        cls.add_strain_permission = Permission.objects.get(codename='add_strain')
+        cls.change_strain_permission = Permission.objects.get(codename='change_strain')
+        cls.delete_strain_permission = Permission.objects.get(codename='delete_strain')
+
+        # plain staff w/ no extra privileges
+        cls.staff_user = _create_user(username=STAFF_USERNAME, email='staff@localhost',
+                                      is_staff=True)
+
+        cls.staff_strain_user = _create_user(username='staff.strain.user',
+                                             email='staff.study@localhost', is_staff=True,
+                                             manage_perms=(cls.add_strain_permission,
+                                                           cls.change_strain_permission,
+                                                           cls.delete_strain_permission))
+
+        cls.staff_strain_creator = _create_user(username='staff.strain.creator',
+                                                email='staff.study@localhost', is_staff=True,
+                                                manage_perms=(cls.add_strain_permission,))
+
+        cls.staff_strain_changer = _create_user(username='staff.strain.changer',
+                                                email='staff.study@localhost', is_staff=True,
+                                                manage_perms=(cls.change_strain_permission,))
+
+        cls.staff_strain_deleter = _create_user(username='staff.strain.deleter', is_staff=True,
+                                                manage_perms=(cls.delete_strain_permission,))
 
         # create some strains / lines in the study
         cls.study_strain1 = Strain.objects.create(
