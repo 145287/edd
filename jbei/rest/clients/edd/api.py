@@ -14,6 +14,7 @@ import requests
 from urlparse import urlparse, urlsplit
 
 from arrow import Arrow
+from datetime import datetime
 
 from .constants import (CASE_SENSITIVE_DEFAULT, CASE_SENSITIVE_PARAM,
                         ACTIVE_STATUS_DEFAULT, METADATA_CONTEXT_VALUES, METADATA_TYPE_CONTEXT,
@@ -234,7 +235,7 @@ class DrfSession(PagedSession):
 def _set_if_value_valid(dictionary, key, value):
     # utility method to get rid of long blocks of setting dictionary keys only if values valid
     if value:
-        if isinstance(value, Arrow):
+        if isinstance(value, datetime):
             value = str(value)
         dictionary[key] = value
 
