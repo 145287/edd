@@ -396,15 +396,6 @@ class StrainResourceTests(EddApiTestCase):
         cls.change_strain_permission = Permission.objects.get(codename='change_strain')
         cls.delete_strain_permission = Permission.objects.get(codename='delete_strain')
 
-        # unprivileged user
-        cls.unprivileged_user = User.objects.create_user(username=UNPRIVILEGED_USERNAME,
-                                                         email='unprivileged@localhost',
-                                                         password=PLAINTEXT_TEMP_USER_PASSWORD)
-        # admin user w/ no extra privileges
-        cls.superuser = _create_user(username=ADMIN_USERNAME,
-                                     email='admin@localhost',
-                                     is_superuser=True)
-
         # plain staff w/ no extra privileges
         cls.staff_user = _create_user(username=STAFF_USERNAME,
                                       email='staff@localhost',
@@ -431,72 +422,22 @@ class StrainResourceTests(EddApiTestCase):
                                                 is_staff=True,
                                                 manage_perms=(cls.delete_strain_permission,))
 
-        # set up a study with lines/strains/permissions that allow us to test unprivileged user
-        # access to ONLY the strains used in studies the user has read access to.
-        cls.study_owner = User.objects.create_user(
-            username=STUDY_OWNER_USERNAME,
-            email='study_owner@localhost',
-            password=PLAINTEXT_TEMP_USER_PASSWORD)
+        # define placeholder data members to silence PyCharm style checks for data members
+        # created in create_study()
+        cls.study = None
+        cls.unprivileged_user = None
+        cls.study_read_only_user = None
+        cls.study_write_only_user = None
+        cls.study_read_group_user = None
+        cls.study_write_group_user = None
+        cls.staff_user = None
+        cls.staff_study_creator = None
+        cls.staff_study_changer = None
+        cls.staff_study_deleter = None
+        cls.superuser = None
 
-        cls.study_read_only_user = User.objects.create_user(
-            username=STUDY_READER_USERNAME,
-            email='study_read_only@localhost',
-            password=PLAINTEXT_TEMP_USER_PASSWORD)
-
-        cls.study_write_only_user = User.objects.create_user(
-            username=STUDY_WRITER_USERNAME,
-            email='study.writer@localhost',
-            password=PLAINTEXT_TEMP_USER_PASSWORD)
-
-        cls.study_read_group_user = User.objects.create_user(
-            username=STUDY_READER_GROUP_USER,
-            email='study.group_reader@localhost',
-            password=PLAINTEXT_TEMP_USER_PASSWORD)
-
-        cls.study_write_group_user = User.objects.create_user(
-            username=STUDY_WRITER_GROUP_USER,
-            email='study.group_writer@localhost',
-            password=PLAINTEXT_TEMP_USER_PASSWORD
-        )
-
-        # create groups for testing group-level user permissions
-        study_read_group = Group.objects.create(name='study_read_only_group')
-        study_read_group.user_set.add(cls.study_read_group_user)
-        study_read_group.save()
-
-        study_write_group = Group.objects.create(name='study_write_only_group')
-        study_write_group.user_set.add(cls.study_write_group_user)
-        study_write_group.save()
-
-        # create the study
-        cls.study = Study.objects.create(name='Test study')
-
-        # future-proof this test by removing any default permissions on the study that may have
-        # been configured on this instance (e.g. by the EDD_DEFAULT_STUDY_READ_GROUPS setting).
-        # This is most likely to be a complication in development.
-        UserPermission.objects.filter(study=cls.study).delete()
-        GroupPermission.objects.filter(study=cls.study).delete()
-
-        UserPermission.objects.create(study=cls.study,
-                                      user=cls.study_owner,
-                                      permission_type=StudyPermission.READ)
-
-        # set permissions on the study
-        UserPermission.objects.create(study=cls.study,
-                                      user=cls.study_read_only_user,
-                                      permission_type=StudyPermission.READ)
-
-        UserPermission.objects.create(study=cls.study,
-                                      user=cls.study_write_only_user,
-                                      permission_type=StudyPermission.WRITE)
-
-        GroupPermission.objects.create(study=cls.study,
-                                       group=study_read_group,
-                                       permission_type=StudyPermission.READ)
-
-        GroupPermission.objects.create(study=cls.study,
-                                       group=study_write_group,
-                                       permission_type=StudyPermission.WRITE)
+        # create the study and associated users & permissions
+        create_study(cls)
 
         # create some strains / lines in the study
         cls.study_strain1 = Strain.objects.create(
@@ -556,11 +497,11 @@ class StrainResourceTests(EddApiTestCase):
             # if the strain is in our test study,
             # test that an otherwise unprivileged user with read access to the study can also use
             # the strain resource to view the strain
-            self._assert_authenticated_get_allowed(url, self.study_owner)
+            self._assert_authenticated_get_allowed(url, self.study_read_only_user)
         else:
-            # if the strain isn't in our test study, test that the study owner, who has no
-            # additional privileges, can't access it
-            self._assert_authenticated_get_denied(url, self.study_owner)
+            # if the strain isn't in our test study, test that a user with study read access,
+            # but no additional privileges, can't access it
+            self._assert_authenticated_get_denied(url, self.study_read_only_user)
 
         # test that user group members with any access to the study have implied read
         # permission on the strains used in it
@@ -1168,7 +1109,7 @@ class StudyResourceTests(EddApiTestCase):
     group membership.
 
     Note that these permissions are enfoced by a combination of EDD's custom
-    ModelImplicitViewOrResultImpliedPermissions class and StudyViewSet's get_queryset() method,
+    ImpliedPermissions class and StudyViewSet's get_queryset() method,
     whose non-empty result implies that the requesting user has access to the returned strains.
     """
 
@@ -1180,103 +1121,22 @@ class StudyResourceTests(EddApiTestCase):
         """
         super(StudyResourceTests, StudyResourceTests).setUpTestData()
 
-        cls.add_study_permission = Permission.objects.get(codename='add_study')
-        cls.change_study_permission = Permission.objects.get(codename='change_study')
-        cls.delete_study_permission = Permission.objects.get(codename='delete_study')
+        # define placeholder data members to silence PyCharm style checks for data members
+        # created in create_study()
+        cls.study = None
+        cls.unprivileged_user = None
+        cls.study_read_only_user = None
+        cls.study_write_only_user = None
+        cls.study_read_group_user = None
+        cls.study_write_group_user = None
+        cls.staff_user = None
+        cls.staff_study_creator = None
+        cls.staff_study_changer = None
+        cls.staff_study_deleter = None
+        cls.superuser = None
 
-        # unprivileged user
-        cls.unprivileged_user = User.objects.create_user(username=UNPRIVILEGED_USERNAME,
-                                                         email='unprivileged@localhost',
-                                                         password=PLAINTEXT_TEMP_USER_PASSWORD)
-        # admin user w/ no extra privileges
-        cls.superuser = _create_user(username=ADMIN_USERNAME,
-                                     email='admin@localhost',
-                                     is_superuser=True)
-
-        # plain staff w/ no extra privileges
-        cls.staff_user = _create_user(username=STAFF_USERNAME,
-                                      email='staff@localhost',
-                                      is_staff=True)
-
-        cls.staff_study_creator = _create_user(username='staff.study.creator',
-                                               email='staff.study@localhost',
-                                               is_staff=True,
-                                               manage_perms=(cls.add_study_permission,))
-
-        cls.staff_study_changer = _create_user(username='staff.study.changer',
-                                               email='staff.study@localhost',
-                                               is_staff=True,
-                                               manage_perms=(cls.change_study_permission,))
-
-        cls.staff_study_deleter = _create_user(username='staff.study.deleter',
-                                               is_staff=True,
-                                               manage_perms=(cls.delete_study_permission,))
-
-        cls.study_read_only_user = User.objects.create_user(
-            username=STUDY_READER_USERNAME,
-            email='study_read_only@localhost',
-            password=PLAINTEXT_TEMP_USER_PASSWORD)
-
-        cls.study_write_only_user = User.objects.create_user(
-            username=STUDY_WRITER_USERNAME,
-            email='study.writer@localhost',
-            password=PLAINTEXT_TEMP_USER_PASSWORD)
-
-        cls.study_read_group_user = User.objects.create_user(
-            username=STUDY_READER_GROUP_USER,
-            email='study.group_reader@localhost',
-            password=PLAINTEXT_TEMP_USER_PASSWORD)
-
-        cls.study_write_group_user = User.objects.create_user(
-            username=STUDY_WRITER_GROUP_USER,
-            email='study.group_writer@localhost',
-            password=PLAINTEXT_TEMP_USER_PASSWORD
-        )
-
-        cls.study_default_read_group_user = User.objects.create_user(
-                username='Default read group user',
-                email='study.default_read_group.user',
-                password=PLAINTEXT_TEMP_USER_PASSWORD,
-        )
-
-        # create groups for testing group-level user permissions
-        study_read_group = Group.objects.create(name='study_read_only_group')
-        study_read_group.user_set.add(cls.study_read_group_user)
-        study_read_group.save()
-
-        study_write_group = Group.objects.create(name='study_write_only_group')
-        study_write_group.user_set.add(cls.study_write_group_user)
-        study_write_group.save()
-
-        cls.study_default_read_group = Group.objects.create(name='study_default_read_group')
-        cls.study_default_read_group.user_set.add(cls.study_default_read_group_user)
-        cls.study_default_read_group.save()
-
-        # create the study
-        cls.study = Study.objects.create(name='Test study')
-
-        # future-proof this test by removing any default permissions on the study that may have
-        # been configured on this instance (e.g. by the EDD_DEFAULT_STUDY_READ_GROUPS setting).
-        # This is most likely to be a complication in development.
-        UserPermission.objects.filter(study=cls.study).delete()
-        GroupPermission.objects.filter(study=cls.study).delete()
-
-        # set permissions on the study
-        UserPermission.objects.create(study=cls.study,
-                                      user=cls.study_read_only_user,
-                                      permission_type=StudyPermission.READ)
-
-        UserPermission.objects.create(study=cls.study,
-                                      user=cls.study_write_only_user,
-                                      permission_type=StudyPermission.WRITE)
-
-        GroupPermission.objects.create(study=cls.study,
-                                       group=study_read_group,
-                                       permission_type=StudyPermission.READ)
-
-        GroupPermission.objects.create(study=cls.study,
-                                       group=study_write_group,
-                                       permission_type=StudyPermission.WRITE)
+        # create the study and associated users & permissions
+        create_study(cls, True)
 
     def _enforce_study_read_access(self, url, is_list, expected_values):
         """
@@ -1749,6 +1609,119 @@ class StudyResourceTests(EddApiTestCase):
                                                    values_converter=study_to_json_dict,
                                                    partial_response=True)
 
+
+def create_study(test_class, create_auth_perms_and_users=False):
+    """
+    Factory method that creates a test study and test users with all available individual,
+    class-level, and group-level permissions on the study (except everyone permissions,
+    which would supercede several of the others).
+    """
+
+    # unprivileged user
+    test_class.unprivileged_user = User.objects.create_user(
+            username=UNPRIVILEGED_USERNAME,
+            email='unprivileged@localhost',
+            password=PLAINTEXT_TEMP_USER_PASSWORD)
+
+    # superuser w/ no extra privileges
+    test_class.superuser = _create_user(username=ADMIN_USERNAME,
+                                        email='admin@localhost',
+                                        is_superuser=True)
+
+    # user with read only access to this study
+    test_class.study_read_only_user = User.objects.create_user(
+            username=STUDY_READER_USERNAME,
+            email='study_read_only@localhost',
+            password=PLAINTEXT_TEMP_USER_PASSWORD)
+
+    # user with write only access to this study
+    test_class.study_write_only_user = User.objects.create_user(
+            username=STUDY_WRITER_USERNAME,
+            email='study.writer@localhost',
+            password=PLAINTEXT_TEMP_USER_PASSWORD)
+
+    # user with read only access to the study via group membership
+    test_class.study_read_group_user = User.objects.create_user(
+            username=STUDY_READER_GROUP_USER,
+            email='study.group_reader@localhost',
+            password=PLAINTEXT_TEMP_USER_PASSWORD)
+
+    # user with write only access to the study via group membership
+    test_class.study_write_group_user = User.objects.create_user(
+            username=STUDY_WRITER_GROUP_USER,
+            email='study.group_writer@localhost',
+            password=PLAINTEXT_TEMP_USER_PASSWORD)
+
+    # user with access to the study via the default read permission TODO: relocate!
+    test_class.study_default_read_group_user = User.objects.create_user(
+            username='Default read group user',
+            email='study.default_read_group.user',
+            password=PLAINTEXT_TEMP_USER_PASSWORD, )
+
+    # create groups for testing group-level user permissions
+    study_read_group = Group.objects.create(name='study_read_only_group')
+    study_read_group.user_set.add(test_class.study_read_group_user)
+    study_read_group.save()
+
+    study_write_group = Group.objects.create(name='study_write_only_group')
+    study_write_group.user_set.add(test_class.study_write_group_user)
+    study_write_group.save()
+
+    test_class.study_default_read_group = Group.objects.create(name='study_default_read_group')
+    test_class.study_default_read_group.user_set.add(test_class.study_default_read_group_user)
+    test_class.study_default_read_group.save()
+
+    # create the study
+    test_class.study = Study.objects.create(name='Test study')
+
+    # future-proof this test by removing any default permissions on the study that may have
+    # been configured on this instance (e.g. by the EDD_DEFAULT_STUDY_READ_GROUPS setting).
+    # This is most likely to be a complication in development.
+    UserPermission.objects.filter(study=test_class.study).delete()
+    GroupPermission.objects.filter(study=test_class.study).delete()
+
+    # set permissions on the study
+    UserPermission.objects.create(study=test_class.study,
+                                  user=test_class.study_read_only_user,
+                                  permission_type=StudyPermission.READ)
+
+    UserPermission.objects.create(study=test_class.study,
+                                  user=test_class.study_write_only_user,
+                                  permission_type=StudyPermission.WRITE)
+
+    GroupPermission.objects.create(study=test_class.study,
+                                   group=study_read_group,
+                                   permission_type=StudyPermission.READ)
+
+    GroupPermission.objects.create(study=test_class.study,
+                                   group=study_write_group,
+                                   permission_type=StudyPermission.WRITE)
+
+    if create_auth_perms_and_users:
+        test_class.add_study_permission = Permission.objects.get(codename='add_study')
+        test_class.change_study_permission = Permission.objects.get(codename='change_study')
+        test_class.delete_study_permission = Permission.objects.get(codename='delete_study')
+
+        test_class.staff_user = _create_user(username=STAFF_USERNAME,
+                                             email='staff@localhost',
+                                             is_staff=True)
+
+        test_class.staff_study_creator = _create_user(username='staff.study.creator',
+                                                      email='staff.study@localhost',
+                                                      is_staff=True,
+                                                      manage_perms=(
+                                                          test_class.add_study_permission,))
+
+        test_class.staff_study_changer = _create_user(username='staff.study.changer',
+                                                      email='staff.study@localhost',
+                                                      is_staff=True,
+                                                      manage_perms=(
+                                                          test_class.change_study_permission,))
+
+        test_class.staff_study_deleter = _create_user(username='staff.study.deleter',
+                                                      is_staff=True,
+                                                      manage_perms=(
+                                                          test_class.delete_study_permission,))
 
 class SearchLinesResourceTest(EddApiTestCase):
 

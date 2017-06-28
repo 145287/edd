@@ -40,7 +40,7 @@ from .serializers import (LineSerializer, MeasurementUnitSerializer,
                           UserSerializer)
 from jbei.rest.clients.edd.constants import (CASE_SENSITIVE_PARAM, CREATED_AFTER_PARAM,
                                              CREATED_BEFORE_PARAM, ACTIVE_STATUS_DEFAULT,
-                                             LINE_ACTIVE_STATUS_PARAM, METADATA_TYPE_CONTEXT,
+                                             ACTIVE_STATUS_PARAM, METADATA_TYPE_CONTEXT,
                                              METADATA_TYPE_GROUP, METADATA_TYPE_I18N,
                                              METADATA_TYPE_LOCALE, METADATA_TYPE_NAME_REGEX,
                                              QUERY_ACTIVE_OBJECTS_ONLY, QUERY_ANY_ACTIVE_STATUS,
@@ -1037,7 +1037,7 @@ class StrainStudiesView(viewsets.ReadOnlyModelViewSet):
         params = self.request.query_params
 
         line_active_status = self.request.query_params.get(
-            LINE_ACTIVE_STATUS_PARAM, ACTIVE_STATUS_DEFAULT
+            ACTIVE_STATUS_PARAM, ACTIVE_STATUS_DEFAULT
         )
         user = self.request.user
 
@@ -1159,18 +1159,22 @@ class StudyLinesView(viewsets.ModelViewSet):  # LineView(APIView):
 
     def get_queryset(self):
         logger.debug('in %(class)s.%(method)s' % {
-            'class': StudyLinesView.__name__, 'method': self.get_queryset.__name__
+            'class': StudyLinesView.__name__,
+            'method': self.get_queryset.__name__
         })
         print('kwargs: ' + str(self.kwargs))  # TODO: remove debug aid
         print('query_params: ' + str(self.request.query_params))  # TODO: remove debug aid
 
         # extract study pk URL argument. line pk, if present, will be handled automatically by
         # get_object() inherited from the parent class
-        study_pk = self.kwargs[self.STUDY_URL_KWARG]
+        study_id = self.kwargs[self.STUDY_URL_KWARG]
 
         user = self.request.user
         requested_permission = (StudyPermission.WRITE if self.request.method in
                                 HTTP_MUTATOR_METHODS else StudyPermission.READ)
+
+        # load / check study permissions first to eliminate multi-table joins
+        study = load_study(requested_permission)
 
         # if the user's admin / staff role gives read access to all Studies, don't bother querying
         # the database for specific permissions defined on this study
@@ -1189,7 +1193,7 @@ class StudyLinesView(viewsets.ModelViewSet):  # LineView(APIView):
         line_query = _optional_timestamp_filter(line_query, query_params)
 
         # filter by line active status, applying the default (only active lines)
-        line_active_status = self.request.query_params.get(LINE_ACTIVE_STATUS_PARAM,
+        line_active_status = self.request.query_params.get(ACTIVE_STATUS_PARAM,
                                                            ACTIVE_STATUS_DEFAULT)
         line_query = filter_by_active_status(line_query, line_active_status)
         # distinct() required by *both* study permissions check and line activity filter above

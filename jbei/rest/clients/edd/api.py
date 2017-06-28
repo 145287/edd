@@ -15,7 +15,7 @@ from urlparse import urlparse, urlsplit
 
 from arrow import Arrow
 
-from .constants import (CASE_SENSITIVE_DEFAULT, CASE_SENSITIVE_PARAM, LINE_ACTIVE_STATUS_PARAM,
+from .constants import (CASE_SENSITIVE_DEFAULT, CASE_SENSITIVE_PARAM,
                         ACTIVE_STATUS_DEFAULT, METADATA_CONTEXT_VALUES, METADATA_TYPE_CONTEXT,
                         METADATA_TYPE_GROUP, METADATA_TYPE_I18N, METADATA_TYPE_LOCALE,
                         METADATA_TYPE_NAME_REGEX, PAGE_NUMBER_QUERY_PARAM, PAGE_SIZE_QUERY_PARAM,
@@ -531,7 +531,7 @@ class EddApi(RestApiClient):
             params = {}
 
             if line_active_status:
-                params[LINE_ACTIVE_STATUS_PARAM] = line_active_status
+                params[ACTIVE_STATUS_PARAM] = line_active_status
 
             if page_number:
                 params[PAGE_NUMBER_QUERY_PARAM] = page_number
@@ -574,7 +574,7 @@ class EddApi(RestApiClient):
             # add parameters to the request
             params = {}
             if line_active_status:
-                params[LINE_ACTIVE_STATUS_PARAM] = line_active_status
+                params[ACTIVE_STATUS_PARAM] = line_active_status
             if page_number:
                 params[PAGE_NUMBER_QUERY_PARAM] = page_number
             response = self.session.get(url, headers=self._json_header, params=params)

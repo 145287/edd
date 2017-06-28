@@ -19,7 +19,6 @@ METADATA_GROUPS_RESOURCE_NAME = r'metadata_groups'
 # General parameter names / values that apply to multiple REST resources. Consistency!! :-)
 ###################################################################################################
 ACTIVE_STATUS_PARAM = 'active'
-LINE_ACTIVE_STATUS_PARAM = 'lines_active'
 QUERY_ANY_ACTIVE_STATUS = 'all'
 QUERY_ACTIVE_OBJECTS_ONLY = 'active'
 QUERY_INACTIVE_OBJECTS_ONLY = 'inactive'
