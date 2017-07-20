@@ -1491,17 +1491,21 @@ class StudyResourceTests(EddApiTestCase):
         EveryonePermission.objects.create(study=everyone_write_study,
                                           permission_type=StudyPermission.WRITE)
 
-        self._assert_authenticated_get_allowed(list_url, self.unprivileged_user, expected_values=[
-            everyone_read_study,
-            everyone_write_study, ], partial_response=True)
+        self._assert_authenticated_get_allowed(list_url,
+                                               self.unprivileged_user,
+                                               expected_values=[everyone_read_study,
+                                                                everyone_write_study, ],
+                                               partial_response=True)
 
         # test study filtering for all any active status
         request_params = {ACTIVE_STATUS_PARAM: QUERY_ANY_ACTIVE_STATUS}
-        self._assert_authenticated_get_allowed(list_url, self.superuser,
-            expected_values=[self.study,
-                             everyone_read_study,
-                             everyone_write_study], request_params=request_params,
-            partial_response=True)
+        self._assert_authenticated_get_allowed(list_url,
+                                               self.superuser,
+                                               expected_values=[self.study,
+                                                                everyone_read_study,
+                                                                everyone_write_study],
+                                               request_params=request_params,
+                                               partial_response=True)
         self.study.active = True
         self.study.save()
 
@@ -1512,43 +1516,61 @@ class StudyResourceTests(EddApiTestCase):
         expected_values = [self.study,
                            everyone_read_study,
                            everyone_write_study, ]
-        self._assert_authenticated_get_allowed(list_url, self.study_read_only_user,
-            expected_values=expected_values, request_params=request_params, partial_response=True)
+        self._assert_authenticated_get_allowed(list_url,
+                                               self.study_read_only_user,
+                                               expected_values=expected_values,
+                                               request_params=request_params,
+                                               partial_response=True)
 
         request_params = {
             UPDATED_AFTER_PARAM: self.study.created.mod_time,
         }
-        self._assert_authenticated_get_allowed(list_url, self.study_read_only_user,
-            expected_values=expected_values, request_params=request_params, partial_response=True)
+        self._assert_authenticated_get_allowed(list_url,
+                                               self.study_read_only_user,
+                                               expected_values=expected_values,
+                                               request_params=request_params,
+                                               partial_response=True)
 
         # verify that "after" param is inclusive, and "before" is exclusive
         request_params = {
             CREATED_AFTER_PARAM: str(self.study.created.mod_time),
             CREATED_BEFORE_PARAM: self.study.created.mod_time + timedelta(microseconds=1),
         }
-        self._assert_authenticated_get_allowed(list_url, self.study_read_only_user,
-            expected_values=[self.study], request_params=request_params, partial_response=True)
+        self._assert_authenticated_get_allowed(list_url,
+                                               self.study_read_only_user,
+                                               expected_values=[self.study],
+                                               request_params=request_params,
+                                               partial_response=True)
 
         request_params = {
             UPDATED_AFTER_PARAM:  str(self.study.updated.mod_time),
             UPDATED_BEFORE_PARAM: self.study.updated.mod_time + timedelta(microseconds=1),
         }
-        self._assert_authenticated_get_allowed(list_url, self.study_read_only_user,
-            expected_values=[self.study], request_params=request_params, partial_response=True)
+        self._assert_authenticated_get_allowed(list_url,
+                                               self.study_read_only_user,
+                                               expected_values=[self.study],
+                                               request_params=request_params,
+                                               partial_response=True)
 
         request_params = {
             CREATED_BEFORE_PARAM: everyone_write_study.created.mod_time
         }
         expected_values = [self.study, everyone_read_study, ]
-        self._assert_authenticated_get_allowed(list_url, self.study_read_only_user,
-            expected_values=expected_values, request_params=request_params, partial_response=True)
+        self._assert_authenticated_get_allowed(list_url,
+                                               self.study_read_only_user,
+                                               expected_values=expected_values,
+                                               request_params=request_params,
+                                               partial_response=True)
 
         request_params = {
             UPDATED_BEFORE_PARAM: self.study.updated.mod_time
         }
         expected_values = [everyone_read_study, everyone_write_study, ]
-        self._assert_authenticated_get_allowed(list_url, self.study_read_only_user,
-            expected_values=expected_values, request_params=request_params, partial_response=True)
+        self._assert_authenticated_get_allowed(list_url,
+                                               self.study_read_only_user,
+                                               expected_values=expected_values,
+                                               request_params=request_params,
+                                               partial_response=True)
 
     def test_study_detail_read_access(self):
         """
@@ -1931,15 +1953,13 @@ class LinesTests(StudyNestedResourceTests):
 
         cls._NESTED_URL_SEGMENT = 'lines'
         uri_elts = [cls._NESTED_URL_SEGMENT]
-        cls.everyone_read_line_uris = StudyUriBuilder(
-            cls.everyone_read_study,
-            nested_orm_models=[cls.everyone_read_line],
-            uri_elts=uri_elts)
+        cls.everyone_read_line_uris = StudyUriBuilder(cls.everyone_read_study,
+                                                      nested_orm_models=[cls.everyone_read_line],
+                                                      uri_elts=uri_elts)
 
-        cls.everyone_write_line_uris = StudyUriBuilder(
-            cls.everyone_write_study,
-            nested_orm_models=[cls.everyone_write_line],
-            uri_elts=uri_elts)
+        cls.everyone_write_line_uris = StudyUriBuilder(cls.everyone_write_study,
+                                                       nested_orm_models=[cls.everyone_write_line],
+                                                       uri_elts=uri_elts)
 
     @property
     def values_converter(self):
@@ -2116,7 +2136,9 @@ class LinesTests(StudyNestedResourceTests):
 
 class StudyUriBuilder:
     """
-    Builds valid URI's combinatorially for nested study resources (i.e. using slug/pk/uuid combinations)
+    Builds valid URI's combinatorially for nested study resources (i.e. using slug/pk/uuid
+    combinations). TODO: enable config-based random use of URL combinations...will significantly
+    cut down on runtime for repetitive use.
     """
     def __init__(self, study, nested_orm_models, uri_elts):
         self.study = study

@@ -549,8 +549,9 @@ class StrainViewSet(mixins.CreateModelMixin,
             'url': self.request.path})
 
         # build a query, filtering by the provided user inputs (starting out unfiltered).
-        # TODO: Strain has been recently updated to be an EDDObject.  We can reuse more code here than before, and
-        # also likely take advantage of newer/more standard search features in optional_edd_object_filtering().
+        # TODO: Strain has been recently updated to be an EDDObject.  We can reuse more code here
+        # than before, and also likely take advantage of newer/more standard search features in
+        # optional_edd_object_filtering().
         # However, there are now two UUID's for a strain...
         query = Strain.objects.all()
 
@@ -872,18 +873,20 @@ class StudyViewSet(mixins.CreateModelMixin,
 
 def build_study_query(request, query_params, identifier=None, skip_study_manage_perms=False):
     """
-    A helper method for constructing a Study QuerySet while consistently applying Study permissions.
-    :param skip_study_manage_perms: True to disallow access to the study based on class-level django.util.auth
-        permissions that only grant permission to the base study details (e.g. name, description, contact) rather than
-        the contained data.  Use False to apply only Study-specific user permissions, e.g. when accessing nested study
-        resources like Lines, Measurements, etc.
+    A helper method for constructing a Study QuerySet while consistently applying Study permissions
+    :param skip_study_manage_perms: True to disallow access to the study based on class-level
+    django.util.auth permissions that only grant permission to the base study details (e.g.
+    name, description, contact) rather than the contained data.  Use False to apply only
+    Study-specific user permissions, e.g. when accessing nested study resources like Lines,
+    Measurements, etc.
     """
     study_query = Study.objects.all()
 
     # if client provided any identifier, filter based on it. Note that since studies have a slug
-    # that most other EddObjects don't have, we do our id filtering up front rather than using EddObject filtering. We
-    # also use int/UUID constructors to guarantee that input format checking is performed up front at queryset
-    # construction time (400 error) rather than evaluation time (500 error)
+    # that most other EddObjects don't have, we do our id filtering up front rather than using
+    # EddObject filtering. We also use int/UUID constructors to guarantee that input format
+    # checking is performed up front at queryset construction time (400 error) rather than
+    # evaluation time (500 error)
     if identifier:
         # test whether this is an integer pk
         found_identifier_format = False
@@ -919,15 +922,11 @@ def build_study_query(request, query_params, identifier=None, skip_study_manage_
 def optional_edd_object_filtering(params, query, skip_id_filtering=False, identifier_override=None):
     """
     A helper method to perform filtering on standard EDDObject fields
-    :param params:
-    :param query:
-    :param skip_id_filtering:
-    :param identifier_override:
-    :return:
     """
-    # filter results based on the provided ID (can take multiple forms). Note: we purposefully use int/UUID
-    # constructors here to force errors to occur at query *construction* time rather than *evaluation* time.
-    # format checks deferred until evaluation will result in 500 errors rather than more appropriate 400's
+    # filter results based on the provided ID (can take multiple forms). Note: we purposefully use
+    # int/UUID constructors here to force errors to occur at query *construction* time rather
+    # than *evaluation* time. format checks deferred until evaluation will result in 500 errors
+    # rather than more appropriate 400's
     if not skip_id_filtering:
         helpful_uuid_err = 'Invalid hexidecimal UUID string "%s"'
         # if an identifier came from another source (e.g. query URL) use that one
@@ -940,7 +939,8 @@ def optional_edd_object_filtering(params, query, skip_id_filtering=False, identi
                 try:
                     query = query.filter(uuid=UUID(identifier_override))
                 except ValueError as err:
-                    raise ParseError(helpful_uuid_err % identifier_override)  # provide good HTTP 400 errs to client
+                    # provide good HTTP 400 errs to client
+                    raise ParseError(helpful_uuid_err % identifier_override)
 
         # otherwise, look for identifiers in the search params
         else:
@@ -966,8 +966,8 @@ def optional_edd_object_filtering(params, query, skip_id_filtering=False, identi
                                    None, )
 
     # filter for active status, or apply the default of only returning active objects.
-    # if accessing a detail view, default to returning the result regardless of active status since it was specifically
-    # requested
+    # if accessing a detail view, default to returning the result regardless of active status since
+    # it was specifically requested
     active_status = params.get(ACTIVE_STATUS_PARAM, QUERY_ANY_ACTIVE_STATUS if identifier_override
                                else ACTIVE_STATUS_DEFAULT)
     query = filter_by_active_status(query, active_status=active_status)
