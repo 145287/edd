@@ -15,10 +15,12 @@ import json
 import logging
 from datetime import timedelta
 from pprint import pformat
+
 from uuid import UUID, uuid4
 from time import sleep
 
 import collections
+import random
 from django.conf import settings
 from django.contrib.auth.models import Permission, Group
 from rest_framework.status import (HTTP_200_OK, HTTP_201_CREATED, HTTP_400_BAD_REQUEST,
@@ -39,8 +41,8 @@ from jbei.rest.clients.edd.constants import (STRAINS_RESOURCE_NAME, STRAIN_DESCR
                                              UPDATED_BEFORE_PARAM, STUDY_CONTACT_KEY,
                                              NAME_REGEX_PARAM, CASE_SENSITIVE_PARAM,
                                              DESCRIPTION_REGEX_PARAM)
-from main.models import (Line, Strain, Study, StudyPermission, User, GroupPermission,
-                         UserPermission, EveryonePermission, MetadataType, Update)
+from main.models import (Assay, EveryonePermission, GroupPermission, Line, MetadataType, Protocol, Strain, Study,
+                         StudyPermission, Update, User, UserPermission,)
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +76,7 @@ STUDY_WRITER_USERNAME = 'study.writer.user'
 PLAINTEXT_TEMP_USER_PASSWORD = 'password'
 
 STRAINS_RESOURCE_URL = '/rest/%(resource)s' % {'resource': STRAINS_RESOURCE_NAME}
-STUDIES_RESOURCE_URL = '/rest/%(resource)s' % {'resource': STUDIES_RESOURCE_NAME}
+STUDIES_RESOURCE_URI = '/rest/%(resource)s' % {'resource': STUDIES_RESOURCE_NAME}
 SEARCH_RESOURCE_URL = '/rest/search'
 
 DRF_UPDATE_ACTION = 'update'
@@ -90,8 +92,18 @@ _WRONG_STATUS_MSG = ('Wrong response status code from %(method)s %(url)s for use
 class EddApiTestCase(APITestCase):
     """
     Overrides APITestCase to provide helper methods that improve test error messages and simplify
-    repetetive test code.
+    repetitive test code.  Helper methods also enforce consistency in return codes across EDD's REST API.
     """
+
+    @property
+    def values_converter(self):
+        """
+        Returns a function that converts ORM model objects into dictionaries that can easily be compared against
+        JSON results of REST API calls performed during the test.
+        """
+        # raise an error -- this required property must be overridden by descendants
+        raise NotImplementedError()
+
     def _assert_unauthenticated_put_denied(self, url, put_data):
         self.client.logout()
         response = self.client.put(url, put_data)
@@ -109,9 +121,13 @@ class EddApiTestCase(APITestCase):
     def _assert_unauthenticated_client_error(self, url):
         self.client.logout()
         response = self.client.get(url)
-        self.assertEquals(response.status_code, HTTP_400_BAD_REQUEST,
-                          'Expected unauthenticated client error, but got an HTTP %(code)d.  '
+        expected_status = HTTP_400_BAD_REQUEST
+        self.assertEquals(response.status_code, expected_status,
+                          'Expected an "unauthenticated client error" (HTTP %(exp_code)s) for '
+                          '%(uri)s, but got an HTTP %(code)d.  '
                           'Response: %(response)s' % {
+                              'uri': url,
+                              'exp_code': expected_status,
                               'code': response.status_code,
                               'response': response.content, })
 
@@ -141,19 +157,14 @@ class EddApiTestCase(APITestCase):
                                            required_response=None,
                                            partial_response=False):
         return self._do_post(url, user, post_data, HTTP_201_CREATED,
-                             expected_values=required_response,
-                             partial_response=partial_response)
+            expected_values=required_response, partial_response=partial_response)
 
     def _assert_authenticated_search_allowed(self, url, user, post_data,
                                              expected_values=None,
-                                             values_converter=None,
                                              partial_response=False,
                                              request_params=None):
-        return self._do_post(url, user, post_data, HTTP_200_OK,
-                             expected_values=expected_values,
-                             values_converter=values_converter,
-                             partial_response=partial_response,
-                             request_params=request_params)
+        return self._do_post(url, user, post_data, HTTP_200_OK, expected_values=expected_values,
+            partial_response=partial_response, request_params=request_params)
 
     def _assert_authenticated_put_allowed(self, url, user, put_data,
                                           expected_values=None, partial_response=False):
@@ -165,7 +176,7 @@ class EddApiTestCase(APITestCase):
         self._do_post(url, user, post_data, HTTP_400_BAD_REQUEST)
 
     def _do_post(self, url, user, post_data, expected_status, expected_values=None,
-                 values_converter=None, partial_response=False, request_params=None):
+                 partial_response=False, request_params=None):
 
         logged_in = self.client.login(username=user.username,
                                       password=PLAINTEXT_TEMP_USER_PASSWORD)
@@ -176,7 +187,6 @@ class EddApiTestCase(APITestCase):
 
         self._compare_expected_values(url, 'POST', user, response, expected_status,
                                       expected_values=expected_values,
-                                      values_converter=values_converter,
                                       partial_response=partial_response)
 
         return response
@@ -191,7 +201,6 @@ class EddApiTestCase(APITestCase):
 
         return self._compare_expected_values(url, 'PUT', user, response, expected_status,
                                              expected_values=expected_values,
-                                             values_converter=None,
                                              partial_response=partial_response)
 
     def _assert_authenticated_get_denied(self, url, user):
@@ -214,15 +223,13 @@ class EddApiTestCase(APITestCase):
         self.client.logout()
 
     def _assert_authenticated_get_allowed(self, url, user, expected_values=None,
-                                          request_params=None, values_converter=None,
-                                          partial_response=False):
+                                          request_params=None, partial_response=False):
         self._do_get(url, user, HTTP_200_OK,
                      expected_values=expected_values,
-                     values_converter=values_converter,
                      partial_response=partial_response,
                      request_params=request_params)
 
-    def _do_get(self, url, user, expected_status, expected_values=None, values_converter=None,
+    def _do_get(self, url, user, expected_status, expected_values=None,
                 partial_response=False, request_params=None):
         logged_in = self.client.login(username=user.username,
                                       password=PLAINTEXT_TEMP_USER_PASSWORD)
@@ -231,13 +238,11 @@ class EddApiTestCase(APITestCase):
         response = self.client.get(url, data=request_params)
         self._compare_expected_values(url, 'GET', user, response, expected_status,
                                       expected_values=expected_values,
-                                      values_converter=values_converter,
                                       partial_response=partial_response)
         self.client.logout()
 
     def _compare_expected_values(self, url, method, user, response, expected_status,
-                                 expected_values=None,
-                                 values_converter=None, partial_response=False):
+                                 expected_values=None, partial_response=False):
 
         # compare expected return code
         self.assertEquals(
@@ -253,7 +258,7 @@ class EddApiTestCase(APITestCase):
 
         # compare expected response content, if provided
         if expected_values is not None:
-            expected, is_paged = to_json_comparable(expected_values, values_converter)
+            expected, is_paged = to_json_comparable(expected_values, self.values_converter)
 
             if is_paged:
                 compare_paged_result_dict(self, expected, observed, order_agnostic=True,
@@ -443,6 +448,10 @@ class StrainResourceTests(EddApiTestCase):
         line.save()
         line.strains.add(cls.study_strain1)
         line.save()
+
+    @property
+    def values_converter(self):
+        return strain_to_json_dict
 
     def _enforce_study_strain_read_access(self, url, is_list, strain_in_study=True):
         """
@@ -719,8 +728,7 @@ class StrainResourceTests(EddApiTestCase):
         line1.save()
 
         self._assert_authenticated_get_allowed(list_url, self.unprivileged_user,
-                                               expected_values=[everyone_read_strain],
-                                               values_converter=strain_to_json_dict)
+            expected_values=[everyone_read_strain])
 
         # everyone write
         everyone_write_study = Study.objects.create(name='Writable be everyone')
@@ -733,11 +741,9 @@ class StrainResourceTests(EddApiTestCase):
         line2.save()
 
         # test access to strain details via "everyone" read permission
-        self._assert_authenticated_get_allowed(list_url, self.unprivileged_user,
-                                               expected_values=[
-                                                           everyone_read_strain,
-                                                           everyone_write_strain, ],
-                                               values_converter=strain_to_json_dict)
+        self._assert_authenticated_get_allowed(list_url, self.unprivileged_user, expected_values=[
+            everyone_read_strain,
+            everyone_write_strain, ])
 
     def test_strain_detail_read_access(self):
         """
@@ -809,8 +815,7 @@ class StrainResourceTests(EddApiTestCase):
             self._assert_unauthenticated_get_denied(everyone_read_url)
 
             self._assert_authenticated_get_allowed(everyone_read_url, self.unprivileged_user,
-                                                   expected_values=everyone_read_strain,
-                                                   values_converter=strain_to_json_dict)
+                expected_values=everyone_read_strain)
 
         # everyone write
         everyone_write_study = Study.objects.create(name='Writable be everyone')
@@ -836,8 +841,7 @@ class StrainResourceTests(EddApiTestCase):
 
             # verify study-level "everyone" permissions allow access to view associated strains
             self._assert_authenticated_get_allowed(everyone_write_url, self.unprivileged_user,
-                                                   expected_values=everyone_write_strain,
-                                                   values_converter=strain_to_json_dict)
+                expected_values=everyone_write_strain)
 
 
 def to_paged_result_dict(expected_values, values_converter):
@@ -970,9 +974,9 @@ def order_agnostic_result_comparison(testcase, expected_values_list, observed_va
         _compare_partial_value(testcase, expected_values_dict, observed_values_dict)
 
 
-def _compare_partial_value(testcase, exp_value, observed_value):
+def _compare_partial_value(testcase, exp_value, observed_value, key=None):
     """
-    A helper method for comparing nested results.  Dictionaries are compared without order taken
+    A helper method for comparing nested JSON query results.  Dictionaries are compared without order taken
     into consideration, while all other elements are
     :param testcase:
     :param exp_value:
@@ -981,18 +985,30 @@ def _compare_partial_value(testcase, exp_value, observed_value):
     """
 
     if isinstance(exp_value, dict):
+        # print('Expected: %s' % str(exp_value))  # TODO: remove debug stmts
+        # print('Observed: %s' % str(observed_value))
         for unique_key, exp_inner in exp_value.iteritems():
-            obs_inner = observed_value[unique_key]
-            _compare_partial_value(testcase, exp_inner, obs_inner)
+            try:
+                obs_inner = observed_value[unique_key]
+                _compare_partial_value(testcase, exp_inner, obs_inner, key=unique_key)
+            except KeyError:
+                err_msg = ('Expected key "%(key)s" to be present, but it was missing. \n\n"Expected: %(expected)s\n\n"'
+                           'Observed: %(observed)s' % {
+                               'key': unique_key,
+                               'expected': pformat(str(exp_value)),
+                               'observed': pformat(str(observed_value)),
+                           })
+                testcase.assertTrue(False, err_msg)
 
     elif isinstance(exp_value, collections.Sequence) and not isinstance(exp_value, basestring):
         for index, exp_inner in enumerate(exp_value):
             obs_inner = observed_value[index]
             print('Expected value %s' % str(exp_inner))  # TODO: remove debug stmt
-            _compare_partial_value(testcase, exp_inner, obs_inner)
+            _compare_partial_value(testcase, exp_inner, obs_inner, key)
     else:
         testcase.assertEqual(exp_value, observed_value,
-                             'Expected value %(exp)s but observed %(obs)s' % {
+                             'Expected %(key)s value %(exp)s but observed %(obs)s' % {
+                                 'key': ('"%s"' % key) if key else '',
                                  'exp': exp_value,
                                  'obs': observed_value, })
 
@@ -1039,17 +1055,39 @@ def line_to_json_dict(line):
 
     # define common EddObject attributes
     edd_obj_to_json_dict(line, val)
+
+    print('Test-serialized line')
+    from pprint import pprint
+    pprint(val)
     return val
 
 
-def edd_obj_to_json_dict(edd_obj, dict):
-    if not edd_obj:
-        return
+def assay_to_json_dict(assay):
+    if not assay:
+        return {}
 
-    dict['name'] = edd_obj.name
-    dict['description'] = edd_obj.description
-    dict['uuid'] = unicode(edd_obj.uuid)
-    dict['active'] = edd_obj.active
+    val = {
+        'line': assay.line_id,
+        'protocol': assay.protocol_id,
+        'experimenter': assay.experimenter_id,
+    }
+
+    # define common EddObject attributes
+    edd_obj_to_json_dict(assay, val)
+    return val
+
+
+def edd_obj_to_json_dict(edd_obj, json_dict):
+    if not edd_obj:
+        return json_dict
+
+    json_dict['name'] = edd_obj.name
+    json_dict['description'] = edd_obj.description
+    json_dict['uuid'] = unicode(edd_obj.uuid)
+    json_dict['pk'] = edd_obj.pk
+    json_dict['active'] = edd_obj.active
+
+    return json_dict
 
 
 def _create_user(username, email='staff.study@localhost',
@@ -1102,7 +1140,7 @@ class StudyResourceTests(EddApiTestCase):
     3) Users who have explicit StudyPermission granted via their individual account or via user
     group membership.
 
-    Note that these permissions are enfoced by a combination of EDD's custom
+    Note that these permissions are enforced by a combination of EDD's custom
     ImpliedPermissions class and StudyViewSet's get_queryset() method,
     whose non-empty result implies that the requesting user has access to the returned strains.
     """
@@ -1127,10 +1165,16 @@ class StudyResourceTests(EddApiTestCase):
         cls.staff_study_creator = None
         cls.staff_study_changer = None
         cls.staff_study_deleter = None
+        cls.study_default_read_group_user = None
+        cls.study_default_read_group = None
         cls.superuser = None
 
         # create the study and associated users & permissions
-        create_study(cls, True)
+        create_study(cls, create_auth_perms_and_users=True)
+
+    @property
+    def values_converter(self):
+        return study_to_json_dict
 
     def _enforce_study_read_access(self, url, is_list, expected_values):
         """
@@ -1165,41 +1209,27 @@ class StudyResourceTests(EddApiTestCase):
 
         # test that users / groups with read access can read the study
         self._assert_authenticated_get_allowed(url, self.study_read_only_user,
-                                               expected_values=expected_values,
-                                               values_converter=study_to_json_dict,
-                                               partial_response=True)
+            expected_values=expected_values, partial_response=True)
 
         self._assert_authenticated_get_allowed(url, self.study_read_group_user,
-                                               expected_values=expected_values,
-                                               values_converter=study_to_json_dict,
-                                               partial_response=True)
+            expected_values=expected_values, partial_response=True)
 
         # verify that study write permissions imply read permissions
         self._assert_authenticated_get_allowed(url, self.study_write_only_user,
-                                               expected_values=expected_values,
-                                               values_converter=study_to_json_dict,
-                                               partial_response=True)
+            expected_values=expected_values, partial_response=True)
 
         self._assert_authenticated_get_allowed(url, self.study_write_group_user,
-                                               expected_values=expected_values,
-                                               values_converter=study_to_json_dict,
-                                               partial_response=True)
+            expected_values=expected_values, partial_response=True)
 
         # test that an 'admin' user can access study data without other privileges
         self._assert_authenticated_get_allowed(url, self.superuser,
-                                               expected_values=expected_values,
-                                               values_converter=study_to_json_dict,
-                                               partial_response=True)
+            expected_values=expected_values, partial_response=True)
 
         # test that 'staff' users with any study mutator privileges have implied read permission
         self._assert_authenticated_get_allowed(url, self.staff_study_changer,
-                                               expected_values=expected_values,
-                                               values_converter=study_to_json_dict,
-                                               partial_response=True)
+            expected_values=expected_values, partial_response=True)
         self._assert_authenticated_get_allowed(url, self.staff_study_deleter,
-                                               expected_values=expected_values,
-                                               values_converter=study_to_json_dict,
-                                               partial_response=True)
+            expected_values=expected_values, partial_response=True)
 
     def test_malformed_uri(self):
         """
@@ -1226,7 +1256,7 @@ class StudyResourceTests(EddApiTestCase):
 
         study_detail_pattern = '%(base_study_url)s/%(pk)d/'
         url = study_detail_pattern % {
-            'base_study_url': STUDIES_RESOURCE_URL,
+            'base_study_url': STUDIES_RESOURCE_URI,
             'pk': study.pk,
         }
 
@@ -1253,7 +1283,7 @@ class StudyResourceTests(EddApiTestCase):
         #  resource.  E.g. metabolic map, contact_extra, slug (but only by admins for slug)
 
         # Note: missing slash causes 301 response when authenticated
-        _URL = STUDIES_RESOURCE_URL + '/'
+        _URL = STUDIES_RESOURCE_URI + '/'
 
         print(SEPARATOR)
         print('%s(): ' % self.test_study_add.__name__)
@@ -1365,7 +1395,7 @@ class StudyResourceTests(EddApiTestCase):
     def test_study_change(self):
         print(SEPARATOR)
         print('%s(): ' % self.test_study_change.__name__)
-        print('PUT %s' % STUDIES_RESOURCE_URL)
+        print('PUT %s' % STUDIES_RESOURCE_URI)
         print(SEPARATOR)
 
         self.assertTrue(self.study.user_can_write(self.study_write_group_user))
@@ -1373,7 +1403,7 @@ class StudyResourceTests(EddApiTestCase):
         # Note: missing slash causes 301 response when authenticated
         url_format = '%(resource_url)s/%(id)s/'
 
-        url = url_format % {'resource_url': STUDIES_RESOURCE_URL,
+        url = url_format % {'resource_url': STUDIES_RESOURCE_URI,
                             'id':           self.study.pk}
 
         # define put data for changing every strain field
@@ -1424,7 +1454,7 @@ class StudyResourceTests(EddApiTestCase):
         print(SEPARATOR)
 
         # test basic use for a single study
-        list_url = '%s/' % STUDIES_RESOURCE_URL
+        list_url = '%s/' % STUDIES_RESOURCE_URI
         print("Testing read access for %s" % list_url)
         self._enforce_study_read_access(list_url, True, expected_values=[self.study])
 
@@ -1441,12 +1471,8 @@ class StudyResourceTests(EddApiTestCase):
 
         request_params = {ACTIVE_STATUS_PARAM: QUERY_INACTIVE_OBJECTS_ONLY}
         logger.debug('request params: %s' % request_params)  # TODO: remove debug stmt
-        self._assert_authenticated_get_allowed(list_url,
-                                               self.superuser,
-                                               request_params=request_params,
-                                               expected_values=[self.study],
-                                               values_converter=study_to_json_dict,
-                                               partial_response=True)
+        self._assert_authenticated_get_allowed(list_url, self.superuser,
+            expected_values=[self.study], request_params=request_params, partial_response=True)
 
         # create a study everyone can read
         # wait before saving the study to guarantee a different creation/update timestamp
@@ -1456,9 +1482,7 @@ class StudyResourceTests(EddApiTestCase):
                                           permission_type=StudyPermission.READ)
 
         self._assert_authenticated_get_allowed(list_url, self.unprivileged_user,
-                                               expected_values=[everyone_read_study],
-                                               values_converter=study_to_json_dict,
-                                               partial_response=True)
+            expected_values=[everyone_read_study], partial_response=True)
 
         # create a study everyone can write
         # wait before saving the study to guarantee a different creation/update timestamp
@@ -1467,23 +1491,17 @@ class StudyResourceTests(EddApiTestCase):
         EveryonePermission.objects.create(study=everyone_write_study,
                                           permission_type=StudyPermission.WRITE)
 
-        self._assert_authenticated_get_allowed(list_url, self.unprivileged_user,
-                                               expected_values=[
-                                                    everyone_read_study,
-                                                    everyone_write_study, ],
-                                               values_converter=study_to_json_dict,
-                                               partial_response=True)
+        self._assert_authenticated_get_allowed(list_url, self.unprivileged_user, expected_values=[
+            everyone_read_study,
+            everyone_write_study, ], partial_response=True)
 
         # test study filtering for all any active status
         request_params = {ACTIVE_STATUS_PARAM: QUERY_ANY_ACTIVE_STATUS}
-        self._assert_authenticated_get_allowed(list_url,
-                                               self.superuser,
-                                               request_params=request_params,
-                                               expected_values=[self.study,
-                                                                everyone_read_study,
-                                                                everyone_write_study],
-                                               values_converter=study_to_json_dict,
-                                               partial_response=True)
+        self._assert_authenticated_get_allowed(list_url, self.superuser,
+            expected_values=[self.study,
+                             everyone_read_study,
+                             everyone_write_study], request_params=request_params,
+            partial_response=True)
         self.study.active = True
         self.study.save()
 
@@ -1495,19 +1513,13 @@ class StudyResourceTests(EddApiTestCase):
                            everyone_read_study,
                            everyone_write_study, ]
         self._assert_authenticated_get_allowed(list_url, self.study_read_only_user,
-                                               request_params=request_params,
-                                               expected_values=expected_values,
-                                               values_converter=study_to_json_dict,
-                                               partial_response=True)
+            expected_values=expected_values, request_params=request_params, partial_response=True)
 
         request_params = {
             UPDATED_AFTER_PARAM: self.study.created.mod_time,
         }
         self._assert_authenticated_get_allowed(list_url, self.study_read_only_user,
-                                               request_params=request_params,
-                                               expected_values=expected_values,
-                                               values_converter=study_to_json_dict,
-                                               partial_response=True)
+            expected_values=expected_values, request_params=request_params, partial_response=True)
 
         # verify that "after" param is inclusive, and "before" is exclusive
         request_params = {
@@ -1515,40 +1527,28 @@ class StudyResourceTests(EddApiTestCase):
             CREATED_BEFORE_PARAM: self.study.created.mod_time + timedelta(microseconds=1),
         }
         self._assert_authenticated_get_allowed(list_url, self.study_read_only_user,
-                                               request_params=request_params,
-                                               expected_values=[self.study],
-                                               values_converter=study_to_json_dict,
-                                               partial_response=True)
+            expected_values=[self.study], request_params=request_params, partial_response=True)
 
         request_params = {
             UPDATED_AFTER_PARAM:  str(self.study.updated.mod_time),
             UPDATED_BEFORE_PARAM: self.study.updated.mod_time + timedelta(microseconds=1),
         }
         self._assert_authenticated_get_allowed(list_url, self.study_read_only_user,
-                                               request_params=request_params,
-                                               expected_values=[self.study],
-                                               values_converter=study_to_json_dict,
-                                               partial_response=True)
+            expected_values=[self.study], request_params=request_params, partial_response=True)
 
         request_params = {
             CREATED_BEFORE_PARAM: everyone_write_study.created.mod_time
         }
         expected_values = [self.study, everyone_read_study, ]
         self._assert_authenticated_get_allowed(list_url, self.study_read_only_user,
-                                               request_params=request_params,
-                                               expected_values=expected_values,
-                                               values_converter=study_to_json_dict,
-                                               partial_response=True)
+            expected_values=expected_values, request_params=request_params, partial_response=True)
 
         request_params = {
             UPDATED_BEFORE_PARAM: self.study.updated.mod_time
         }
         expected_values = [everyone_read_study, everyone_write_study, ]
         self._assert_authenticated_get_allowed(list_url, self.study_read_only_user,
-                                               request_params=request_params,
-                                               expected_values=expected_values,
-                                               values_converter=study_to_json_dict,
-                                               partial_response=True)
+            expected_values=expected_values, request_params=request_params, partial_response=True)
 
     def test_study_detail_read_access(self):
         """
@@ -1582,9 +1582,7 @@ class StudyResourceTests(EddApiTestCase):
             self._assert_unauthenticated_get_denied(everyone_read_url)
 
             self._assert_authenticated_get_allowed(everyone_read_url, self.unprivileged_user,
-                                                   expected_values=everyone_read_study,
-                                                   values_converter=study_to_json_dict,
-                                                   partial_response=True)
+                expected_values=everyone_read_study, partial_response=True)
 
         # everyone write
         everyone_write_study = Study.objects.create(name='Writable be everyone')
@@ -1599,9 +1597,7 @@ class StudyResourceTests(EddApiTestCase):
 
             # verify study-level "everyone" permissions allow access to view associated strains
             self._assert_authenticated_get_allowed(everyone_write_url, self.unprivileged_user,
-                                                   expected_values=everyone_write_study,
-                                                   values_converter=study_to_json_dict,
-                                                   partial_response=True)
+                expected_values=everyone_write_study, partial_response=True)
 
 
 def create_study(test_class, create_auth_perms_and_users=False):
@@ -1717,7 +1713,687 @@ def create_study(test_class, create_auth_perms_and_users=False):
                                                       manage_perms=(
                                                           test_class.delete_study_permission,))
 
+
+def create_everyone_studies_and_lines(test_class):
+    # setup studies that use the "everyone" permissions so we can test access to nested resources
+    # using them
+    test_class.everyone_read_study = Study.objects.create(name='Readable by everyone')
+    EveryonePermission.objects.create(study=test_class.everyone_read_study,
+                                      permission_type=StudyPermission.READ)
+    test_class.everyone_read_line = Line.objects.create(name='Everyone read line',
+                                                        study=test_class.everyone_read_study)
+
+    test_class.everyone_write_study = Study.objects.create(name='Writable by everyone')
+    EveryonePermission.objects.create(study=test_class.everyone_write_study,
+                                      permission_type=StudyPermission.WRITE)
+    test_class.everyone_write_line = Line.objects.create(name='Everyone write line',
+                                                  study=test_class.everyone_write_study)
+
+
+def define_auth_perms_and_users(test_class, model_name):
+    test_class.add_permission = Permission.objects.get(codename='add_%s' % model_name)
+    test_class.change_permission = Permission.objects.get(codename='change_%s' % model_name)
+    test_class.delete_permission = Permission.objects.get(codename='delete_%s' % model_name)
+
+    test_class.staff_creator = _create_user(username='staff.%s.creator' % model_name,
+                                            email='staff.study@localhost',
+                                            is_staff=True,
+                                            manage_perms=(test_class.add_permission,))
+
+    test_class.staff_changer = _create_user(username='staff.%s.changer' % model_name,
+                                            email='staff.study@localhost',
+                                            is_staff=True,
+                                            manage_perms=(test_class.change_permission,))
+
+    test_class.staff_deleter = _create_user(username='staff.%s.deleter' % model_name,
+                                            is_staff=True,
+                                            manage_perms=(test_class.delete_permission,))
+
+
+class StudyNestedResourceTests(EddApiTestCase):
+
+    def assert_everyone_read_privileges(self, uri_builder, is_detail, expected_values):
+        # test that every read/write permissions are enforced properly on nested study resources
+        uris = uri_builder.detail_uris if is_detail else uri_builder.list_uris
+        for uri in uris:
+            logger.debug('Testing "everyone" GET access to %s' % uri)
+            # verify that an un-authenticated request gets a 404
+            self._assert_unauthenticated_get_denied(uri)
+
+            self._assert_authenticated_get_allowed(uri, self.unprivileged_user,
+                expected_values=expected_values, partial_response=True)
+
+    def inactive_resource_factory(self):
+        # must be overridden by children
+        raise NotImplementedError()
+
+    def _enforce_nested_study_resource_access(self, url, expected_values):
+        """
+           A helper method that does the work to test permissions for both list and individual study
+           GET access.
+        """
+
+        # verify that an un-authenticated request gets a 404
+        self._assert_unauthenticated_get_denied(url)
+
+        # enforce access denied behavior users without access to the enclosing study
+        self._assert_authenticated_get_denied(url, self.unprivileged_user)
+        self._assert_authenticated_get_denied(url, self.staff_user)
+        self._assert_authenticated_get_denied(url, self.staff_creator)
+
+        # test that users / groups with read access can read study internals
+        self._assert_authenticated_get_allowed(url,
+                                               self.study_read_only_user,
+                                               expected_values=expected_values,
+                                               partial_response=True)
+
+        self._assert_authenticated_get_allowed(url,
+                                               self.study_read_group_user,
+                                               expected_values=expected_values,
+                                               partial_response=True)
+
+        # verify that study write permissions imply read permissions on the internals
+        self._assert_authenticated_get_allowed(url,
+                                               self.study_write_only_user,
+                                               expected_values=expected_values,
+                                               partial_response=True)
+
+        self._assert_authenticated_get_allowed(url,
+                                               self.study_write_group_user,
+                                               expected_values=expected_values,
+                                               partial_response=True)
+
+        # test that a superuser can access study data without any other privileges
+        self._assert_authenticated_get_allowed(url,
+                                               self.superuser,
+                                               expected_values=expected_values,
+                                               partial_response=True)
+
+        # test that 'staff' users with any class-level Study django.util.auth privileges have NO
+        # implied permission on data stored within the study (those perms only apply to the
+        # study title/description/contact).
+        self._assert_authenticated_get_denied(url, self.staff_changer)
+        self._assert_authenticated_get_denied(url, self.staff_creator)
+        self._assert_authenticated_get_denied(url, self.staff_deleter)
+
+        # test that 'staff' users with class-level Line django.util.auth mutator privileges have NO
+        # permission on relevant objects within the study, even without other permissions. We can
+        # add this later if needed, but it adds code complexity with no clear benefit
+        self._assert_authenticated_get_denied(url, self.staff_creator)
+        self._assert_authenticated_get_denied(url, self.staff_changer)
+        self._assert_authenticated_get_denied(url, self.staff_deleter)
+
+
+class LinesTests(StudyNestedResourceTests):
+    """
+    Tests access controls and HTTP return codes for queries to the nested /rest/studies/{X}/lines/
+    REST API resource.
+
+    Study lines should only be accessible by:
+    1) Superusers
+    2) Users who have explicit StudyPermission granted via their individual account or via user
+    group membership.
+
+    Note that these permissions are enforced by a combination of EDD's custom
+    ImpliedPermissions class and StudyLinesView's get_queryset() method, whose non-empty result
+    implies that the requesting user has access to the returned strains.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        """
+        Creates strains, users, and study/line combinations to test the REST resource's application
+        of user permissions.
+        """
+        super(LinesTests, LinesTests).setUpTestData()
+
+        # define placeholder data members to silence PyCharm style checks for data members
+        # created in create_study()
+        cls.study = None
+        cls.unprivileged_user = None
+        cls.study_read_only_user = None
+        cls.study_write_only_user = None
+        cls.study_read_group_user = None
+        cls.study_write_group_user = None
+        cls.staff_user = None
+        cls.staff_study_creator = None
+        cls.staff_study_changer = None
+        cls.staff_study_deleter = None
+        cls.superuser = None
+
+        cls.staff_creator = None
+        cls.staff_changer = None
+        cls.staff_deleter = None
+
+        # create the study and associated users & permissions
+        create_study(cls, True)
+        logger.debug('Study pk = %d' % cls.study.pk)
+
+        # create class-level django.util.auth permissions for Lines. This isn't a normal use case,
+        # but since EDD supports this configuration, it should be tested.
+        define_auth_perms_and_users(cls, 'line')
+
+        # create an active line in the study
+        cls.active_line = Line.objects.create(name='Study line 1',
+                                              study=cls.study)
+
+        logger.debug('Study lines: %s' % Line.objects.filter(study__pk=cls.study.pk))
+        create_everyone_studies_and_lines(cls)
+
+        cls._NESTED_URL_SEGMENT = 'lines'
+        uri_elts = [cls._NESTED_URL_SEGMENT]
+        cls.everyone_read_line_uris = StudyUriBuilder(
+            cls.everyone_read_study,
+            nested_orm_models=[cls.everyone_read_line],
+            uri_elts=uri_elts)
+
+        cls.everyone_write_line_uris = StudyUriBuilder(
+            cls.everyone_write_study,
+            nested_orm_models=[cls.everyone_write_line],
+            uri_elts=uri_elts)
+
+    @property
+    def values_converter(self):
+        return line_to_json_dict
+
+    def test_malformed_uri(self):
+        """
+        Tests that the API correctly identifies a client error in URI input, since code has
+        to deliberately avoid a 500 error for invalid ID's
+        """
+        # build a URL with purposefully malformed study UUID
+        line_list_pattern = '%(base_study_uri)s/%(study_uuid)s/%(nested_lines_uri)s/'
+        url = line_list_pattern % {
+            'base_study_uri': STUDIES_RESOURCE_URI,
+            'study_uuid': 'None',
+            'nested_lines_uri': self._NESTED_URL_SEGMENT,
+        }
+
+        self._assert_unauthenticated_client_error(url)
+        self._assert_authenticated_get_client_error(url, self.unprivileged_user)
+
+        # build a URL with purposefully malformed study line UUID
+        line_list_pattern = '%(base_study_uri)s/%(study_uuid)s/%(nested_lines_uri)s/%(line_uuid)s/'
+        url = line_list_pattern % {
+            'base_study_uri': STUDIES_RESOURCE_URI,
+            'study_uuid': self.study.pk,
+            'nested_lines_uri': self._NESTED_URL_SEGMENT,
+            'line_uuid': 'None',
+        }
+
+        self._assert_unauthenticated_client_error(url)
+        self._assert_authenticated_get_client_error(url, self.unprivileged_user)
+
+        # build a URL with valid / accessible line ID that doesn't exist in this study -- verify
+        # the line isn't accessible build a URL with purposefully malformed study line UUID
+        inaccessible_line = Line.objects.create('Not in this study')
+        line_list_pattern = '%(base_study_uri)s/%(study_uuid)s/%(nested_lines_uri)s/%(line_uuid)s/'
+        url = line_list_pattern % {
+            'base_study_uri': STUDIES_RESOURCE_URI,
+            'study_uuid': self.study.pk,
+            'nested_lines_uri': self._NESTED_URL_SEGMENT,
+            'line_uuid': inaccessible_line.pk,
+        }
+
+        self._assert_unauthenticated_client_error(url)
+        self._assert_authenticated_get_client_error(url, self.superuser)
+
+    def test_study_list_read_access(self):
+        """
+            Tests GET /rest/studies/
+        """
+        print(SEPARATOR)
+        print('%s(): ' % self.test_study_list_read_access.__name__)
+        print(SEPARATOR)
+
+        # test basic use for a single study
+        study_line_urls = make_study_url_variants(self.study, nested_resource_url='lines')
+
+        for list_url in study_line_urls:
+            print("Testing read access for %s" % list_url)
+            print('Active line active ? %s' % self.active_line.active)
+            self._enforce_nested_study_resource_access(list_url,
+                                                       expected_values=[self.active_line])
+
+            # test filtering based on study active status -- should return the same results as
+            # before since the client has specifically requested lines this study
+            self.study.active = False
+            self.study.save()
+            self._enforce_nested_study_resource_access(list_url,
+                                                       expected_values=[self.active_line])
+            self.study.active = True
+            self.study.save()
+
+            # test that explicitly filtering by line active status gives the same result as before
+            request_params = {ACTIVE_STATUS_PARAM: QUERY_ACTIVE_OBJECTS_ONLY}
+            self._assert_authenticated_get_allowed(list_url,
+                                                   self.superuser,
+                                                   request_params=request_params)
+
+            # create an inactive line in the study
+            inactive_line = Line.objects.create(name='Inactive line',
+                                                study=self.study,
+                                                active=False)
+
+            # test that a default request still only returns the active lines
+            self._assert_authenticated_get_allowed(list_url,
+                                                   self.superuser,
+                                                   expected_values=[self.active_line],
+                                                   partial_response=True)
+
+            # test that an explicit request for active lines only returns the active one
+            request_params = {ACTIVE_STATUS_PARAM: QUERY_ACTIVE_OBJECTS_ONLY}
+            self._assert_authenticated_get_allowed(list_url,
+                                                   self.superuser,
+                                                   expected_values=[self.active_line],
+                                                   request_params=request_params,
+                                                   partial_response=True)
+
+            # test that an explicit request for INactive lines only returns the inactive one
+            request_params = {ACTIVE_STATUS_PARAM: QUERY_INACTIVE_OBJECTS_ONLY}
+            self._assert_authenticated_get_allowed(list_url,
+                                                   self.superuser,
+                                                   expected_values=[inactive_line],
+                                                   request_params=request_params,
+                                                   partial_response=True)
+
+            # remove the inactive line to simplify the next iteration
+            inactive_line.delete()
+
+        # test that study-level "everyone" permissions are correctly applied
+        self.assert_everyone_read_privileges(self.everyone_read_line_uris,
+                                             False,
+                                             [self.everyone_read_line])
+
+        self.assert_everyone_read_privileges(self.everyone_write_line_uris,
+                                              False,
+                                              [self.everyone_write_line])
+
+    def test_line_detail_read_access(self):
+        """
+            Tests GET /rest/studies/{X}/lines/{Y}
+        """
+        print(SEPARATOR)
+        print('%s(): ' % self.test_line_detail_read_access.__name__)
+        print(SEPARATOR)
+
+        # create a second active line in the study so our tests of line detail access can't stumble
+        # on the same result as search without taking requested line pk into account...this
+        # happened during early tests!
+        temp_line = Line.objects.create(name='Other active line',
+                                        study=self.study,
+                                        active=True)
+
+        # build up a list of all the valid URL's by which the study details can be accessed
+        line_detail_urls = make_study_url_variants(self.study,
+                                                   nested_resource_url=self._NESTED_URL_SEGMENT,
+                                                   nested_resource=self.active_line)
+
+        # test that permissions are applied consistently across each URL used to access the study
+        # / line
+        for study_lines_url in line_detail_urls:
+            logger.debug('Testing line detail access at %s' % study_lines_url)
+            self._enforce_nested_study_resource_access(study_lines_url,
+                                                       expected_values=self.active_line)
+
+        # test that study-level "everyone" permissions are applied correctly for nested lines
+        self.assert_everyone_read_privileges(self.everyone_read_line_uris,
+                                             is_detail=True,
+                                             expected_values=self.everyone_read_line)
+        self.assert_everyone_read_privileges(self.everyone_write_line_uris,
+                                             is_detail=True,
+                                             expected_values=self.everyone_write_line)
+
+        # test that a directly request for a line returns it even if it's marked inactive (which
+        # would hide it from
+        # the list view by default)
+        inactive_line = Line.objects.create(name='Inactive line',
+                                            study=self.study,
+                                            active=False)
+        inactive_line_url = '/rest/studies/%(study_id)s/lines/%(line_id)s/' % {
+            'study_id': self.study.pk,
+            'line_id': inactive_line.pk}
+
+        logger.debug('testing inactive line detail access at %s' % inactive_line_url)
+
+        self._assert_authenticated_get_allowed(inactive_line_url,
+                                               self.study_read_only_user,
+                                               expected_values=inactive_line,
+                                               partial_response=True)
+
+        temp_line.delete()
+        inactive_line.delete()
+
+
+class StudyUriBuilder:
+    """
+    Builds valid URI's combinatorially for nested study resources (i.e. using slug/pk/uuid combinations)
+    """
+    def __init__(self, study, nested_orm_models, uri_elts):
+        self.study = study
+        self.nested_orm_models = nested_orm_models
+        self.uri_elts = uri_elts
+
+        self.list_uris = []
+        self.detail_uris = None
+
+        self._build_uri_combinations()
+
+    @property
+    def detail_model(self):
+        return self.nested_orm_models[-1]
+
+    def _build_uri_combinations(self):
+        _study_prefix = '/rest/studies/%s/'
+        uri_prefixes = [_study_prefix % self.study.pk,
+                        _study_prefix % self.study.uuid,
+                        _study_prefix % self.study.slug]
+
+        for index, url_segment in enumerate(self.uri_elts):
+            new_prefixes = []
+            for prefix in uri_prefixes:
+                resource = self.nested_orm_models[index]
+
+                if index == (len(self.nested_orm_models) - 1):
+                    self.list_uris.append(prefix + ('%s/' % url_segment))
+
+                pk_uri = prefix + '%s/%s/' % (url_segment, resource.pk)
+                new_prefixes.append(pk_uri)
+
+                uuid_uri = prefix + '%s/%s/' % (url_segment, resource.uuid)
+                new_prefixes.append(uuid_uri)
+
+            uri_prefixes = new_prefixes
+
+        self.detail_uris = uri_prefixes
+
+        if not self.uri_elts:
+            self.list_uris.append('/rest/study/')
+
+
+class AssaysTests(StudyNestedResourceTests):
+    """
+    Tests access controls and HTTP return codes for queries to the nested /rest/studies/{X}/lines/
+    REST API resource.
+
+    Study lines should only be accessible by:
+    1) Superusers
+    2) Users who have explicit StudyPermission granted via their individual account or via user
+    group membership.
+
+    Note that these permissions are enforced by a combination of EDD's custom
+    ImpliedPermissions class and StudyLinesView's get_queryset() method, whose non-empty result
+    implies that the requesting user has access to the returned strains.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        """
+        Creates strains, users, and study/line combinations to test the REST resource's application
+        of user permissions.
+        """
+        super(AssaysTests, AssaysTests).setUpTestData()
+
+        # define placeholder data members to silence PyCharm style checks for data members
+        # created in create_study()
+        cls.study = None
+        cls.unprivileged_user = None
+        cls.study_read_only_user = None
+        cls.study_write_only_user = None
+        cls.study_read_group_user = None
+        cls.study_write_group_user = None
+        cls.staff_user = None
+        cls.staff_study_creator = None
+        cls.staff_study_changer = None
+        cls.staff_study_deleter = None
+        cls.superuser = None
+
+        cls.staff_creator = None
+        cls.staff_changer = None
+        cls.staff_deleter = None
+
+        # create the study and associated users & permissions
+        create_study(cls, True)
+        logger.debug('Study pk = %d' % cls.study.pk)
+
+        # create class-level django.util.auth permissions for Assays. This isn't a normal use case,
+        # but since EDD supports this configuration, it should be tested.
+        define_auth_perms_and_users(cls, 'assay')
+
+        # create an active line/assay in the study
+        cls.active_line = Line.objects.create(name='Study line 1',
+                                              study=cls.study)
+
+        logger.debug('Study lines: %s' % ', '.join([str(line.pk) for line in
+                                                    Line.objects.filter(study__pk=cls.study.pk)]))
+
+        create_everyone_studies_and_lines(cls)
+
+        # set up objects that are unique to this level of study detail.
+        # TODO: add further abstraction to above code to eliminate boilerplate for additional
+        # nested study objects
+        cls.protocol = Protocol.objects.create(name='JBEI Proteomics',
+                                               description='Proteomics protocol used @ JBEI',
+                                               owned_by=cls.superuser)
+
+        cls.active_assay = Assay.objects.create(name='Study assay 1',
+                                                line=cls.active_line,
+                                                protocol=cls.protocol,
+                                                experimenter=cls.study_write_only_user)
+
+        cls.everyone_read_assay = Assay.objects.create(name='Everyone read assay',
+                                                       line=cls.everyone_read_line,
+                                                       protocol=cls.protocol,
+                                                       experimenter=cls.unprivileged_user)
+
+        cls.everyone_write_assay = Assay.objects.create(name='Everyone write assay',
+                                                        line=cls.everyone_write_line,
+                                                        protocol=cls.protocol,
+                                                        experimenter=cls.unprivileged_user)
+
+        # build up lists of all the valid URI's usable to access the assays during the test
+        uri_elts = ['lines', 'assays']
+        cls.active_assay_uris = StudyUriBuilder(cls.study,
+                                                nested_orm_models=[cls.active_line,
+                                                                   cls.active_assay],
+                                                uri_elts=uri_elts)
+
+        cls.everyone_read_assay_uris = StudyUriBuilder(cls.everyone_read_study,
+                                                       nested_orm_models=[cls.everyone_read_line,
+                                                                          cls.everyone_read_assay],
+                                                       uri_elts=uri_elts)
+
+        cls.everyone_write_assay_uris = StudyUriBuilder(cls.everyone_write_study,
+                                                        nested_orm_models=[cls.everyone_write_line,
+                                                                           cls.everyone_write_assay],
+                                                        uri_elts=uri_elts)
+
+    # def test_malformed_uri(self):
+    #     """
+    #     Tests that the API correctly identifies a client error in URI input, since code has
+    #     to deliberately avoid a 500 error for invalid ID's
+    #     """
+    #     # build a URL with purposefully malformed study UUID
+    #     line_list_pattern = '%(base_study_uri)s/%(study_uuid)s/%(nested_lines_uri)s/'
+    #     url = line_list_pattern % {
+    #         'base_study_uri': STUDIES_RESOURCE_URI,
+    #         'study_uuid': 'None',
+    #         'nested_lines_uri': self._NESTED_URL_SEGMENT,
+    #     }
+    #
+    #     self._assert_unauthenticated_client_error(url)
+    #     self._assert_authenticated_get_client_error(url, self.unprivileged_user)
+    #
+    #     # build a URL with purposefully malformed study line UUID
+    #     line_list_pattern = '%(base_study_uri)s/%(study_uuid)s/%(nested_lines_uri)s/%(line_uuid)s/'
+    #     url = line_list_pattern % {
+    #         'base_study_uri': STUDIES_RESOURCE_URI,
+    #         'study_uuid': self.study.pk,
+    #         'nested_lines_uri': self._NESTED_URL_SEGMENT,
+    #         'line_uuid': 'None',
+    #     }
+    #
+    #     self._assert_unauthenticated_client_error(url)
+    #     self._assert_authenticated_get_client_error(url, self.unprivileged_user)
+    #
+    #     # build a URL with valid / accessible line ID that doesn't exist in this study -- verify the line isn't
+    #     # accessible build a URL with purposefully malformed study line UUID
+    #     inaccessible_line = Line.objects.create('Not in this study')
+    #     line_list_pattern = '%(base_study_uri)s/%(study_uuid)s/%(nested_lines_uri)s/%(line_uuid)s/'
+    #     url = line_list_pattern % {
+    #         'base_study_uri': STUDIES_RESOURCE_URI,
+    #         'study_uuid': self.study.pk,
+    #         'nested_lines_uri': self._NESTED_URL_SEGMENT,
+    #         'line_uuid': inaccessible_line.pk,
+    #     }
+    #
+    #     self._assert_unauthenticated_client_error(url)
+    #     self._assert_authenticated_get_client_error(url, self.superuser)
+
+    def test_assay_list_read_access(self):
+        """
+            Tests GET /rest/studies/X/assays/
+        """
+        print(SEPARATOR)
+        print('%s(): ' % self.test_assay_list_read_access.__name__)
+        print(SEPARATOR)
+
+        print('Testing all URIs:')
+        for list_uri in self.active_assay_uris.list_uris:
+            print(list_uri)
+
+        self.enforce_nested_study_resource_list(self.active_assay_uris, [self.active_assay])
+
+        # test that study-level "everyone" permissions are correctly applied
+        self.assert_everyone_read_privileges(self.everyone_read_assay_uris, False,
+            [self.everyone_read_assay])
+
+        self.assert_everyone_read_privileges(self.everyone_write_assay_uris, False,
+            [self.everyone_write_assay])
+
+    @property
+    def values_converter(self):
+        return assay_to_json_dict
+
+    def inactive_resource_factory(self):
+        # create an inactive assay
+        inactive_assay = Assay.objects.create(name='Inactive assay',
+                                              line=self.active_line,
+                                              protocol=self.protocol,
+                                              active=False)
+
+        return StudyUriBuilder(self.study, nested_orm_models=[self.active_line, inactive_assay],
+                               uri_elts=['lines', 'assays'])
+
+    def enforce_nested_study_resource_list(self, uri_builder, expected_values):
+
+        # test basic use for a single study
+        for list_uri in uri_builder.list_uris:
+            print("Testing GET access for %s" % list_uri)
+            self._enforce_nested_study_resource_access(list_uri,
+                                                       expected_values=expected_values)
+
+            # test filtering based on study active status -- should return the same results as
+            # before since the client has specifically requested data in this study
+            self.study.active = False
+            self.study.save()
+            self._enforce_nested_study_resource_access(list_uri,
+                                                       expected_values=expected_values)
+            self.study.active = True
+            self.study.save()
+
+            # test that explicitly filtering by active status gives the same result as before
+            request_params = {ACTIVE_STATUS_PARAM: QUERY_ACTIVE_OBJECTS_ONLY}
+            self._assert_authenticated_get_allowed(list_uri, self.superuser,
+                                                   request_params=request_params)
+
+            # create inactive resources within the study that will show up in the list view
+            inactive_resource_uris = self.inactive_resource_factory()
+            inactive_resource = inactive_resource_uris.detail_model
+
+            # test that a default request still only returns the active objects
+            self._assert_authenticated_get_allowed(list_uri, self.superuser,
+                                                   expected_values=expected_values,
+                                                   partial_response=True)
+
+            # test that an explicit request for active assays only returns the active one
+            request_params = {ACTIVE_STATUS_PARAM: QUERY_ACTIVE_OBJECTS_ONLY}
+            self._assert_authenticated_get_allowed(list_uri, self.superuser,
+                                                   expected_values=expected_values,
+                                                   request_params=request_params,
+                                                   partial_response=True)
+
+            # test that an explicit request for INactive resources only returns the inactive one
+            request_params = {ACTIVE_STATUS_PARAM: QUERY_INACTIVE_OBJECTS_ONLY}
+            self._assert_authenticated_get_allowed(list_uri, self.superuser,
+                                                   expected_values=[inactive_resource],
+                                                   request_params=request_params,
+                                                   partial_response=True)
+
+            # delete inactive resources created for the purposes of the test...we don't want
+            # them to interfere with subsequent iterations of the test or with other test methods
+            inactive_resource.delete()
+
+    def test_assay_detail_read_access(self):
+        """
+            Tests GET /rest/studies/{X}/lines/{Y}/assays/{Z}/
+        """
+        print(SEPARATOR)
+        print('%s(): ' % self.test_assay_detail_read_access.__name__)
+        print(SEPARATOR)
+
+        print('Testing all URIs:')
+        for list_uri in self.active_assay_uris.detail_uris:
+            print(list_uri)
+
+        # create a second active assay in the study so our tests of line detail access can't
+        # stumble on the same result as search without taking requested assay pk into
+        # account...this happened during early tests!
+        temp_assay = Assay.objects.create(name='Other active assay',
+                                          line=self.active_line,
+                                          protocol=self.protocol,
+                                          active=True)
+
+        self.assert_detail_read_access(self.active_assay_uris,
+                                      self.everyone_read_assay_uris,
+                                      self.everyone_write_assay_uris)
+
+        temp_assay.delete()
+
+    def assert_detail_read_access(self, resource_uris, everyone_read, everyone_write):
+
+        # test that permissions are applied consistently across each URI used to access the nested
+        # resource
+        for detail_uri in resource_uris.detail_uris:
+            logger.debug('Testing detail access at GET %s' % detail_uri)
+            self._enforce_nested_study_resource_access(detail_uri,
+                                                       expected_values=resource_uris.detail_model)
+
+        # test that study-level "everyone" permissions are applied correctly for nested resources
+        self.assert_everyone_read_privileges(everyone_read, True, everyone_read.detail_model)
+
+        self.assert_everyone_read_privileges(everyone_write, True, everyone_write.detail_model)
+
+        # test that a directly request for a resource returns it even if it's marked inactive
+        # (which would hide it from the list view by default)
+        inactive_resource_uris = self.inactive_resource_factory()
+        inactive_resource_uri = inactive_resource_uris.detail_uris[0]
+        inactive_resource = inactive_resource_uris.detail_model
+
+        logger.debug('testing inactive detail access at GET %s' % inactive_resource_uri)
+
+        self._assert_authenticated_get_allowed(inactive_resource_uri, self.study_read_only_user,
+            expected_values=inactive_resource, partial_response=True)
+
+        # delete inactive resources created for the purposes of the test...we don't want
+        # them to interfere with subsequent iterations of the test or with other test methods
+        inactive_resource.delete()
+
+
 class SearchLinesResourceTest(EddApiTestCase):
+    @property
+    def values_converter(self):
+        return line_to_json_dict
 
     @classmethod
     def setUpTestData(cls):
@@ -1727,84 +2403,7 @@ class SearchLinesResourceTest(EddApiTestCase):
         """
         super(StudyResourceTests, StudyResourceTests).setUpTestData()
 
-        cls.add_study_permission = Permission.objects.get(codename='add_study')
-        cls.change_study_permission = Permission.objects.get(codename='change_study')
-        cls.delete_study_permission = Permission.objects.get(codename='delete_study')
-
-        # TODO: test for line manage permissions, even though they're presently unused in practice
-        cls.add_line_permission = Permission.objects.get(codename='add_line')
-        cls.change_line_permission = Permission.objects.get(codename='change_line')
-        cls.delete_line_permission = Permission.objects.get(codename='delete_line')
-
-        # unprivileged user
-        cls.unprivileged_user = User.objects.create_user(username=UNPRIVILEGED_USERNAME,
-                                                         email='unprivileged@localhost',
-                                                         password=PLAINTEXT_TEMP_USER_PASSWORD)
-        # admin user w/ no extra privileges
-        cls.superuser = _create_user(username=ADMIN_USERNAME, email='admin@localhost',
-                                     is_superuser=True)
-
-        # plain staff w/ no extra privileges
-        cls.staff_user = _create_user(username=STAFF_USERNAME, email='staff@localhost',
-                                      is_staff=True)
-
-        cls.staff_study_creator = _create_user(username='staff.study.creator',
-                                               email='staff.study@localhost', is_staff=True,
-                                               manage_perms=(cls.add_study_permission,))
-
-        cls.staff_study_changer = _create_user(username='staff.study.changer',
-                                               email='staff.study@localhost', is_staff=True,
-                                               manage_perms=(cls.change_study_permission,))
-
-        cls.staff_study_deleter = _create_user(username='staff.study.deleter', is_staff=True,
-                                               manage_perms=(cls.delete_study_permission,))
-
-        cls.study_read_only_user = User.objects.create_user(
-                username=STUDY_READER_USERNAME, email='study_read_only@localhost',
-                password=PLAINTEXT_TEMP_USER_PASSWORD)
-
-        cls.study_write_only_user = User.objects.create_user(
-                username=STUDY_WRITER_USERNAME, email='study.writer@localhost',
-                password=PLAINTEXT_TEMP_USER_PASSWORD)
-
-        cls.study_read_group_user = User.objects.create_user(
-                username=STUDY_READER_GROUP_USER, email='study.group_reader@localhost',
-                password=PLAINTEXT_TEMP_USER_PASSWORD)
-
-        cls.study_write_group_user = User.objects.create_user(
-                username=STUDY_WRITER_GROUP_USER, email='study.group_writer@localhost',
-                password=PLAINTEXT_TEMP_USER_PASSWORD)
-
-        # create groups for testing group-level user permissions
-        study_read_group = Group.objects.create(name='study_read_only_group')
-        study_read_group.user_set.add(cls.study_read_group_user)
-        study_read_group.save()
-
-        study_write_group = Group.objects.create(name='study_write_only_group')
-        study_write_group.user_set.add(cls.study_write_group_user)
-        study_write_group.save()
-
-        # create the study
-        cls.study = Study.objects.create(name='Test study')
-
-        # future-proof this test by removing any default permissions on the study that may have
-        # been configured on this instance (e.g. by the EDD_DEFAULT_STUDY_READ_GROUPS setting).
-        # This is most likely to be a complication in development.
-        UserPermission.objects.filter(study=cls.study).delete()
-        GroupPermission.objects.filter(study=cls.study).delete()
-
-        # set permissions on the study
-        UserPermission.objects.create(study=cls.study, user=cls.study_read_only_user,
-                                      permission_type=StudyPermission.READ)
-
-        UserPermission.objects.create(study=cls.study, user=cls.study_write_only_user,
-                                      permission_type=StudyPermission.WRITE)
-
-        GroupPermission.objects.create(study=cls.study, group=study_read_group,
-                                       permission_type=StudyPermission.READ)
-
-        GroupPermission.objects.create(study=cls.study, group=study_write_group,
-                                       permission_type=StudyPermission.WRITE)
+        create_study(cls, create_auth_perms_and_users=True)
 
         cls.growth_temp = MetadataType.objects.get(type_name='Growth temperature',
                                                    for_context=MetadataType.LINE)
@@ -1821,7 +2420,8 @@ class SearchLinesResourceTest(EddApiTestCase):
         cls.line.metadata_add(cls.growth_temp, 37)
         cls.line.save()
 
-        cls.inactive_line = Line.objects.create(name='Inactive line', study=cls.study,
+        cls.inactive_line = Line.objects.create(name='Inactive line',
+                                                study=cls.study,
                                                 active=False)
 
     def test_line_search_permissions(self):
@@ -2140,14 +2740,17 @@ class SearchLinesResourceTest(EddApiTestCase):
             CREATED_AFTER_PARAM: line1.created.mod_time,
         }
         expected_values = [line1, line2, line3]
-        self._assert_authenticated_search_allowed(search_url, self.superuser, search_params,
+        self._assert_authenticated_search_allowed(search_url,
+                                                  self.superuser,
+                                                  search_params,
                                                   expected_values=expected_values)
 
         search_params = {
             SEARCH_TYPE_PARAM: 'lines',
             UPDATED_AFTER_PARAM: line1.created.mod_time,
         }
-        self._assert_authenticated_search_allowed(search_url, self.superuser, search_params,
+        self._assert_authenticated_search_allowed(search_url,
+                                                  self.superuser, search_params,
                                                   expected_values=expected_values)
 
         # test single-bounded search where exclusive end boundary is set
@@ -2185,7 +2788,6 @@ class SearchLinesResourceTest(EddApiTestCase):
 
     def _assert_authenticated_search_allowed(self, url, user, post_data,
                                              expected_values=None,
-                                             values_converter=line_to_json_dict,
                                              partial_response=True,
                                              request_params=None):
         """
@@ -2195,24 +2797,40 @@ class SearchLinesResourceTest(EddApiTestCase):
         return super(SearchLinesResourceTest, self)._assert_authenticated_search_allowed(
                 url, user, post_data,
                 expected_values=expected_values,
-                values_converter=values_converter,
                 partial_response=partial_response,
                 request_params=request_params)
 
 
-def make_study_url_variants(study):
+# TODO: search for / remove usages
+def make_study_url_variants(study, nested_resource_url=None, nested_resource=None):
     study_detail_pattern = '%(base_studies_url)s/%(id)s/'
     pk_based_url = study_detail_pattern % {
-        'base_studies_url': STUDIES_RESOURCE_URL, 'id': str(study.pk),
+        'base_studies_url': STUDIES_RESOURCE_URI, 'id': str(study.pk),
     }
     uuid_based_url = study_detail_pattern % {
-        'base_studies_url': STUDIES_RESOURCE_URL, 'id': str(study.uuid),
+        'base_studies_url': STUDIES_RESOURCE_URI, 'id': str(study.uuid),
     }
     slug_based_url = study_detail_pattern % {
-        'base_studies_url': STUDIES_RESOURCE_URL, 'id': str(study.slug),
+        'base_studies_url': STUDIES_RESOURCE_URI, 'id': str(study.slug),
     }
-    return pk_based_url, uuid_based_url, slug_based_url,
 
+    study_urls = (pk_based_url, uuid_based_url, slug_based_url,)
+
+    if not nested_resource_url:
+        return study_urls
+
+    nested_resource_urls = []
+
+    for study_detail_url in study_urls:
+        if not nested_resource:
+            nested_list_url = study_detail_url + nested_resource_url + '/'
+            nested_resource_urls.append(nested_list_url)
+        else:
+            nested_detail_url = study_detail_url + nested_resource_url + '/%s/'
+            nested_resource_urls.append(nested_detail_url % nested_resource.pk)
+            nested_resource_urls.append(nested_detail_url % nested_resource.uuid)
+
+    return nested_resource_urls
 
 def make_url_variants(list_url, edd_obj):
     pattern = list_url + '/%s/'
