@@ -2218,9 +2218,7 @@ class AssaysTests(StudyNestedResourceTests):
 
         create_everyone_studies_and_lines(cls)
 
-        # set up objects that are unique to this level of study detail.
-        # TODO: add further abstraction to above code to eliminate boilerplate for additional
-        # nested study objects
+        # set up objects that are unique to this level of study detail
         cls.protocol = Protocol.objects.create(name='JBEI Proteomics',
                                                description='Proteomics protocol used @ JBEI',
                                                owned_by=cls.superuser)
@@ -2265,6 +2263,9 @@ class AssaysTests(StudyNestedResourceTests):
         print('%s(): ' % self.test_assay_list_read_access.__name__)
         print(SEPARATOR)
 
+        ###########################################################################################
+        # Test standard use cases for all REST resources...correct results and access privileges
+        ###########################################################################################
         print('Testing all URIs:')
         for list_uri in self.active_assay_uris.list_uris:
             print(list_uri)
@@ -2277,6 +2278,38 @@ class AssaysTests(StudyNestedResourceTests):
 
         self.assert_everyone_read_privileges(self.everyone_write_assay_uris, False,
             [self.everyone_write_assay])
+
+        ###########################################################################################
+        # test assay-specific filtering options
+        ###########################################################################################
+        protocol2 = Protocol.objects.create(
+            name='JBEI Metabolomics',
+            description='Metabolomics protocol used @ JBEI',
+            owned_by=self.superuser)
+
+        metabolomics_assay = Assay.objects.create(
+            name='Metabolomics assay',
+            line=self.active_line,
+            protocol=protocol2,
+            experimenter=self.study_write_only_user)
+
+        # test that single-value protocol-based filtering works
+        list_uri = self.active_assay_uris.list_uris[0]
+        self._assert_authenticated_get_allowed(
+            list_uri,
+            self.superuser,
+            expected_values=[metabolomics_assay],
+            request_params={'protocol': protocol2.pk},
+            partial_response=True)
+
+        # test multi-value protocol filtering
+        self._assert_authenticated_get_allowed(
+            list_uri,
+            self.superuser,
+            expected_values=[metabolomics_assay],
+            request_params={'protocol': [self.protocol.pk, protocol2.pk]},
+            partial_response=True)
+
 
     @property
     def values_converter(self):

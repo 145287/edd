@@ -166,8 +166,12 @@ class AssaysViewSet(viewsets.ReadOnlyModelViewSet):
         study_pk = study_query.get()
         line_id = self.kwargs[self.LINE_URL_KWARG]
         assay_id = self.kwargs.get(self.lookup_url_kwarg)
+        protocol_filter = query_params.get('protocol', None)
+
         assays_query = Assay.objects.filter(build_id_q('line__', line_id))
         assays_query = assays_query.filter(line__study__pk=study_pk)
+
+        assays_query = filter_id_list(assays_query, 'protocol', 'protocol', protocol_filter)
 
         return optional_edd_object_filtering(query_params,
                                              assays_query,
@@ -177,6 +181,43 @@ class AssaysViewSet(viewsets.ReadOnlyModelViewSet):
         # TODO: override to support optional bulk measurement / data requests for the study rather
         # than returning just assays
         return super(AssaysViewSet, self).get_serializer_class()
+
+
+def filter_id_list(assays_query, filter_param_name, query_param_name, protocol_filter):
+    if not protocol_filter:
+        return assays_query
+
+    filter_kwarg = '%s__in' % query_param_name
+
+    # if query params came from URL query params, parse them into a form usable in an ORM query
+    if isinstance(protocol_filter, basestring):
+        tokens = protocol_filter.split(',')
+        if len(tokens) == 1:
+            return assays_query.filter(build_id_q('protocol__', tokens[0].strip()))
+        else:
+            pks = []
+            for index, token in enumerate(tokens):
+                try:
+                    pks.append(int(token))
+                    continue
+                except ValueError:
+                    raise ParseError('Invalid value "%(invalid)s" in %(param) was not a valid '
+                                     'integer primary key' % {
+                                         'invalid': token,
+                                         'param': filter_param_name,
+                    })
+
+            return assays_query.filter(**{filter_kwarg: pks})
+
+    elif isinstance(protocol_filter, list):
+        return assays_query.filter(**{filter_kwarg: protocol_filter})
+    elif isinstance(protocol_filter, int):
+        return assays_query.filter(**{query_param_name: protocol_filter})
+
+    raise ParseError('Unsupported %(param)s value "%(value)s"' % {
+        'param': filter_param_name,
+        'value': protocol_filter
+    })
 
 
 class MetadataTypeViewSet(viewsets.ReadOnlyModelViewSet):
