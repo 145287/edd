@@ -114,7 +114,8 @@ class AssaysViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = AssaySerializer
     lookup_url_kwarg = 'assay_id'
     STUDY_URL_KWARG = '%s_pk' % STUDIES_RESOURCE_NAME
-    LINE_URL_KWARG = 'line_line_pk'  # TODO: sort out weird router/View.lookup_url_kwarg naming for double-nesting
+    # TODO: sort out weird router/View.lookup_url_kwarg naming for double-nesting
+    LINE_URL_KWARG = 'line_line_pk'
 
     def get_object(self):
         """
@@ -144,43 +145,37 @@ class AssaysViewSet(viewsets.ReadOnlyModelViewSet):
             logger.debug('User %s is not authenticated' % user.username)
             raise NotAuthenticated()
 
-        # load / check study permissions first rather than using expensive joins that include
-        # Study/StudyPermission/Line/Assay
+        # load / check enclosing study permissions first, ignoring the study's 'active' status
+        # and django.contrib.auth "manage" permissions since we're requesting its internals
         study_id = self.kwargs[self.STUDY_URL_KWARG]
-        study_query_params = {ACTIVE_STATUS_PARAM: QUERY_ANY_ACTIVE_STATUS}  # ignore active status for enclosing study
-        study_query = build_study_query(self.request, study_query_params, identifier=study_id, skip_study_manage_perms=True)
+        study_query_params = {ACTIVE_STATUS_PARAM: QUERY_ANY_ACTIVE_STATUS}
+        study_query = build_study_query(self.request,
+                                        study_query_params,
+                                        identifier=study_id,
+                                        skip_study_manage_perms=True)
         study_query = study_query.values_list('pk', flat=True)
+
         if len(study_query) != 1:
             logger.debug('Study %(study)s not found, or user %(user)s does not have permission' % {
                 'study': study_id,
                 'user': user.username})
             raise NotFound('Study %s not found' % study_id)
 
-        # load the line next to be sure it actually exists in this study. otherwise we're either performing a more
-        # expensive assay/line join or trusting users to provide a valid assay ID within the study (exposing all study
-        # assays instead of only those the user has access to)
-        line_id = self.kwargs[self.LINE_URL_KWARG]
+        # filter by line ID / study ID first to limit the size of the line/assay join, but also
+        # avoid a second query on Line before drilling into Assay
         study_pk = study_query.get()
-        line_query = do_id_filter(Line.objects.filter(study__pk=study_pk), line_id)
-
-        if not line_query:
-            msg = 'Line "%(line)s" not found in study "%(study)s"' % {
-                'line': line_id,
-                'study': study_id,
-            }
-            logger.info(msg)
-            raise NotFound(msg)
-
-        assays_query = Assay.objects.filter(line__pk=line_query.get().pk)
-
+        line_id = self.kwargs[self.LINE_URL_KWARG]
         assay_id = self.kwargs.get(self.lookup_url_kwarg)
+        assays_query = Assay.objects.filter(build_id_q('line__', line_id))
+        assays_query = assays_query.filter(line__study__pk=study_pk)
+
         return optional_edd_object_filtering(query_params,
-                                                     assays_query,
-                                                     identifier_override=assay_id)
+                                             assays_query,
+                                             identifier_override=assay_id)
 
     def get_serializer_class(self):
-        # TODO: override to support optional bulk measurement / data requests for the study rather than returning just
-        # assays
+        # TODO: override to support optional bulk measurement / data requests for the study rather
+        # than returning just assays
         return super(AssaysViewSet, self).get_serializer_class()
 
 
@@ -203,18 +198,20 @@ class MetadataTypeViewSet(viewsets.ReadOnlyModelViewSet):
                                          identifier=identifier)
 
 
-def do_id_filter(queryset, identifier):
+def build_id_q(prefix, identifier):
     try:
-        queryset = queryset.filter(pk=int(identifier))
+        id_keyword = '%spk' % prefix
+        return Q(**{id_keyword: int(identifier)})
     except ValueError:
-        try:
-            queryset = queryset.filter(uuid=UUID(identifier))
-        except ValueError:
-            raise ParseError('Invalid identifier "%(id)s"' % {
-                'id': identifier
-            })
+        pass
 
-    return queryset
+    try:
+        id_keyword = '%suuid' % prefix
+        return Q(**{id_keyword: UUID(identifier)})
+    except ValueError:
+        raise ParseError('Invalid identifier "%(id)s"' % {
+            'id': identifier
+        })
 
 
 def build_metadata_type_query(queryset, query_params, identifier=None):

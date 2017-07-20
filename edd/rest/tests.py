@@ -1752,17 +1752,6 @@ def define_auth_perms_and_users(test_class, model_name):
 
 class StudyNestedResourceTests(EddApiTestCase):
 
-    def assert_everyone_read_privileges(self, uri_builder, is_detail, expected_values):
-        # test that every read/write permissions are enforced properly on nested study resources
-        uris = uri_builder.detail_uris if is_detail else uri_builder.list_uris
-        for uri in uris:
-            logger.debug('Testing "everyone" GET access to %s' % uri)
-            # verify that an un-authenticated request gets a 404
-            self._assert_unauthenticated_get_denied(uri)
-
-            self._assert_authenticated_get_allowed(uri, self.unprivileged_user,
-                expected_values=expected_values, partial_response=True)
-
     def inactive_resource_factory(self):
         # must be overridden by children
         raise NotImplementedError()
@@ -1822,6 +1811,66 @@ class StudyNestedResourceTests(EddApiTestCase):
         self._assert_authenticated_get_denied(url, self.staff_creator)
         self._assert_authenticated_get_denied(url, self.staff_changer)
         self._assert_authenticated_get_denied(url, self.staff_deleter)
+
+    def _enforce_nested_study_resource_list(self, uri_builder, expected_values):
+
+        # test basic use for a single study
+        for list_uri in uri_builder.list_uris:
+            print("Testing GET access for %s" % list_uri)
+            self._enforce_nested_study_resource_access(list_uri,
+                                                       expected_values=expected_values)
+
+            # test filtering based on study active status -- should return the same results as
+            # before since the client has specifically requested data in this study
+            self.study.active = False
+            self.study.save()
+            self._enforce_nested_study_resource_access(list_uri,
+                                                       expected_values=expected_values)
+            self.study.active = True
+            self.study.save()
+
+            # test that explicitly filtering by active status gives the same result as before
+            request_params = {ACTIVE_STATUS_PARAM: QUERY_ACTIVE_OBJECTS_ONLY}
+            self._assert_authenticated_get_allowed(list_uri, self.superuser,
+                                                   request_params=request_params)
+
+            # create inactive resources within the study that will show up in the list view
+            inactive_resource_uris = self.inactive_resource_factory()
+            inactive_resource = inactive_resource_uris.detail_model
+
+            # test that a default request still only returns the active objects
+            self._assert_authenticated_get_allowed(list_uri, self.superuser,
+                                                   expected_values=expected_values,
+                                                   partial_response=True)
+
+            # test that an explicit request for active assays only returns the active one
+            request_params = {ACTIVE_STATUS_PARAM: QUERY_ACTIVE_OBJECTS_ONLY}
+            self._assert_authenticated_get_allowed(list_uri, self.superuser,
+                                                   expected_values=expected_values,
+                                                   request_params=request_params,
+                                                   partial_response=True)
+
+            # test that an explicit request for INactive resources only returns the inactive one
+            request_params = {ACTIVE_STATUS_PARAM: QUERY_INACTIVE_OBJECTS_ONLY}
+            self._assert_authenticated_get_allowed(list_uri, self.superuser,
+                                                   expected_values=[inactive_resource],
+                                                   request_params=request_params,
+                                                   partial_response=True)
+
+            # delete inactive resources created for the purposes of the test...we don't want
+            # them to interfere with subsequent iterations of the test or with other test methods
+            inactive_resource.delete()
+
+    def assert_everyone_read_privileges(self, uri_builder, is_detail, expected_values):
+        # test that every read/write permissions are enforced properly on nested study resources
+        uris = uri_builder.detail_uris if is_detail else uri_builder.list_uris
+        for uri in uris:
+            logger.debug('Testing "everyone" GET access to %s' % uri)
+            # verify that an un-authenticated request gets a 404`
+            self._assert_unauthenticated_get_denied(uri)
+
+            self._assert_authenticated_get_allowed(uri, self.unprivileged_user,
+                expected_values=expected_values, partial_response=True)
 
 
 class LinesTests(StudyNestedResourceTests):
@@ -2006,8 +2055,8 @@ class LinesTests(StudyNestedResourceTests):
                                              [self.everyone_read_line])
 
         self.assert_everyone_read_privileges(self.everyone_write_line_uris,
-                                              False,
-                                              [self.everyone_write_line])
+                                             False,
+                                             [self.everyone_write_line])
 
     def test_line_detail_read_access(self):
         """
@@ -2208,48 +2257,6 @@ class AssaysTests(StudyNestedResourceTests):
                                                                            cls.everyone_write_assay],
                                                         uri_elts=uri_elts)
 
-    # def test_malformed_uri(self):
-    #     """
-    #     Tests that the API correctly identifies a client error in URI input, since code has
-    #     to deliberately avoid a 500 error for invalid ID's
-    #     """
-    #     # build a URL with purposefully malformed study UUID
-    #     line_list_pattern = '%(base_study_uri)s/%(study_uuid)s/%(nested_lines_uri)s/'
-    #     url = line_list_pattern % {
-    #         'base_study_uri': STUDIES_RESOURCE_URI,
-    #         'study_uuid': 'None',
-    #         'nested_lines_uri': self._NESTED_URL_SEGMENT,
-    #     }
-    #
-    #     self._assert_unauthenticated_client_error(url)
-    #     self._assert_authenticated_get_client_error(url, self.unprivileged_user)
-    #
-    #     # build a URL with purposefully malformed study line UUID
-    #     line_list_pattern = '%(base_study_uri)s/%(study_uuid)s/%(nested_lines_uri)s/%(line_uuid)s/'
-    #     url = line_list_pattern % {
-    #         'base_study_uri': STUDIES_RESOURCE_URI,
-    #         'study_uuid': self.study.pk,
-    #         'nested_lines_uri': self._NESTED_URL_SEGMENT,
-    #         'line_uuid': 'None',
-    #     }
-    #
-    #     self._assert_unauthenticated_client_error(url)
-    #     self._assert_authenticated_get_client_error(url, self.unprivileged_user)
-    #
-    #     # build a URL with valid / accessible line ID that doesn't exist in this study -- verify the line isn't
-    #     # accessible build a URL with purposefully malformed study line UUID
-    #     inaccessible_line = Line.objects.create('Not in this study')
-    #     line_list_pattern = '%(base_study_uri)s/%(study_uuid)s/%(nested_lines_uri)s/%(line_uuid)s/'
-    #     url = line_list_pattern % {
-    #         'base_study_uri': STUDIES_RESOURCE_URI,
-    #         'study_uuid': self.study.pk,
-    #         'nested_lines_uri': self._NESTED_URL_SEGMENT,
-    #         'line_uuid': inaccessible_line.pk,
-    #     }
-    #
-    #     self._assert_unauthenticated_client_error(url)
-    #     self._assert_authenticated_get_client_error(url, self.superuser)
-
     def test_assay_list_read_access(self):
         """
             Tests GET /rest/studies/X/assays/
@@ -2262,7 +2269,7 @@ class AssaysTests(StudyNestedResourceTests):
         for list_uri in self.active_assay_uris.list_uris:
             print(list_uri)
 
-        self.enforce_nested_study_resource_list(self.active_assay_uris, [self.active_assay])
+        self._enforce_nested_study_resource_list(self.active_assay_uris, [self.active_assay])
 
         # test that study-level "everyone" permissions are correctly applied
         self.assert_everyone_read_privileges(self.everyone_read_assay_uris, False,
@@ -2285,55 +2292,6 @@ class AssaysTests(StudyNestedResourceTests):
         return StudyUriBuilder(self.study, nested_orm_models=[self.active_line, inactive_assay],
                                uri_elts=['lines', 'assays'])
 
-    def enforce_nested_study_resource_list(self, uri_builder, expected_values):
-
-        # test basic use for a single study
-        for list_uri in uri_builder.list_uris:
-            print("Testing GET access for %s" % list_uri)
-            self._enforce_nested_study_resource_access(list_uri,
-                                                       expected_values=expected_values)
-
-            # test filtering based on study active status -- should return the same results as
-            # before since the client has specifically requested data in this study
-            self.study.active = False
-            self.study.save()
-            self._enforce_nested_study_resource_access(list_uri,
-                                                       expected_values=expected_values)
-            self.study.active = True
-            self.study.save()
-
-            # test that explicitly filtering by active status gives the same result as before
-            request_params = {ACTIVE_STATUS_PARAM: QUERY_ACTIVE_OBJECTS_ONLY}
-            self._assert_authenticated_get_allowed(list_uri, self.superuser,
-                                                   request_params=request_params)
-
-            # create inactive resources within the study that will show up in the list view
-            inactive_resource_uris = self.inactive_resource_factory()
-            inactive_resource = inactive_resource_uris.detail_model
-
-            # test that a default request still only returns the active objects
-            self._assert_authenticated_get_allowed(list_uri, self.superuser,
-                                                   expected_values=expected_values,
-                                                   partial_response=True)
-
-            # test that an explicit request for active assays only returns the active one
-            request_params = {ACTIVE_STATUS_PARAM: QUERY_ACTIVE_OBJECTS_ONLY}
-            self._assert_authenticated_get_allowed(list_uri, self.superuser,
-                                                   expected_values=expected_values,
-                                                   request_params=request_params,
-                                                   partial_response=True)
-
-            # test that an explicit request for INactive resources only returns the inactive one
-            request_params = {ACTIVE_STATUS_PARAM: QUERY_INACTIVE_OBJECTS_ONLY}
-            self._assert_authenticated_get_allowed(list_uri, self.superuser,
-                                                   expected_values=[inactive_resource],
-                                                   request_params=request_params,
-                                                   partial_response=True)
-
-            # delete inactive resources created for the purposes of the test...we don't want
-            # them to interfere with subsequent iterations of the test or with other test methods
-            inactive_resource.delete()
-
     def test_assay_detail_read_access(self):
         """
             Tests GET /rest/studies/{X}/lines/{Y}/assays/{Z}/
@@ -2355,8 +2313,8 @@ class AssaysTests(StudyNestedResourceTests):
                                           active=True)
 
         self.assert_detail_read_access(self.active_assay_uris,
-                                      self.everyone_read_assay_uris,
-                                      self.everyone_write_assay_uris)
+                                       self.everyone_read_assay_uris,
+                                       self.everyone_write_assay_uris)
 
         temp_assay.delete()
 
@@ -2382,8 +2340,10 @@ class AssaysTests(StudyNestedResourceTests):
 
         logger.debug('testing inactive detail access at GET %s' % inactive_resource_uri)
 
-        self._assert_authenticated_get_allowed(inactive_resource_uri, self.study_read_only_user,
-            expected_values=inactive_resource, partial_response=True)
+        self._assert_authenticated_get_allowed(inactive_resource_uri,
+                                               self.study_read_only_user,
+                                               expected_values=inactive_resource,
+                                               partial_response=True)
 
         # delete inactive resources created for the purposes of the test...we don't want
         # them to interfere with subsequent iterations of the test or with other test methods
