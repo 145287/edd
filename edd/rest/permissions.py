@@ -129,6 +129,9 @@ class ImpliedPermissions(BasePermission):
         if getattr(view, '_ignore_model_permissions', False):
             return True
 
+        if request.method == 'OPTIONS':
+            return True
+
         # get the queryset, depending on how the view defines it
         if hasattr(view, 'get_queryset'):
             queryset = view.get_queryset()
@@ -146,7 +149,9 @@ class ImpliedPermissions(BasePermission):
 
         # unauthenticated users never have permission
         if not (user and user.is_authenticated()):
-            logger.debug('User %(username)s is not authenticated. Denying access to %(url)s' % {
+            logger.debug('%(class)s: User %(username)s is not authenticated. Denying access to %('
+                         'url)s' % {
+                            'class': ImpliedPermissions.__class__.__name__,
                             'username': user.username,
                             'url': request.path,
                         })
@@ -157,9 +162,10 @@ class ImpliedPermissions(BasePermission):
 
         # if we can't infer permission and don't have any explicitly permission is DENIED
         if not self.result_implied_permissions:
-            logger.debug('User %(username)s has no explicitly-granted permissions on '
+            logger.debug('%(class)s: User %(username)s has no explicitly-granted permissions on '
                          'resource %(url)s. Denying access since no inferred permissions are '
                          'defined for HTTP %(method)s.' % {
+                            'class': ImpliedPermissions.__class__.__name__,
                             'username': user.username,
                             'method': request.method,
                             'url': request.path,
@@ -172,12 +178,14 @@ class ImpliedPermissions(BasePermission):
         requested_permission = self.method_to_inferred_perms_map[http_method]
         permission_implied_by_results = requested_permission in self.result_implied_permissions
 
-        logger.debug('Queryset inferred permissions: (%s)' % ', '.join(
-                        self.result_implied_permissions))
+        logger.debug('%(class)s: Queryset inferred permissions: (%(perms)s)' % {
+            'class': ImpliedPermissions.__class__.__name__,
+            'perms': ', '.join(self.result_implied_permissions)})
 
         has = 'has' if permission_implied_by_results else "doesn't have"
-        logger.debug('User %(username)s %(has)s inferred permission %(permission)s on resource '
-                     '%(method)s %(url)s if the query returns results' % {
+        logger.debug('%(class)s: User %(username)s %(has)s inferred permission %(permission)s on '
+                     'resource %(method)s %(url)s if the query returns results' % {
+                        'class': ImpliedPermissions.__class__.__name__,
                         'username': user.username,
                         'has': has,
                         'permission': requested_permission,
@@ -210,9 +218,9 @@ def user_has_admin_or_manage_perm(
     # if user has been explicitly granted any of the class-level django.contrib.auth permissions
     # that enable access
     enabling_perms = perms_getter(http_method, queryset.model)
-    logger.debug('Enabling permissions for %(method)s %(url)s: %(perms)s' % {
-        'method': request.method, 'url': request.path, 'perms': ', '.join(enabling_perms)
-    })
+    # logger.debug('Enabling permissions for %(method)s %(url)s: %(perms)s' % {
+    #     'method': request.method, 'url': request.path, 'perms': ', '.join(enabling_perms)
+    # })
     for permission in enabling_perms:
         if user.has_perm(permission):
             logger.debug('User %(username)s has class-level django.contrib.auth '

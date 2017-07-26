@@ -9,6 +9,8 @@ maintainability of the API across data member renames in Django's model classes
 # String constants for REST resource names
 ###################################################################################################
 LINES_RESOURCE_NAME = r'lines'
+ASSAYS_RESOURCE_NAME = r'assays'
+MEASUREMENTS_RESOURCE_NAME = r'measurements'
 STUDIES_RESOURCE_NAME = r'studies'
 SEARCH_RESOURCE_NAME = r'search'
 STRAINS_RESOURCE_NAME = r'strains'
@@ -31,6 +33,11 @@ META_VALUE_PARAM = 'test'
 ACTIVE_STATUS_DEFAULT = QUERY_ACTIVE_OBJECTS_ONLY
 ACTIVE_STATUS_OPTIONS = (QUERY_ANY_ACTIVE_STATUS, QUERY_ACTIVE_OBJECTS_ONLY,
                          QUERY_INACTIVE_OBJECTS_ONLY)
+
+UNKNOWN = 0
+INTRACELLULAR = 1
+EXTRACELLULAR = 2
+
 
 LOCALE_PARAM = 'locale'
 CASE_SENSITIVE_PARAM = 'case_sensitive'
