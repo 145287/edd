@@ -3,8 +3,8 @@ Defines serializers for EDD's nascent REST API, as supported by the django rest 
 (http://www.django-rest-framework.org/)
 """
 
-from main.models import (Assay, EDDObject, Line, MetadataType, MetadataGroup, Strain, Study, Update,
-                         User, Protocol, MeasurementUnit)
+from main.models import (Assay, EDDObject, Line, Measurement, MeasurementValue, MeasurementUnit,
+                         MetadataType, MetadataGroup, Protocol, Strain, Study, Update, User, )
 from rest_framework import serializers
 
 
@@ -29,8 +29,21 @@ class EDDObjectSerializer(serializers.ModelSerializer):
 class AssaySerializer(serializers.ModelSerializer):
     class Meta:
         model = Assay
-        fields = ('pk', 'line', 'name', 'protocol', 'experimenter', 'description', 'uuid', 'created', 'updated',
-                  'meta_store', 'active')
+        fields = ('pk', 'line', 'name', 'protocol', 'experimenter', 'description', 'uuid',
+                  'created', 'updated', 'meta_store', 'active')
+
+
+class MeasurementSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Measurement
+        fields = ('pk', 'assay', 'experimenter', 'measurement_type', 'x_units',
+                  'y_units', 'compartment', 'active', 'update_ref', 'measurement_format')
+
+
+class MeasurementValueSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MeasurementValue
+        fields = ('pk', 'measurement', 'x', 'y', 'updated')
 
 
 class StudySerializer(serializers.ModelSerializer):

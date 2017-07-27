@@ -34,7 +34,8 @@ from rest_framework_swagger.renderers import OpenAPIRenderer, SwaggerUIRenderer
 
 from .permissions import (ImpliedPermissions, StudyResourcePermissions,
                           user_has_admin_or_manage_perm)
-from .serializers import (LineSerializer, MeasurementSerializer, MeasurementUnitSerializer,
+from .serializers import (LineSerializer, MeasurementSerializer,
+                          MeasurementValueSerializer, MeasurementUnitSerializer,
                           MetadataGroupSerializer, MetadataTypeSerializer,
                           ProtocolSerializer, StrainSerializer, StudySerializer,
                           UserSerializer, AssaySerializer)
@@ -147,13 +148,13 @@ class AssaysViewSet(viewsets.ReadOnlyModelViewSet):
 
         query_params = self.request.query_params
 
-        study_query = nested_study_resource_initial_query(self.request,
-                                                          self.kwargs,
-                                                          _STUDY_NESTED_ID_KWARG)
+        study_pk_query = nested_study_resource_initial_query(self.request,
+                                                             self.kwargs,
+                                                             _STUDY_NESTED_ID_KWARG)
 
         # filter by line ID / study ID first to limit the size of the line/assay join, but also
         # avoid a second query on Line before drilling into Assay
-        study_pk = study_query.get()
+        study_pk = study_pk_query.get()
         line_id = self.kwargs[_LINE_NESTED_ID_KWARG]
         assay_id = self.kwargs.get(self.lookup_url_kwarg)
 
@@ -175,23 +176,37 @@ class AssaysViewSet(viewsets.ReadOnlyModelViewSet):
         return super(AssaysViewSet, self).get_serializer_class()
 
 
-def nested_study_resource_initial_query(request, kwargs, study_url_kwarg):
+def nested_study_resource_initial_query(request, kwargs, study_url_kwarg, line_url_kwarg=None,
+                                        assay_url_kwarg=None, measurement_url_kwarg=None):
+    """
+    A helper method to query nested study resources as part of enforcing EDD study permissions
+    for REST API calls.  Queries the database for the study and its nested resources,
+    verifying the relationships of nested resources back to the study.   Raises NotFound if the
+    study or any requested nested resource doesn't exist, or if the requesting user doesn't have
+    required permission to access it as defined by study permissions. Note that that
+    django.contrib.auth permissions are NOT checked by this method, so it should only be used to
+    verify relationship back to the study itself (the most likely source of user access to the
+    resources).  Django.contrib.auth permissions are NOT checked/applied to any resource within a
+    study, since at that point study-level permissions make more sense to apply than class-level
+    django.contrib.auth permissions across all studies.
+    :return: a QuerySet that returns the primary key of the study iff it exists and the user has
+    access to it
+    """
     user = request.user
     if not user.is_authenticated():
         logger.debug('User %s is not authenticated' % user.username)
         raise NotAuthenticated()
 
-    # load / check enclosing study permissions first, ignoring the study's 'active' status
-    # and django.contrib.auth "manage" permissions since we're requesting its internals
-    study_id = kwargs.get(study_url_kwarg)
-
     # special-case workaround for the browseable API.  It appears to directly call the views'
     # get_queryset() methods during inspection. When implemented, removing this check would cause
     # the browseable API to fail to load, although clearly under normal conditions study nested
     # resources shouldn't be reachable without the study id used to enforce access controls
+    study_id = kwargs.get(study_url_kwarg)
     if not study_id:
         raise NotFound()
 
+    # load / check enclosing study permissions first, ignoring the study's 'active' status
+    # and django.contrib.auth "manage" permissions since we're requesting study internals
     study_query_params = {ACTIVE_STATUS_PARAM: QUERY_ANY_ACTIVE_STATUS}
     study_query = build_study_query(request,
                                     study_query_params,
@@ -205,7 +220,59 @@ def nested_study_resource_initial_query(request, kwargs, study_url_kwarg):
             'user': user.username})
         raise NotFound('Study %s not found' % study_id)
 
-    return study_query
+    if not line_url_kwarg:
+        return study_query
+
+    # verify line / study relationship to enforce permissions on nested resources
+    study_pk = study_query.get()
+    line_id = kwargs.get(line_url_kwarg)
+
+    line_query = Line.objects.filter(build_id_q('', line_id) &
+                                     Q(study_id=study_pk)).values_list('pk', flat=True)
+    if len(line_query) != 1:
+        requested_study_id = kwargs[line_url_kwarg]
+        msg = 'No line "%(line)s" was found for study "%(study)s"' % {
+            'line': line_id,
+            'study': requested_study_id,
+        }
+        logger.debug(msg)
+        raise NotFound(msg)
+
+    if not assay_url_kwarg:
+        return line_query
+
+    # verify line/assay relationship to enforce permissions on nested resources
+    line_pk = line_query.get()
+    assay_id = kwargs[assay_url_kwarg]
+    assay_query = Assay.objects.filter(build_id_q('', assay_id) &
+                                       Q(line_id=line_pk)).values_list('pk', flat=True)
+
+    if len(assay_query) != 1:
+        msg = 'No assay "%(assay)s" was found for line "%(line)s"' % {
+            'assay': assay_id,
+            'line': line_id}
+        logger.debug(msg)
+        raise NotFound(msg)
+
+    if not measurement_url_kwarg:
+        return assay_query
+
+    assay_pk = assay_query.get()
+    measurement_id = kwargs.get(measurement_url_kwarg)
+    meas_query = Measurement.objects.filter(build_id_q('', measurement_id) &
+                                            Q(assay_id=assay_pk)).values_list('pk', flat=True)
+
+    if len(meas_query) != 1:
+        msg = ('No measurement "%(meas)s" was found for study "%(study)s", line "%(line)s", '
+               '"%(assay)s"' % {
+                   'study': study_id,
+                   'assay': assay_id,
+                   'line': line_id,
+                   'meas': measurement_id})
+        logger.debug(msg)
+        raise NotFound(msg)
+
+    return meas_query
 
 
 def build_id_q(prefix, identifier):
@@ -310,72 +377,42 @@ class MeasurementsViewSet(viewsets.ReadOnlyModelViewSet):
 
         logger.debug('query_params: %s' % self.request.query_params)
 
-        study_query = nested_study_resource_initial_query(self.request,
-                                                          self.kwargs,
-                                                          _STUDY_NESTED_ID_KWARG)
-        if len(study_query) != 1:
-            study_id = self.kwargs.get(_STUDY_NESTED_ID_KWARG)
-            msg = 'No study "%s" was found' % study_id
-            logger.info(msg)
-            raise NotFound(msg)
+        # query study/line/assay relationships first to apply study-level permissions to nested
+        # measurements
+        assay_pk_query = nested_study_resource_initial_query(
+            self.request,
+            self.kwargs,
+            _STUDY_NESTED_ID_KWARG,
+            line_url_kwarg=_LINE_NESTED_ID_KWARG,
+            assay_url_kwarg=_ASSAY_NESTED_ID_KWARG)
 
-        study_pk = study_query.get()
-
-        # filter by line ID / study ID first to limit the size of the line/assay join, but also
-        # avoid a second query on Line before drilling into Assay
+        # construct an initial measurement query that verifies the Measurement's
+        # relationship back to the study/line/assay where we've verified user permissions.
         query_params = self.request.query_params
-
-        line_id = self.kwargs[_LINE_NESTED_ID_KWARG]
-        assay_id = self.kwargs[_ASSAY_NESTED_ID_KWARG]
         measurement_id = self.kwargs.get(self.lookup_url_kwarg)
+        meas_query = Measurement.objects.filter(assay_id=assay_pk_query.get())
 
-        line_query = Line.objects.filter(build_id_q('', line_id) &
-                                         Q(study__pk=study_pk)).values_list('pk', flat=True)
+        # layer on optional filtering on measurement-specific attributes
 
-        if len(line_query) != 1:
-            requested_study_id = self.kwargs[_STUDY_NESTED_ID_KWARG]
-            msg = 'No line "%(line)s" was found for study "%(study)s"' % {
-                'line': line_id,
-                'study': requested_study_id,
-            }
-            logger.debug(msg)
-            raise NotFound(msg)
-
-        line_pk = line_query.get()
-
-        assay_query = Assay.objects.filter(build_id_q('', assay_id) & Q(
-            line__pk=line_pk)).values_list(
-            'pk', flat=True)
-
-        if len(assay_query) != 1:
-            msg = 'No assay "%(assay)s" was found for line "%(line)s"' % {
-                'assay': assay_id,
-                'line': line_id}
-            logger.debug(msg)
-            raise NotFound(msg)
-
-        # construct an initial query that verifies the Measurement's relationship back to the
-        # study where we've verified user permissions.
-        meas_query = Measurement.objects.filter(assay_id=assay_query.get())
-
-        # layer on / test optional filtering on measurement-specific attributes
-
+        # type
         measurement_type_filter = query_params.get('measurement_type')
-        logger.debug('MEASUREMENT TYPE FILTER: %s' % measurement_type_filter)  # TODO: remove
         meas_query = filter_id_list(meas_query, 'measurement_type', 'measurement_type_id',
                                     measurement_type_filter)
 
-        # filter by x-units, if requested
+        # x-units
         x_units_filter = query_params.get('x_units')
         meas_query = filter_id_list(meas_query, 'x_units', 'x_units_id', x_units_filter)
 
+        # y-units
         y_units_filter = query_params.get('y_units')
         meas_query = filter_id_list(meas_query, 'y_units', 'y_units_id', y_units_filter)
 
+        # cellular compartment
         compartment_filter = query_params.get('compartment')
         if compartment_filter:
             meas_query = meas_query.filter(compartment=compartment_filter)
 
+        # format
         format_filter = query_params.get('meas_format')  # NOTE: "format" is reserved by DRF
         if format_filter:
             logger.debug('MEASUREMENT FORMAT filter: %s' % format_filter)
@@ -385,6 +422,64 @@ class MeasurementsViewSet(viewsets.ReadOnlyModelViewSet):
         return optional_edd_object_filtering(query_params,
                                              meas_query,
                                              identifier_override=measurement_id)
+
+
+class MeasurementValuesViewSet(viewsets.ReadOnlyModelViewSet):
+    permission_classes = [ImpliedPermissions]
+    serializer_class = MeasurementValueSerializer
+    lookup_url_kwarg = 'id'
+
+    def get_object(self):
+        """
+        Overrides the default implementation to provide flexible lookup for Assay detail
+        views (either based on local numeric primary key, or UUID)
+        """
+        queryset = self.get_queryset()
+
+        # unlike the DRF example code: for consistency in permissions enforcement, just do all the
+        # filtering in get_queryset() and pass empty filters here
+        filters = {}
+        obj = get_object_or_404(queryset, **filters)
+        self.check_object_permissions(self.request, obj)
+        return obj
+
+    def get_queryset(self):
+
+        logger.debug((_QUERYSET_LOG_MESSAGE + ' query_params=%(query_params)s') % {
+            'class': MeasurementsViewSet.__name__,
+            'url': self.request.path,
+            'cls_method': self.get_queryset.__name__,
+            'http_method': self.request.method,
+            'kwargs': self.kwargs,
+            'query_params': self.request.query_params,
+        })
+
+        logger.debug('query_params: %s' % self.request.query_params)
+
+        # query study/line/assay relationships first to apply study-level permissions to nested
+        # measurements
+        meas_pk_query = nested_study_resource_initial_query(
+            self.request,
+            self.kwargs,
+            _STUDY_NESTED_ID_KWARG,
+            line_url_kwarg=_LINE_NESTED_ID_KWARG,
+            assay_url_kwarg=_ASSAY_NESTED_ID_KWARG,
+            measurement_url_kwarg=_MEASUREMENT_NESTED_ID_KWARG)
+
+        # construct an initial measurement value query that verifies the value's
+        # relationship back to the study/line/assay/measurement where we've verified user
+        # permissions.
+        value_id = self.kwargs.get(self.lookup_url_kwarg)
+
+        meas_id_q = Q(measurement_id=meas_pk_query.get())
+        if value_id:
+            filter_q = build_id_q('', value_id) & meas_id_q
+        else:
+            filter_q = meas_id_q
+        val_query = MeasurementValue.objects.filter(filter_q)
+
+        # TODO: add some nice-to-have value-based filtering options
+        return val_query
 
 
 def opt_foreign_key_filter(model_field_name, queryset, request_params, request_param_name):
@@ -1484,7 +1579,8 @@ class LinesView(viewsets.ReadOnlyModelViewSet):  # LineView(APIView):
             'kwargs': self.kwargs
         })
 
-        study_pk_query = nested_study_resource_initial_query(self.request, self.kwargs,
+        study_pk_query = nested_study_resource_initial_query(self.request,
+                                                             self.kwargs,
                                                              _STUDY_NESTED_ID_KWARG)
 
         queryset = Line.objects.filter(study__pk=study_pk_query.get())

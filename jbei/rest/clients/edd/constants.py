@@ -11,6 +11,7 @@ maintainability of the API across data member renames in Django's model classes
 LINES_RESOURCE_NAME = r'lines'
 ASSAYS_RESOURCE_NAME = r'assays'
 MEASUREMENTS_RESOURCE_NAME = r'measurements'
+VALUES_RESOURCE_NAME = r'values'
 STUDIES_RESOURCE_NAME = r'studies'
 SEARCH_RESOURCE_NAME = r'search'
 STRAINS_RESOURCE_NAME = r'strains'
