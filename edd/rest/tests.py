@@ -2173,15 +2173,21 @@ class StudyNestedResourceTests(EddApiTestCase):
                                                partial_response=True)
 
     def _enforce_nested_study_resource_list(self, uris):
+        """
+        A helper method that tests application of StudyPermissions, superuser status, and
+        class-level django.contrib.auth permissions to access REST API resources
+        :param uris: uris to test
+        """
 
-        # test basic use for a single study
+        # test all the valid list URI's for this resource (e.g. bothe pk-based & UUID-based)
         for list_uri in uris.list_uris:
             print("Testing GET access for %s" % list_uri)
             self._enforce_nested_study_resource_access(list_uri, True,
                                                        study_based=self.study_based_uris)
 
             # test filtering based on study active status -- should return the same results as
-            # before since the client has specifically requested data in this study
+            # before since the client has either asked for all results of this type,
+            # or has specifically requested data in this study
             self.study.active = False
             self.study.save()
             self._enforce_nested_study_resource_access(list_uri, True,
@@ -2189,12 +2195,12 @@ class StudyNestedResourceTests(EddApiTestCase):
             self.study.active = True
             self.study.save()
 
-            # test that explicitly filtering by active status gives the same result as before
+            # test that explicitly filtering by active=True status gives the same result as before
             request_params = {ACTIVE_STATUS_PARAM: QUERY_ACTIVE_OBJECTS_ONLY}
             self._assert_authenticated_get_allowed(list_uri, self.superuser,
                                                    request_params=request_params)
 
-            # create inactive resources within the study that will show up in the list view
+            # create an inactive resource within the study that will show up in the list view
             inactive_resource = self.inactive_model_factory().detail_model
             active_resource_list = self.expected_list_values
 
@@ -2203,14 +2209,14 @@ class StudyNestedResourceTests(EddApiTestCase):
                                                    expected_values=active_resource_list,
                                                    partial_response=True)
 
-            # test that an explicit request for active assays only returns the active one
+            # test that an explicit request for active resources only returns the active one
             request_params = {ACTIVE_STATUS_PARAM: QUERY_ACTIVE_OBJECTS_ONLY}
             self._assert_authenticated_get_allowed(list_uri, self.superuser,
                                                    expected_values=active_resource_list,
                                                    request_params=request_params,
                                                    partial_response=True)
 
-            # test that an explicit request for INactive resources only returns the inactive one
+            # test that an explicit request for INactive resources only returns the INactive one
             request_params = {ACTIVE_STATUS_PARAM: QUERY_INACTIVE_OBJECTS_ONLY}
             self._assert_authenticated_get_allowed(list_uri, self.superuser,
                                                    expected_values=[inactive_resource],
@@ -2218,7 +2224,7 @@ class StudyNestedResourceTests(EddApiTestCase):
                                                    partial_response=True)
 
             # delete inactive resources created for the purposes of the test...we don't want
-            # them to interfere with subsequent iterations of the test or with other test methods
+            # them to interfere with subsequent iterations of the loop or with other test methods
             inactive_resource.delete()
 
     def assert_detail_read_access(self, detail_uris, everyone_read_uris, everyone_write_uris):
@@ -2557,51 +2563,11 @@ class UriBuilder(object):
             self.list_uris.append('/rest/study/')
 
 
-class StudyAssaysTests(StudyNestedResourceTests):
-    """
-    Tests access controls and HTTP return codes for queries to the nested /rest/studies/{X}/lines/
-    REST API resource.
-
-    Study lines should only be accessible by:
-    1) Superusers
-    2) Users who have explicit StudyPermission granted via their individual account or via user
-    group membership.
-
-    Note that these permissions are enforced by a combination of EDD's custom
-    ImpliedPermissions class and StudyLinesView's get_queryset() method, whose non-empty result
-    implies that the requesting user has access to the returned strains.
-    """
-
+class AssayTests(StudyNestedResourceTests):
     @classmethod
-    def setUpTestData(cls):
-        """
-        Creates strains, users, and study/line combinations to test the REST resource's application
-        of user permissions.
-        """
-        super(StudyAssaysTests, StudyAssaysTests).setUpTestData()
-
-        # define placeholder data members to silence style checks for data members created in
-        # create_study()
-        cls.study = None
-        cls.unprivileged_user = None
-        cls.study_read_only_user = None
-        cls.study_write_only_user = None
-        cls.study_read_group_user = None
-        cls.study_write_group_user = None
-        cls.staff_user = None
-        cls.staff_study_creator = None
-        cls.staff_study_changer = None
-        cls.staff_study_deleter = None
-        cls.superuser = None
-
-        cls.staff_creator = None
-        cls.staff_changer = None
-        cls.staff_deleter = None
-
-        # create the study and associated users & permissions
+    def _setUpTestData(cls, study_based_uris):
+        # create the study, associated users & permissions
         create_study(cls, True)
-        logger.debug('Study pk = %d' % cls.study.pk)
-
         create_study_internals(cls, cls.study, ASSAYS_RESOURCE_NAME, 'Active ')
 
         # create class-level django.util.auth permissions for Assays. This isn't a normal use case,
@@ -2609,48 +2575,41 @@ class StudyAssaysTests(StudyNestedResourceTests):
         define_auth_perms_and_users(cls, 'assay')
 
         uri_elts = [ASSAYS_RESOURCE_NAME]
-        cls.study_based_uris = True
+        cls.study_based_uris = study_based_uris
         cls.everyone_read_assay_uris, cls.everyone_write_assay_uris = create_everyone_studies(
             cls, uri_elts, cls.protocol, study_based_uris=cls.study_based_uris)
 
         # build up lists of all the valid URI's usable to access the assays during the test
-        cls.active_assay_uris = UriBuilder(cls.study,
+        uri_study = cls.study if study_based_uris else None
+        cls.active_assay_uris = UriBuilder(uri_study,
                                            nested_orm_models=[cls.active_assay],
                                            uri_elts=uri_elts)
 
-    @property
-    def expected_list_values(self):
-        return [self.active_assay]
-
-    @property
-    def expected_unprivileged_list_values(self):
-        return [self.active_assay]
-
-    @property
-    def privileged_detail_results(self):
-        return self.active_assay
-
     def test_assay_list_read_access(self):
         """
-            Tests GET /rest/studies/X/assays/
+            Tests GET /rest/assays/
         """
         print(SEPARATOR)
         print('%s(): ' % self.test_assay_list_read_access.__name__)
         print(SEPARATOR)
 
         ###########################################################################################
-        # Test standard use cases for all REST resources...correct results and access privileges
+        # Test standard use cases for all REST resources...correct results and access privileges.
+        # Note that if expected_list_values contains "everyone" read/write studies, those are
+        # also tested here.
         ###########################################################################################
         self._enforce_nested_study_resource_list(self.active_assay_uris)
 
-        # test that study-level "everyone" permissions are correctly applied
-        everyone_read_assay = self.everyone_read_assay_uris.nested_orm_models[-1]
-        self.assert_everyone_get_privileges(self.everyone_read_assay_uris, False,
-                                            [everyone_read_assay])
+        if self.study_based_uris:
+            # test that study-level "everyone" permissions, which will be accessed via different
+            # URI's, are correctly applied
+            everyone_read_assay = self.everyone_read_assay_uris.nested_orm_models[-1]
+            self.assert_everyone_get_privileges(self.everyone_read_assay_uris, False,
+                                                [everyone_read_assay])
 
-        everyone_write_assay = self.everyone_write_assay_uris.nested_orm_models[-1]
-        self.assert_everyone_get_privileges(self.everyone_write_assay_uris, False,
-                                            [everyone_write_assay])
+            everyone_write_assay = self.everyone_write_assay_uris.nested_orm_models[-1]
+            self.assert_everyone_get_privileges(self.everyone_write_assay_uris, False,
+                                                [everyone_write_assay])
 
         ###########################################################################################
         # test assay-specific filtering options
@@ -2666,7 +2625,7 @@ class StudyAssaysTests(StudyNestedResourceTests):
             protocol=protocol2,
             experimenter=self.study_write_only_user)
 
-        # test that single-value protocol-based filtering works
+        # test that single-value, protocol-based filtering works
         list_uri = self.active_assay_uris.list_uris[0]
         self._assert_authenticated_get_allowed(
             list_uri,
@@ -2684,6 +2643,29 @@ class StudyAssaysTests(StudyNestedResourceTests):
             partial_response=True)
 
 
+class StudyAssaysTests(AssayTests):
+    """
+    Tests access controls and HTTP return codes for queries to the nested /rest/studies/{X}/assays/
+    REST API resource.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        super(StudyAssaysTests, StudyAssaysTests).setUpTestData()
+        super(StudyAssaysTests, StudyAssaysTests)._setUpTestData(True)
+
+    @property
+    def expected_list_values(self):
+        return [self.active_assay]
+
+    @property
+    def expected_unprivileged_list_values(self):
+        return [self.active_assay]
+
+    @property
+    def privileged_detail_results(self):
+        return self.active_assay
+
     @property
     def values_converter(self):
         return assay_to_json_dict
@@ -2699,49 +2681,15 @@ class StudyAssaysTests(StudyNestedResourceTests):
                           uri_elts=[ASSAYS_RESOURCE_NAME])
 
 
-class BaseAssaysTests(StudyNestedResourceTests):
+class BaseAssaysTests(AssayTests):
+    """
+    Tests GET access to /rest/assays/{X}/ (list + detail views in DRF terms)
+    """
+
     @classmethod
     def setUpTestData(cls):
-        """
-        Creates strains, users, and study/line combinations to test the REST resource's application
-        of user permissions.
-        """
         super(BaseAssaysTests, BaseAssaysTests).setUpTestData()
-
-        # create the study and associated users & permissions
-        create_study(cls, True)
-        logger.debug('Study pk = %d' % cls.study.pk)
-
-        create_study_internals(cls, cls.study, ASSAYS_RESOURCE_NAME, 'Active ')
-
-        # create class-level django.util.auth permissions for Assays. This isn't a normal use case,
-        # but since EDD supports this configuration, it should be tested.
-        define_auth_perms_and_users(cls, 'assay')
-
-        # build up lists of all the valid URI's usable to access the assays during the test
-        cls.active_assay_uris = UriBuilder(None,
-                                           nested_orm_models=[cls.active_assay],
-                                           uri_elts=[ASSAYS_RESOURCE_NAME])
-
-        # build different URLs to test the same resources tested by the parent class (e.g.
-        # accessing the Assay via the study ID)
-        # TODO: investigate why this didn't work as a class-level property
-        cls.study_based_uris = False
-        everyone_read_assay_uris, everyone_write_assay_uris = create_everyone_studies(
-            cls, [ASSAYS_RESOURCE_NAME], cls.protocol,
-            study_based_uris=cls.study_based_uris)
-
-        logger.debug('Everyone read detail URIs:')
-        for uri in everyone_read_assay_uris.detail_uris:
-            logger.debug(uri)
-
-        cls.everyone_read_assay_uris = everyone_read_assay_uris
-        cls.everyone_write_assay_uris = everyone_write_assay_uris
-
-    @property
-    @classmethod
-    def study_based_uris(cls):
-        return False
+        super(BaseAssaysTests, BaseAssaysTests)._setUpTestData(False)
 
     @property
     def expected_list_values(self):
@@ -2775,66 +2723,15 @@ class BaseAssaysTests(StudyNestedResourceTests):
     def expected_unprivileged_detail(self):
         return None
 
-    def test_assay_list_read_access(self):
-        """
-            Tests GET /rest/studies/X/assays/
-        """
-        print(SEPARATOR)
-        print('%s(): ' % self.test_assay_list_read_access.__name__)
-        print(SEPARATOR)
-
-        ###########################################################################################
-        # Test standard use cases for all REST resources...correct results and access privileges.
-        # Note that since expected_list_values contains "everyone" read/write studies, those are
-        # also tested here.
-        ###########################################################################################
-        self._enforce_nested_study_resource_list(self.active_assay_uris)
-
-        ###########################################################################################
-        # test assay-specific filtering options
-        ###########################################################################################
-        protocol2 = Protocol.objects.create(
-            name='JBEI Metabolomics',
-            description='Metabolomics protocol used @ JBEI',
-            owned_by=self.superuser)
-
-        metabolomics_assay = Assay.objects.create(
-            name='Metabolomics assay',
-            line=self.active_line,
-            protocol=protocol2,
-            experimenter=self.study_write_only_user)
-
-        # test that single-value protocol-based filtering works
-        list_uri = self.active_assay_uris.list_uris[0]
-        self._assert_authenticated_get_allowed(
-            list_uri,
-            self.superuser,
-            expected_values=[metabolomics_assay],
-            request_params={'protocol': protocol2.pk},
-            partial_response=True)
-
-        # test multi-value protocol filtering
-        self._assert_authenticated_get_allowed(
-            list_uri,
-            self.superuser,
-            expected_values=[metabolomics_assay],
-            request_params={'protocol': [self.protocol.pk, protocol2.pk]},
-            partial_response=True)
-
-
     def test_assay_detail_read_access(self):
         """
-            Tests GET /rest/studies/{X}/assays/{Z}/
+            Tests GET /rest/assays/{X}/
         """
         print(SEPARATOR)
         print('%s(): ' % self.test_assay_detail_read_access.__name__)
         print(SEPARATOR)
 
-        print('Testing all URIs:')
-        for detail_uri in self.active_assay_uris.detail_uris:
-            print(detail_uri)
-
-        # create a second active assay in the study so our tests of line detail access can't
+        # create a second active assay in the study so our tests of detail access can't
         # stumble on the same result as search without taking requested assay pk into
         # account...this happened during early tests!
         temp_assay = Assay.objects.create(name='Other active assay',
