@@ -102,14 +102,15 @@ _WRONG_STATUS_MSG = ('Wrong response status code from %(method)s %(url)s for use
 class EddApiTestCase(APITestCase):
     """
     Overrides APITestCase to provide helper methods that improve test error messages and simplify
-    repetitive test code.  Helper methods also enforce consistency in return codes across EDD's REST API.
+    repetitive test code.  Helper methods also enforce consistency in return codes across EDD's
+    REST API.
     """
 
     @property
     def values_converter(self):
         """
-        Returns a function that converts ORM model objects into dictionaries that can easily be compared against
-        JSON results of REST API calls performed during the test.
+        Returns a function that converts ORM model objects into dictionaries that can easily be
+        compared against JSON results of REST API calls performed during the test.
         """
         # raise an error -- this required property must be overridden by descendants
         raise NotImplementedError()
@@ -119,12 +120,15 @@ class EddApiTestCase(APITestCase):
         response = self.client.put(url, put_data)
         self.assertTrue(response.status_code in DRF_UNAUTHENTICATED_PERMISSION_DENIED_CODES)
 
-    def _assert_unauthenticated_get_denied(self, url):
+    def _assert_unauthenticated_get_denied(self, uri):
         self.client.logout()
-        response = self.client.get(url)
+        response = self.client.get(uri)
         self.assertTrue(response.status_code in DRF_UNAUTHENTICATED_PERMISSION_DENIED_CODES,
-                        'Expected unauthenticated request to be denied, but got an HTTP '
-                        '%(code)d.  Response: %(response)s' % {
+                        'Expected unauthenticated request to GET %(uri)s be denied (HTTP '
+                        '%(expected)s), but got an HTTP %(code)d.  Response: %(response)s' % {
+                            'uri': uri,
+                            'expected': (', '.join([str(code) for code in
+                                                   DRF_UNAUTHENTICATED_PERMISSION_DENIED_CODES])),
                             'code': response.status_code,
                             'response': response.content, })
 
@@ -248,8 +252,8 @@ class EddApiTestCase(APITestCase):
         response = self.client.get(url, data=request_params)
 
         # TODO: remove debug block
-        print('expected: %s' % expected_values)
-        print('actual: %s' % expected_values)
+        logger.debug('expected: %s' % expected_values)
+        logger.debug('actual: %s' % expected_values)
 
         self._compare_expected_values(url, 'GET', user, response, expected_status,
                                       expected_values=expected_values,
@@ -881,6 +885,8 @@ def compare_paged_result_dict(testcase, expected, observed, order_agnostic=True,
     definition of the object.  In this case, only the provided values will be compared.
     """
     # compare result count
+    logger.debug('Expected: %s' % expected)
+    logger.debug('Actual: %s' % observed)
     compare_dict_value(testcase, RESULT_COUNT_KEY, expected, observed)
 
     # compare next page link
@@ -1786,8 +1792,73 @@ def create_study(test_class, create_auth_perms_and_users=False):
                                                       manage_perms=(
                                                           test_class.delete_study_permission,))
 
+
+def create_study_internals(test_class, study, deepest_model, name_prefix):
+    """
+    A helper method that creates and saves study internals in the database so as a basis for
+    testing REST API calls that should return them. A single, active  instance of each nested
+    resource is created within the study, down to the level of depth requested.
+    in the study
+    :param test_class:
+    :param deepest_element:
+    :return: the deepest ORM model object created
+    """
+    # create an active Line/Assay/Measurement in the study so we have something to test
+    test_class.active_line = Line.objects.create(name='%sLine' % name_prefix,
+                                                 study=study)
+
+    if deepest_model == LINES_RESOURCE_NAME:
+        return test_class.active_line
+
+    test_class.protocol = Protocol.objects.create(name='JBEI Proteomics',
+                                                  description='Proteomics protocol used @ '
+                                                              'JBEI',
+                                                  owned_by=test_class.superuser)
+
+    test_class.active_assay = Assay.objects.create(name='%s Assay' % name_prefix,
+                                                   line=test_class.active_line,
+                                                   protocol=test_class.protocol,
+                                                   experimenter=test_class.study_write_only_user)
+
+    if deepest_model == ASSAYS_RESOURCE_NAME:
+        return test_class.active_assay
+
+    # get / create measurement types, units, etc as needed for measurements
+    test_class.test_protein = ProteinIdentifier.objects.create(accession_id='1|2|3|4',
+                                                               length=255,
+                                                               mass=1,
+                                                               type_name='Test protein',
+                                                               short_name='test prot')
+    test_class.ethanol_metabolite = Metabolite.objects.get(type_name='Ethanol')
+    test_class.oxygen_metabolite = Metabolite.objects.get(type_name='O2')
+
+    test_class.gram_per_liter_units = MeasurementUnit.objects.get(unit_name='g/L')
+    test_class.detection_units = MeasurementUnit.objects.create(unit_name='detections',
+                                                                display=True)
+
+    test_class.hour_units = MeasurementUnit.objects.get(unit_name='hours')
+    test_class.min_units = MeasurementUnit.objects.create(unit_name='minutes')
+
+    test_class.active_measurement = Measurement.objects.create(
+        assay=test_class.active_assay,
+        experimenter=test_class.study_write_only_user,
+        measurement_type=test_class.oxygen_metabolite,
+        x_units=test_class.gram_per_liter_units,
+        y_units=test_class.hour_units,
+        compartment=_EXTRACELLULAR,
+        measurement_format=_SCALAR, )
+
+    if deepest_model == MEASUREMENTS_RESOURCE_NAME:
+        return test_class.active_measurement
+
+    test_class.measurementValue = MeasurementValue.objects.create(
+        measurement=test_class.active_measurement, x=[1], y=[2])
+
+    return test_class.measurementValue
+
+
 def create_everyone_studies(test_class, uri_elts, protocol=None, measurement_type=None,
-                            units=None):
+                            units=None, study_based_uris=False):
     """
     Creates studies and nested components that have "everyone read" and "everyone write"
     permissions.
@@ -1797,13 +1868,11 @@ def create_everyone_studies(test_class, uri_elts, protocol=None, measurement_typ
     :param measurement_type: the MeasurementType to use in constructing measurements (if
     applicable()
     :param units: the x-units to use for measurements, assuming data construction gets that far
-    :return: a tuple of StudyUriBuilder objects, in the form (everyone_read, everyone_write) that
+    :return: a tuple of UriBuilder objects, in the form (everyone_read, everyone_write) that
     represent the URI's of the most deeply-nested resources and contain references to the
     associated ORM model objects
     """
-    deepest_element = uri_elts[-1]
-    write_orm_models = []
-    read_orm_models = []
+    deepest_uri_elt = uri_elts[-1]
 
     ###############################################################################################
     # Create studies
@@ -1823,8 +1892,6 @@ def create_everyone_studies(test_class, uri_elts, protocol=None, measurement_typ
                                              study=everyone_read_study)
     everyone_write_line = Line.objects.create(name='Everyone write line',
                                               study=everyone_write_study)
-    read_orm_models.append(everyone_read_line)
-    write_orm_models.append(everyone_write_line)
 
     # TODO: refactor other existing tests to use newer implementation, then delete this block
     test_class.everyone_read_study = everyone_read_study
@@ -1832,14 +1899,16 @@ def create_everyone_studies(test_class, uri_elts, protocol=None, measurement_typ
     test_class.everyone_read_line = everyone_read_line
     test_class.everyone_write_line = everyone_write_line
 
-    if deepest_element == LINES_RESOURCE_NAME:
-        everyone_read_line_uris = StudyUriBuilder(everyone_read_study,
-                                                  nested_orm_models=read_orm_models,
-                                                  uri_elts=uri_elts)
+    read_uri_study = everyone_read_study if study_based_uris else None
+    write_uri_study = everyone_write_study if study_based_uris else None
 
-        everyone_write_line_uris = StudyUriBuilder(everyone_write_study,
-                                                   nested_orm_models=write_orm_models,
-                                                   uri_elts=uri_elts)
+    if deepest_uri_elt == LINES_RESOURCE_NAME:
+        everyone_read_line_uris = UriBuilder(read_uri_study,
+                                             nested_orm_models=[everyone_read_line],
+                                             uri_elts=uri_elts)
+        everyone_write_line_uris = UriBuilder(write_uri_study,
+                                              nested_orm_models=[everyone_write_line],
+                                              uri_elts=uri_elts)
         return everyone_read_line_uris, everyone_write_line_uris
 
     ###############################################################################################
@@ -1858,17 +1927,15 @@ def create_everyone_studies(test_class, uri_elts, protocol=None, measurement_typ
                                                 protocol=protocol,
                                                 experimenter=test_class.unprivileged_user)
 
-    read_orm_models.append(everyone_read_assay)
-    write_orm_models.append(everyone_write_assay)
+    if deepest_uri_elt == ASSAYS_RESOURCE_NAME:
+        logger.debug('Creating assay URIs.  Study is %s' % read_uri_study)
+        everyone_read_assay_uris = UriBuilder(read_uri_study,
+                                              nested_orm_models=[everyone_read_assay],
+                                              uri_elts=uri_elts)
 
-    if deepest_element == ASSAYS_RESOURCE_NAME:
-        everyone_read_assay_uris = StudyUriBuilder(everyone_read_study,
-                                                   nested_orm_models=read_orm_models,
-                                                   uri_elts=uri_elts)
-
-        everyone_write_assay_uris = StudyUriBuilder(everyone_write_study,
-                                                    nested_orm_models=write_orm_models,
-                                                    uri_elts=uri_elts)
+        everyone_write_assay_uris = UriBuilder(write_uri_study,
+                                               nested_orm_models=[everyone_write_assay],
+                                               uri_elts=uri_elts)
         return everyone_read_assay_uris, everyone_write_assay_uris
 
     ###############################################################################################
@@ -1881,7 +1948,6 @@ def create_everyone_studies(test_class, uri_elts, protocol=None, measurement_typ
                                                     y_units=hour_units,
                                                     compartment=_EXTRACELLULAR,
                                                     measurement_format=_SCALAR, )
-    read_orm_models.append(everyone_read_meas)
 
     everyone_write_meas = Measurement.objects.create(assay=everyone_write_assay,
                                                      experimenter=test_class.study_write_only_user,
@@ -1890,38 +1956,33 @@ def create_everyone_studies(test_class, uri_elts, protocol=None, measurement_typ
                                                      y_units=hour_units,
                                                      compartment=_EXTRACELLULAR,
                                                      measurement_format=_SCALAR, )
-    write_orm_models.append(everyone_write_meas)
 
     ###############################################################################################
     # Create values
     ###############################################################################################
-    if deepest_element == MEASUREMENTS_RESOURCE_NAME:
-        everyone_read_meas_uris = StudyUriBuilder(everyone_read_study,
-                                                  nested_orm_models=read_orm_models,
-                                                  uri_elts=uri_elts)
-        everyone_write_meas_uris = StudyUriBuilder(everyone_write_study,
-                                                   nested_orm_models=write_orm_models,
-                                                   uri_elts=uri_elts)
+    if deepest_uri_elt == MEASUREMENTS_RESOURCE_NAME:
+        everyone_read_meas_uris = UriBuilder(read_uri_study,
+                                             nested_orm_models=[everyone_read_meas],
+                                             uri_elts=uri_elts)
+        everyone_write_meas_uris = UriBuilder(write_uri_study,
+                                              nested_orm_models=[everyone_write_meas],
+                                              uri_elts=uri_elts)
         return everyone_read_meas_uris, everyone_write_meas_uris
 
     everyone_read_value = MeasurementValue.objects.create(measurement=everyone_read_meas,
                                                           x=[5], y=[6])
-    read_orm_models.append(everyone_read_value)
 
     everyone_write_value = MeasurementValue.objects.create(measurement=everyone_write_meas,
                                                            x=[7], y=[8])
-    write_orm_models.append(everyone_write_value)
 
-    everyone_read_val_uris = StudyUriBuilder(everyone_read_study,
-                                           nested_orm_models=read_orm_models,
-                                           uri_elts=uri_elts)
-    everyone_write_val_uris = StudyUriBuilder(everyone_write_study,
-                                              nested_orm_models=write_orm_models,
-                                              uri_elts=uri_elts)
+    everyone_read_val_uris = UriBuilder(read_uri_study,
+                                        nested_orm_models=[everyone_read_value],
+                                        uri_elts=uri_elts)
+    everyone_write_val_uris = UriBuilder(write_uri_study,
+                                         nested_orm_models=[everyone_write_value],
+                                         uri_elts=uri_elts)
 
     return everyone_read_val_uris, everyone_write_val_uris
-
-
 
 
 def define_auth_perms_and_users(test_class, model_name):
@@ -1945,81 +2006,186 @@ def define_auth_perms_and_users(test_class, model_name):
 
 
 class StudyNestedResourceTests(EddApiTestCase):
+    """
+    A helper class that supports testing REST API access to data considered to fall under a Study
+    in the EDD ontology (e.g. Line, Assay, Measurement, MeasurementValue). The assumption of
+    supporting test code is that each test sets up a similar test environment. The general
+    process is:
+    1) Create supporting database entries in the class-level setupTestData() method that are
+    used to test list and detail views of the REST resource. This normally includes creating a
+    single study and a set of users/groups
+    to test access to it. Under the Study, nested ORM objects are created up to the level of
+    detail needed to create a single active instance of the Django ORM model under test.
+    2) Test user and group permissions to the resource, using common code to enforce consistency
+    of permissions enforcement and return codes across all resources.
+    """
+    @classmethod
+    def setUpTestData(cls):
+        super(StudyNestedResourceTests, StudyNestedResourceTests).setUpTestData()
 
-    def inactive_resource_factory(self):
+        # define placeholder data members to silence style checks for data members created in
+        # create_study()
+        cls.study = None
+        cls.unprivileged_user = None
+        cls.study_read_only_user = None
+        cls.study_write_only_user = None
+        cls.study_read_group_user = None
+        cls.study_write_group_user = None
+        cls.staff_user = None
+        cls.staff_study_creator = None
+        cls.staff_study_changer = None
+        cls.staff_study_deleter = None
+        cls.superuser = None
+
+        cls.staff_creator = None
+        cls.staff_changer = None
+        cls.staff_deleter = None
+
+    def inactive_model_factory(self):
         # must be overridden by children
         raise NotImplementedError()
 
-    def _enforce_nested_study_resource_access(self, url, expected_values):
+    @property
+    def expected_list_values(self):
+        raise NotImplementedError()
+
+    @property
+    def expected_unprivileged_list_values(self):
+        raise NotImplementedError()
+
+    @property
+    def privileged_detail_results(self):
+        raise NotImplementedError()
+
+    def _enforce_nested_study_resource_access(self, url, is_list, study_based=True):
         """
-           A helper method that does the work to test permissions for both list and individual study
-           GET access.
+           A helper method that does the work to test GET permissions for both list and detail
+           views.
         """
 
         # verify that an un-authenticated request gets a 404
         self._assert_unauthenticated_get_denied(url)
 
         # enforce access denied behavior users without access to the enclosing study
-        self._assert_authenticated_get_denied(url, self.unprivileged_user)
-        self._assert_authenticated_get_denied(url, self.staff_user)
-        self._assert_authenticated_get_denied(url, self.staff_creator)
+        if is_list:
+            privileged_results = self.expected_list_values
+            if study_based:
+                self._assert_authenticated_get_denied(url, self.unprivileged_user)
+                self._assert_authenticated_get_denied(url, self.staff_user)
+                self._assert_authenticated_get_denied(url, self.staff_creator)
+            else:
+                unprivileged_list_results = self.expected_unprivileged_list_values
+                privileged_results = self.expected_list_values
+                self._assert_authenticated_get_allowed(url,
+                                                       self.unprivileged_user,
+                                                       expected_values=unprivileged_list_results,
+                                                       partial_response=True)
+                self._assert_authenticated_get_allowed(url,
+                                                       self.staff_user,
+                                                       expected_values=unprivileged_list_results,
+                                                       partial_response=True)
+                self._assert_authenticated_get_allowed(url,
+                                                       self.staff_creator,
+                                                       expected_values=unprivileged_list_results,
+                                                       partial_response=True)
+
+        else:
+            privileged_results = self.privileged_detail_results
+            self._assert_authenticated_get_denied(url, self.unprivileged_user)
+            self._assert_authenticated_get_denied(url, self.staff_user)
+            self._assert_authenticated_get_denied(url, self.staff_creator)
 
         # test that users / groups with read access can read study internals
         self._assert_authenticated_get_allowed(url,
                                                self.study_read_only_user,
-                                               expected_values=expected_values,
+                                               expected_values=privileged_results,
                                                partial_response=True)
 
         self._assert_authenticated_get_allowed(url,
                                                self.study_read_group_user,
-                                               expected_values=expected_values,
+                                               expected_values=privileged_results,
                                                partial_response=True)
 
         # verify that study write permissions imply read permissions on the internals
         self._assert_authenticated_get_allowed(url,
                                                self.study_write_only_user,
-                                               expected_values=expected_values,
+                                               expected_values=privileged_results,
                                                partial_response=True)
 
         self._assert_authenticated_get_allowed(url,
                                                self.study_write_group_user,
-                                               expected_values=expected_values,
+                                               expected_values=privileged_results,
                                                partial_response=True)
 
         # test that a superuser can access study data without any other privileges
         self._assert_authenticated_get_allowed(url,
                                                self.superuser,
-                                               expected_values=expected_values,
+                                               expected_values=privileged_results,
                                                partial_response=True)
 
-        # test that 'staff' users with any class-level Study django.util.auth privileges have NO
+        # test that 'staff' users with class-level django.util.auth Study privileges have NO
         # implied permission on data stored within the study (those perms only apply to the
         # study title/description/contact).
-        self._assert_authenticated_get_denied(url, self.staff_changer)
-        self._assert_authenticated_get_denied(url, self.staff_creator)
-        self._assert_authenticated_get_denied(url, self.staff_deleter)
+        if is_list:
+            if study_based:
+                self._assert_authenticated_get_denied(url, self.staff_study_changer)
+                self._assert_authenticated_get_denied(url, self.staff_study_creator)
+                self._assert_authenticated_get_denied(url, self.staff_study_deleter)
+            else:
+                self._assert_authenticated_get_allowed(url,
+                                                       self.staff_study_changer,
+                                                       expected_values=unprivileged_list_results,
+                                                       partial_response=True)
+                self._assert_authenticated_get_allowed(url,
+                                                       self.staff_study_creator,
+                                                       expected_values=unprivileged_list_results,
+                                                       partial_response=True)
+                self._assert_authenticated_get_allowed(url,
+                                                       self.staff_study_deleter,
+                                                       expected_values=unprivileged_list_results,
+                                                       partial_response=True)
+        else:
+            self._assert_authenticated_get_denied(url, self.staff_study_changer)
+            self._assert_authenticated_get_denied(url, self.staff_study_creator)
+            self._assert_authenticated_get_denied(url, self.staff_study_deleter)
 
-        # test that 'staff' users with class-level Line django.util.auth mutator privileges have NO
-        # permission on relevant objects within the study, even without other permissions. We can
-        # add this later if needed, but it adds code complexity with no clear benefit
-        self._assert_authenticated_get_denied(url, self.staff_creator)
-        self._assert_authenticated_get_denied(url, self.staff_changer)
-        self._assert_authenticated_get_denied(url, self.staff_deleter)
+        # test that 'staff' users with class-level django.util.auth mutator privileges for the
+        # requested ORM model class have permission on relevant objects even without study-based
+        #  permissions
+        if is_list:
+            if study_based:
+                self._assert_authenticated_get_denied(url, self.staff_creator)
+            else:
+                self._assert_authenticated_get_allowed(url,
+                                                       self.staff_creator,
+                                                       expected_values=unprivileged_list_results,
+                                                       partial_response=True)
+        else:
+            self._assert_authenticated_get_denied(url, self.staff_creator)
 
-    def _enforce_nested_study_resource_list(self, uri_builder, expected_values):
+        self._assert_authenticated_get_allowed(url,
+                                               self.staff_changer,
+                                               expected_values=privileged_results,
+                                               partial_response=True)
+        self._assert_authenticated_get_allowed(url,
+                                               self.staff_deleter,
+                                               expected_values=privileged_results,
+                                               partial_response=True)
+
+    def _enforce_nested_study_resource_list(self, uris):
 
         # test basic use for a single study
-        for list_uri in uri_builder.list_uris:
+        for list_uri in uris.list_uris:
             print("Testing GET access for %s" % list_uri)
-            self._enforce_nested_study_resource_access(list_uri,
-                                                       expected_values=expected_values)
+            self._enforce_nested_study_resource_access(list_uri, True,
+                                                       study_based=self.study_based_uris)
 
             # test filtering based on study active status -- should return the same results as
             # before since the client has specifically requested data in this study
             self.study.active = False
             self.study.save()
-            self._enforce_nested_study_resource_access(list_uri,
-                                                       expected_values=expected_values)
+            self._enforce_nested_study_resource_access(list_uri, True,
+                                                       study_based=self.study_based_uris)
             self.study.active = True
             self.study.save()
 
@@ -2029,18 +2195,18 @@ class StudyNestedResourceTests(EddApiTestCase):
                                                    request_params=request_params)
 
             # create inactive resources within the study that will show up in the list view
-            inactive_resource_uris = self.inactive_resource_factory()
-            inactive_resource = inactive_resource_uris.detail_model
+            inactive_resource = self.inactive_model_factory().detail_model
+            active_resource_list = self.expected_list_values
 
             # test that a default request still only returns the active objects
             self._assert_authenticated_get_allowed(list_uri, self.superuser,
-                                                   expected_values=expected_values,
+                                                   expected_values=active_resource_list,
                                                    partial_response=True)
 
             # test that an explicit request for active assays only returns the active one
             request_params = {ACTIVE_STATUS_PARAM: QUERY_ACTIVE_OBJECTS_ONLY}
             self._assert_authenticated_get_allowed(list_uri, self.superuser,
-                                                   expected_values=expected_values,
+                                                   expected_values=active_resource_list,
                                                    request_params=request_params,
                                                    partial_response=True)
 
@@ -2055,23 +2221,23 @@ class StudyNestedResourceTests(EddApiTestCase):
             # them to interfere with subsequent iterations of the test or with other test methods
             inactive_resource.delete()
 
-    def assert_detail_read_access(self, resource_uris, everyone_read, everyone_write):
+    def assert_detail_read_access(self, detail_uris, everyone_read_uris, everyone_write_uris):
 
         # test that permissions are applied consistently across each URI used to access the nested
         # resource
-        for detail_uri in resource_uris.detail_uris:
+        for detail_uri in detail_uris.detail_uris:
             logger.debug('Testing detail access at GET %s' % detail_uri)
-            self._enforce_nested_study_resource_access(detail_uri,
-                                                       expected_values=resource_uris.detail_model)
+            self._enforce_nested_study_resource_access(detail_uri, False,
+                                                       study_based=self.study_based_uris)
 
         # test that study-level "everyone" permissions are applied correctly for nested resources
-        self.assert_everyone_get_privileges(everyone_read, True, everyone_read.detail_model)
+        self.assert_everyone_get_privileges(everyone_read_uris, True, everyone_read_uris.detail_model)
 
-        self.assert_everyone_get_privileges(everyone_write, True, everyone_write.detail_model)
+        self.assert_everyone_get_privileges(everyone_write_uris, True, everyone_write_uris.detail_model)
 
         # test that a directly request for a resource returns it even if it's marked inactive
         # (which would hide it from the list view by default)
-        inactive_resource_uris = self.inactive_resource_factory()
+        inactive_resource_uris = self.inactive_model_factory()
         inactive_resource_uri = inactive_resource_uris.detail_uris[0]
         inactive_resource = inactive_resource_uris.detail_model
 
@@ -2158,11 +2324,11 @@ class LinesTests(StudyNestedResourceTests):
         uri_elts = [LINES_RESOURCE_NAME]
         create_everyone_studies(cls, uri_elts)
 
-        cls.everyone_read_line_uris = StudyUriBuilder(cls.everyone_read_study,
+        cls.everyone_read_line_uris = UriBuilder(cls.everyone_read_study,
                                                       nested_orm_models=[cls.everyone_read_line],
                                                       uri_elts=uri_elts)
 
-        cls.everyone_write_line_uris = StudyUriBuilder(cls.everyone_write_study,
+        cls.everyone_write_line_uris = UriBuilder(cls.everyone_write_study,
                                                        nested_orm_models=[cls.everyone_write_line],
                                                        uri_elts=uri_elts)
 
@@ -2227,14 +2393,14 @@ class LinesTests(StudyNestedResourceTests):
             print("Testing read access for %s" % list_url)
             print('Active line active ? %s' % self.active_line.active)
             self._enforce_nested_study_resource_access(list_url,
-                                                       expected_values=[self.active_line])
+                                                       expected_privileged_vals=[self.active_line])
 
             # test filtering based on study active status -- should return the same results as
             # before since the client has specifically requested lines this study
             self.study.active = False
             self.study.save()
             self._enforce_nested_study_resource_access(list_url,
-                                                       expected_values=[self.active_line])
+                                                       expected_privileged_vals=[self.active_line])
             self.study.active = True
             self.study.save()
 
@@ -2308,7 +2474,7 @@ class LinesTests(StudyNestedResourceTests):
         for study_lines_url in line_detail_urls:
             logger.debug('Testing line detail access at %s' % study_lines_url)
             self._enforce_nested_study_resource_access(study_lines_url,
-                                                       expected_values=self.active_line)
+                                                       expected_privileged_vals=self.active_line)
 
         # test that study-level "everyone" permissions are applied correctly for nested lines
         self.assert_everyone_get_privileges(self.everyone_read_line_uris,
@@ -2339,9 +2505,9 @@ class LinesTests(StudyNestedResourceTests):
         inactive_line.delete()
 
 
-class StudyUriBuilder:
+class UriBuilder(object):
     """
-    Builds valid URI's combinatorially for nested study resources (i.e. using slug/pk/uuid
+    Builds valid URI's combinatorially for nested resources (e.g. using study slug/pk/uuid
     combinations). TODO: enable config-based random use of URL combinations...will significantly
     cut down on runtime for repetitive use.
     """
@@ -2360,10 +2526,13 @@ class StudyUriBuilder:
         return self.nested_orm_models[-1]
 
     def _build_uri_combinations(self):
-        _study_prefix = '/rest/studies/%s/'
-        uri_prefixes = [_study_prefix % self.study.pk,
-                        _study_prefix % self.study.uuid,
-                        _study_prefix % self.study.slug]
+        if self.study:
+            _study_prefix = '/rest/studies/%s/'
+            uri_prefixes = [_study_prefix % self.study.pk,
+                            _study_prefix % self.study.uuid,
+                            _study_prefix % self.study.slug]
+        else:
+            uri_prefixes = ['/rest/']
 
         for index, url_segment in enumerate(self.uri_elts):
             new_prefixes = []
@@ -2388,7 +2557,7 @@ class StudyUriBuilder:
             self.list_uris.append('/rest/study/')
 
 
-class AssaysTests(StudyNestedResourceTests):
+class StudyAssaysTests(StudyNestedResourceTests):
     """
     Tests access controls and HTTP return codes for queries to the nested /rest/studies/{X}/lines/
     REST API resource.
@@ -2409,10 +2578,10 @@ class AssaysTests(StudyNestedResourceTests):
         Creates strains, users, and study/line combinations to test the REST resource's application
         of user permissions.
         """
-        super(AssaysTests, AssaysTests).setUpTestData()
+        super(StudyAssaysTests, StudyAssaysTests).setUpTestData()
 
-        # define placeholder data members to silence PyCharm style checks for data members
-        # created in create_study()
+        # define placeholder data members to silence style checks for data members created in
+        # create_study()
         cls.study = None
         cls.unprivileged_user = None
         cls.study_read_only_user = None
@@ -2433,37 +2602,33 @@ class AssaysTests(StudyNestedResourceTests):
         create_study(cls, True)
         logger.debug('Study pk = %d' % cls.study.pk)
 
+        create_study_internals(cls, cls.study, ASSAYS_RESOURCE_NAME, 'Active ')
+
         # create class-level django.util.auth permissions for Assays. This isn't a normal use case,
         # but since EDD supports this configuration, it should be tested.
         define_auth_perms_and_users(cls, 'assay')
 
-        # set up objects that are unique to this level of study detail
-        cls.protocol = Protocol.objects.create(name='JBEI Proteomics',
-                                               description='Proteomics protocol used @ JBEI',
-                                               owned_by=cls.superuser)
-
-        # create an active line/assay in the study
-        cls.active_line = Line.objects.create(name='Study line 1',
-                                              study=cls.study)
-
-        logger.debug('Study lines: %s' % ', '.join([str(line.pk) for line in
-                                                    Line.objects.filter(study__pk=cls.study.pk)]))
-
-        cls.active_assay = Assay.objects.create(name='Study assay 1',
-                                                line=cls.active_line,
-                                                protocol=cls.protocol,
-                                                experimenter=cls.study_write_only_user)
-
-        uri_elts = [LINES_RESOURCE_NAME, ASSAYS_RESOURCE_NAME]
+        uri_elts = [ASSAYS_RESOURCE_NAME]
+        cls.study_based_uris = True
         cls.everyone_read_assay_uris, cls.everyone_write_assay_uris = create_everyone_studies(
-            cls, uri_elts, cls.protocol)
+            cls, uri_elts, cls.protocol, study_based_uris=cls.study_based_uris)
 
         # build up lists of all the valid URI's usable to access the assays during the test
+        cls.active_assay_uris = UriBuilder(cls.study,
+                                           nested_orm_models=[cls.active_assay],
+                                           uri_elts=uri_elts)
 
-        cls.active_assay_uris = StudyUriBuilder(cls.study,
-                                                nested_orm_models=[cls.active_line,
-                                                                   cls.active_assay],
-                                                uri_elts=uri_elts)
+    @property
+    def expected_list_values(self):
+        return [self.active_assay]
+
+    @property
+    def expected_unprivileged_list_values(self):
+        return [self.active_assay]
+
+    @property
+    def privileged_detail_results(self):
+        return self.active_assay
 
     def test_assay_list_read_access(self):
         """
@@ -2476,11 +2641,7 @@ class AssaysTests(StudyNestedResourceTests):
         ###########################################################################################
         # Test standard use cases for all REST resources...correct results and access privileges
         ###########################################################################################
-        print('Testing all URIs:')
-        for list_uri in self.active_assay_uris.list_uris:
-            print(list_uri)
-
-        self._enforce_nested_study_resource_list(self.active_assay_uris, [self.active_assay])
+        self._enforce_nested_study_resource_list(self.active_assay_uris)
 
         # test that study-level "everyone" permissions are correctly applied
         everyone_read_assay = self.everyone_read_assay_uris.nested_orm_models[-1]
@@ -2527,27 +2688,151 @@ class AssaysTests(StudyNestedResourceTests):
     def values_converter(self):
         return assay_to_json_dict
 
-    def inactive_resource_factory(self):
+    def inactive_model_factory(self):
         # create an inactive assay
         inactive_assay = Assay.objects.create(name='Inactive assay',
                                               line=self.active_line,
                                               protocol=self.protocol,
                                               active=False)
+        return UriBuilder(None,
+                          nested_orm_models=[inactive_assay],
+                          uri_elts=[ASSAYS_RESOURCE_NAME])
 
-        return StudyUriBuilder(self.study, nested_orm_models=[self.active_line, inactive_assay],
-                               uri_elts=['lines', 'assays'])
+
+class BaseAssaysTests(StudyNestedResourceTests):
+    @classmethod
+    def setUpTestData(cls):
+        """
+        Creates strains, users, and study/line combinations to test the REST resource's application
+        of user permissions.
+        """
+        super(BaseAssaysTests, BaseAssaysTests).setUpTestData()
+
+        # create the study and associated users & permissions
+        create_study(cls, True)
+        logger.debug('Study pk = %d' % cls.study.pk)
+
+        create_study_internals(cls, cls.study, ASSAYS_RESOURCE_NAME, 'Active ')
+
+        # create class-level django.util.auth permissions for Assays. This isn't a normal use case,
+        # but since EDD supports this configuration, it should be tested.
+        define_auth_perms_and_users(cls, 'assay')
+
+        # build up lists of all the valid URI's usable to access the assays during the test
+        cls.active_assay_uris = UriBuilder(None,
+                                           nested_orm_models=[cls.active_assay],
+                                           uri_elts=[ASSAYS_RESOURCE_NAME])
+
+        # build different URLs to test the same resources tested by the parent class (e.g.
+        # accessing the Assay via the study ID)
+        # TODO: investigate why this didn't work as a class-level property
+        cls.study_based_uris = False
+        everyone_read_assay_uris, everyone_write_assay_uris = create_everyone_studies(
+            cls, [ASSAYS_RESOURCE_NAME], cls.protocol,
+            study_based_uris=cls.study_based_uris)
+
+        logger.debug('Everyone read detail URIs:')
+        for uri in everyone_read_assay_uris.detail_uris:
+            logger.debug(uri)
+
+        cls.everyone_read_assay_uris = everyone_read_assay_uris
+        cls.everyone_write_assay_uris = everyone_write_assay_uris
+
+    @property
+    @classmethod
+    def study_based_uris(cls):
+        return False
+
+    @property
+    def expected_list_values(self):
+        return [self.active_assay,
+                self.everyone_read_assay_uris.detail_model,
+                self.everyone_write_assay_uris.detail_model]
+
+    @property
+    def expected_unprivileged_list_values(self):
+        return [self.everyone_read_assay_uris.detail_model,
+                self.everyone_write_assay_uris.detail_model]
+
+    @property
+    def privileged_detail_results(self):
+        return self.active_assay
+
+    @property
+    def values_converter(self):
+        return assay_to_json_dict
+
+    def inactive_model_factory(self):
+        # create an inactive assay
+        inactive_assay = Assay.objects.create(name='Inactive assay',
+                                              line=self.active_line,
+                                              protocol=self.protocol,
+                                              active=False)
+        return UriBuilder(None,
+                          nested_orm_models=[inactive_assay],
+                          uri_elts=[ASSAYS_RESOURCE_NAME])
+
+    def expected_unprivileged_detail(self):
+        return None
+
+    def test_assay_list_read_access(self):
+        """
+            Tests GET /rest/studies/X/assays/
+        """
+        print(SEPARATOR)
+        print('%s(): ' % self.test_assay_list_read_access.__name__)
+        print(SEPARATOR)
+
+        ###########################################################################################
+        # Test standard use cases for all REST resources...correct results and access privileges.
+        # Note that since expected_list_values contains "everyone" read/write studies, those are
+        # also tested here.
+        ###########################################################################################
+        self._enforce_nested_study_resource_list(self.active_assay_uris)
+
+        ###########################################################################################
+        # test assay-specific filtering options
+        ###########################################################################################
+        protocol2 = Protocol.objects.create(
+            name='JBEI Metabolomics',
+            description='Metabolomics protocol used @ JBEI',
+            owned_by=self.superuser)
+
+        metabolomics_assay = Assay.objects.create(
+            name='Metabolomics assay',
+            line=self.active_line,
+            protocol=protocol2,
+            experimenter=self.study_write_only_user)
+
+        # test that single-value protocol-based filtering works
+        list_uri = self.active_assay_uris.list_uris[0]
+        self._assert_authenticated_get_allowed(
+            list_uri,
+            self.superuser,
+            expected_values=[metabolomics_assay],
+            request_params={'protocol': protocol2.pk},
+            partial_response=True)
+
+        # test multi-value protocol filtering
+        self._assert_authenticated_get_allowed(
+            list_uri,
+            self.superuser,
+            expected_values=[metabolomics_assay],
+            request_params={'protocol': [self.protocol.pk, protocol2.pk]},
+            partial_response=True)
+
 
     def test_assay_detail_read_access(self):
         """
-            Tests GET /rest/studies/{X}/lines/{Y}/assays/{Z}/
+            Tests GET /rest/studies/{X}/assays/{Z}/
         """
         print(SEPARATOR)
         print('%s(): ' % self.test_assay_detail_read_access.__name__)
         print(SEPARATOR)
 
         print('Testing all URIs:')
-        for list_uri in self.active_assay_uris.detail_uris:
-            print(list_uri)
+        for detail_uri in self.active_assay_uris.detail_uris:
+            print(detail_uri)
 
         # create a second active assay in the study so our tests of line detail access can't
         # stumble on the same result as search without taking requested assay pk into
@@ -2664,7 +2949,7 @@ class MeasurementsTests(StudyNestedResourceTests):
 
         # build up lists of all the valid URI's usable to access the assays during the test
 
-        cls.active_meas_uris = StudyUriBuilder(cls.study,
+        cls.active_meas_uris = UriBuilder(cls.study,
                                                nested_orm_models=[cls.active_line,
                                                                   cls.active_assay,
                                                                   cls.active_measurement],
@@ -2785,7 +3070,7 @@ class MeasurementsTests(StudyNestedResourceTests):
     def values_converter(self):
         return measurement_to_json_dict
 
-    def inactive_resource_factory(self):
+    def inactive_model_factory(self):
         inactive_measurement = Measurement.objects.create(assay=self.active_assay,
                                                           experimenter=self.study_write_only_user,
                                                           measurement_type=self.test_protein,
@@ -2795,7 +3080,7 @@ class MeasurementsTests(StudyNestedResourceTests):
                                                           measurement_format=_SCALAR,
                                                           active=False)
 
-        return StudyUriBuilder(self.study,
+        return UriBuilder(self.study,
                                nested_orm_models=[self.active_line,
                                                   self.active_assay,
                                                   inactive_measurement],
@@ -2914,7 +3199,7 @@ class MeasurementValuesTests(StudyNestedResourceTests):
         cls.everyone_write_meas_uris = write_uris
 
         # build up lists of all the valid URI's usable to access the assays during the test
-        cls.active_val_uris = StudyUriBuilder(cls.study,
+        cls.active_val_uris = UriBuilder(cls.study,
                                               nested_orm_models=[cls.active_line,
                                                                  cls.active_assay,
                                                                  cls.active_measurement,
@@ -3036,7 +3321,7 @@ class MeasurementValuesTests(StudyNestedResourceTests):
     def values_converter(self):
         return value_to_json_dict
 
-    def inactive_resource_factory(self):
+    def inactive_model_factory(self):
         inactive_measurement = Measurement.objects.create(assay=self.active_assay,
                                                           experimenter=self.study_write_only_user,
                                                           measurement_type=self.test_protein,
@@ -3048,7 +3333,7 @@ class MeasurementValuesTests(StudyNestedResourceTests):
 
         inactive_value = MeasurementValue.objects.create()
 
-        return StudyUriBuilder(self.study,
+        return UriBuilder(self.study,
                                nested_orm_models=[self.active_line,
                                                   self.active_assay,
                                                   inactive_measurement,

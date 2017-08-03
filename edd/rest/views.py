@@ -117,10 +117,9 @@ def schema_view(request):
     return response.Response(generator.get_schema(request=request))
 
 
-class AssaysViewSet(viewsets.ReadOnlyModelViewSet):
+class StudyAssaysViewSet(mixins.ListModelMixin, GenericViewSet):
     permission_classes = [ImpliedPermissions]
     serializer_class = AssaySerializer
-    lookup_url_kwarg = 'id'
 
     def get_object(self):
         """
@@ -146,29 +145,50 @@ class AssaysViewSet(viewsets.ReadOnlyModelViewSet):
             'kwargs': self.kwargs
         })
 
-        query_params = self.request.query_params
+        study_id = self.kwargs.get(_STUDY_NESTED_ID_KWARG)
+        assay_id = self.kwargs.get(self.lookup_url_kwarg, None)
 
-        study_pk_query = nested_study_resource_initial_query(self.request,
-                                                             self.kwargs,
-                                                             _STUDY_NESTED_ID_KWARG)
+        return build_assays_query(self.request,
+                                  self.request.query_params,
+                                  study_id=study_id,
+                                  identifier_override=assay_id)
 
-        # filter by line ID / study ID first to limit the size of the line/assay join, but also
-        # avoid a second query on Line before drilling into Assay
-        study_pk = study_pk_query.get()
-        line_id = self.kwargs[_LINE_NESTED_ID_KWARG]
-        assay_id = self.kwargs.get(self.lookup_url_kwarg)
 
-        _PROTOCOL_REQUEST_PARAM = 'protocol'
-        protocol_filter = query_params.get(_PROTOCOL_REQUEST_PARAM, None)
+class AssaysViewSet(viewsets.ReadOnlyModelViewSet):
+    permission_classes = [ImpliedPermissions]
+    serializer_class = AssaySerializer
+    lookup_url_kwarg = 'id'
 
-        assays_query = Assay.objects.filter(build_id_q('line__', line_id))
-        assays_query = assays_query.filter(line__study__pk=study_pk)
+    def get_object(self):
+        """
+        Overrides the default implementation to provide flexible lookup for Assay detail
+        views (either based on local numeric primary key, or UUID)
+        """
+        queryset = self.get_queryset()
 
-        assays_query = filter_id_list(assays_query, 'protocol', 'protocol', protocol_filter)
+        # unlike the DRF example code: for consistency in permissions enforcement, just do all the
+        # filtering in get_queryset() and pass empty filters here
+        filters = {}
+        obj = get_object_or_404(queryset, **filters)
+        self.check_object_permissions(self.request, obj)
+        return obj
 
-        return optional_edd_object_filtering(query_params,
-                                             assays_query,
-                                             identifier_override=assay_id)
+    def get_queryset(self):
+
+        logger.debug((_QUERYSET_LOG_MESSAGE + ' query_params: %(query_params)s') % {
+            'class': AssaysViewSet.__name__,
+            'cls_method': self.get_queryset.__name__,
+            'http_method': self.request.method,
+            'url': self.request.path,
+            'kwargs': self.kwargs,
+            'query_params': self.request.query_params,
+        })
+
+        assay_id = self.kwargs.get(self.lookup_url_kwarg, None)
+
+        return build_assays_query(self.request,
+                                  self.request.query_params,
+                                  identifier_override=assay_id)
 
     def get_serializer_class(self):
         # TODO: override to support optional bulk measurement / data requests for the study rather
@@ -176,103 +196,118 @@ class AssaysViewSet(viewsets.ReadOnlyModelViewSet):
         return super(AssaysViewSet, self).get_serializer_class()
 
 
-def nested_study_resource_initial_query(request, kwargs, study_url_kwarg, line_url_kwarg=None,
-                                        assay_url_kwarg=None, measurement_url_kwarg=None):
+def build_assays_query(request, query_params, identifier_override=None,
+                       study_id=None,
+                       enabling_manage_permissions=USE_STANDARD_PERMISSIONS,
+                       requested_study_permission_override=None):
+
+    ###################################################################################
+    # Build the query based on assay-specific search parameters, but don't execute yet
+    ##################################################################################
+    query = Assay.objects.all()
+    query = optional_edd_object_filtering(query_params,
+                                          query,
+                                          identifier_override=identifier_override)
+    # optional filtering by protocol
+    _PROTOCOL_REQUEST_PARAM = 'protocol'
+    protocol_filter = query_params.get(_PROTOCOL_REQUEST_PARAM, None)
+    query = filter_id_list(query, 'protocol', 'protocol', protocol_filter)
+
+    ###############################################################################
+    # Add in context-specific permissions checks for the enclosing study/studies
+    ###############################################################################
+
+    # if we a study ID is provided, first check study permissions and raise a 404 if the study
+    # doesn't exist or isn't accessible. This helps allows us to return a 404 for
+    # non-existent / inaccessible studies, while avoiding joins that include more than a single
+    # study.
+    if study_id:
+        study_pk = nested_study_resource_initial_query(request, study_id, Assay)
+        logger.debug('Filtering results to those in study %s' % study_id)
+        query = query.filter(line__study__pk=study_pk)
+
+    # otherwise, build study permission checks into the query itself.
+    else:
+        logger.debug('No %s identifier found for filtering' % _STUDY_NESTED_ID_KWARG)
+        query = filter_for_study_permission(
+            request, query, Assay, 'line__study__',
+            enabling_auth_perms=enabling_manage_permissions,
+            requested_study_permission_override=requested_study_permission_override)
+
+    return query
+
+
+def nested_study_resource_initial_query(request, study_id, result_model_class):
     """
-    A helper method to query nested study resources as part of enforcing EDD study permissions
-    for REST API calls.  Queries the database for the study and its nested resources,
-    verifying the relationships of nested resources back to the study.   Raises NotFound if the
-    study or any requested nested resource doesn't exist, or if the requesting user doesn't have
-    required permission to access it as defined by study permissions. Note that that
-    django.contrib.auth permissions are NOT checked by this method, so it should only be used to
-    verify relationship back to the study itself (the most likely source of user access to the
-    resources).  Django.contrib.auth permissions are NOT checked/applied to any resource within a
-    study, since at that point study-level permissions make more sense to apply than class-level
-    django.contrib.auth permissions across all studies.
-    :return: a QuerySet that returns the primary key of the study iff it exists and the user has
-    access to it
+    A helper method to simplify REST API queries for studies and study internals.  If this
+    method returns without raising an Exception, the user is authenticated and has permission
+    to access the study and its internals based on the HTTP request method used.
+
+    The first step of querying for any study-specific data via REST should be to run this method
+    to verify user access to the study. Checks user authentication status, superuser status,
+    and study-specific user/group permissions.  Note that class-level django.contrib.auth
+    permissions are purposefully NOT checked on the study internals (e.g. Assay), since those
+    are currently not in use in EDD and would add complexity / hurt efficiency for no benefit.
+
+    Note that this method is very similar in purpose to main.views.load_study(), but includes
+    some specific conveniences for use in the DRF REST context, as well as removing the need for
+    client code to distinguish which study identifier is in use.
+    :param request: the REST API request
+    :param kwargs: a dict of URI keyword arguments
+    :param study_uri_kwarg: the string used to identify the study identifier read from the
+    request URI
+    :return: the integer primary key of the study, even if the client provided a different valid
+    identifier (e.g. UUID or slug).
+    :raises NotAuthenticated: if the user isn't authenticated
+    :raises NotFound: if the no study identifier is provided
     """
     user = request.user
     if not user.is_authenticated():
         logger.debug('User %s is not authenticated' % user.username)
         raise NotAuthenticated()
 
-    # special-case workaround for the browseable API.  It appears to directly call the views'
+    # special-case workaround for the DRF browseable API.  It appears to directly call the views'
     # get_queryset() methods during inspection. When implemented, removing this check would cause
     # the browseable API to fail to load, although clearly under normal conditions study nested
     # resources shouldn't be reachable without the study id used to enforce access controls
-    study_id = kwargs.get(study_url_kwarg)
     if not study_id:
-        raise NotFound()
+        raise NotFound('No study identifier was provided')
 
-    # load / check enclosing study permissions first, ignoring the study's 'active' status
-    # and django.contrib.auth "manage" permissions since we're requesting study internals
-    study_query_params = {ACTIVE_STATUS_PARAM: QUERY_ANY_ACTIVE_STATUS}
-    study_query = build_study_query(request,
-                                    study_query_params,
-                                    identifier=study_id,
-                                    skip_study_manage_perms=True)
+    # load / check enclosing study permissions first
+    study_query = Study.objects.filter(build_study_id_q('', study_id))
+    study_query = filter_for_study_permission(request, study_query, result_model_class, '',)
     study_query = study_query.values_list('pk', flat=True)
 
     if len(study_query) != 1:
-        logger.debug('Study %(study)s not found, or user %(user)s does not have permission' % {
-            'study': study_id,
-            'user': user.username})
-        raise NotFound('Study %s not found' % study_id)
+        raise NotFound('Study "%s" not found' % study_id)
 
-    if not line_url_kwarg:
-        return study_query
+    return study_query.get()
 
-    # verify line / study relationship to enforce permissions on nested resources
-    study_pk = study_query.get()
-    line_id = kwargs.get(line_url_kwarg)
 
-    line_query = Line.objects.filter(build_id_q('', line_id) &
-                                     Q(study_id=study_pk)).values_list('pk', flat=True)
-    if len(line_query) != 1:
-        requested_study_id = kwargs[line_url_kwarg]
-        msg = 'No line "%(line)s" was found for study "%(study)s"' % {
-            'line': line_id,
-            'study': requested_study_id,
-        }
-        logger.debug(msg)
-        raise NotFound(msg)
+def build_study_id_q(prefix, identifier):
+    ############################
+    # integer primary key
+    ############################
+    try:
+        id_keyword = '%spk' % prefix
+        return Q(**{id_keyword: int(identifier)})
+    except ValueError:
+        pass
 
-    if not assay_url_kwarg:
-        return line_query
+    ############################
+    # UUID
+    ############################
+    try:
+        id_keyword = '%suuid' % prefix
+        return Q(**{id_keyword: UUID(identifier)})
+    except ValueError:
+        pass
 
-    # verify line/assay relationship to enforce permissions on nested resources
-    line_pk = line_query.get()
-    assay_id = kwargs[assay_url_kwarg]
-    assay_query = Assay.objects.filter(build_id_q('', assay_id) &
-                                       Q(line_id=line_pk)).values_list('pk', flat=True)
-
-    if len(assay_query) != 1:
-        msg = 'No assay "%(assay)s" was found for line "%(line)s"' % {
-            'assay': assay_id,
-            'line': line_id}
-        logger.debug(msg)
-        raise NotFound(msg)
-
-    if not measurement_url_kwarg:
-        return assay_query
-
-    assay_pk = assay_query.get()
-    measurement_id = kwargs.get(measurement_url_kwarg)
-    meas_query = Measurement.objects.filter(build_id_q('', measurement_id) &
-                                            Q(assay_id=assay_pk)).values_list('pk', flat=True)
-
-    if len(meas_query) != 1:
-        msg = ('No measurement "%(meas)s" was found for study "%(study)s", line "%(line)s", '
-               '"%(assay)s"' % {
-                   'study': study_id,
-                   'assay': assay_id,
-                   'line': line_id,
-                   'meas': measurement_id})
-        logger.debug(msg)
-        raise NotFound(msg)
-
-    return meas_query
+    ############################
+    # Assume it's a slug
+    ############################
+    id_keyword = '%sslug' % prefix
+    return Q(**{id_keyword: identifier})
 
 
 def build_id_q(prefix, identifier):
@@ -1130,10 +1165,11 @@ class StudyViewSet(mixins.CreateModelMixin,
         return super(StudyViewSet, self).create(request, *args, **kwargs)
 
 
-def build_study_query(request, query_params, identifier=None, skip_study_manage_perms=False):
+def build_study_query(request, query_params, identifier=None, skip_study_auth_perms=False,
+                      skip_non_id_filtering=False):
     """
     A helper method for constructing a Study QuerySet while consistently applying Study permissions
-    :param skip_study_manage_perms: True to disallow access to the study based on class-level
+    :param skip_study_auth_perms: True to disallow access to the study based on class-level
     django.util.auth permissions that only grant permission to the base study details (e.g.
     name, description, contact) rather than the contained data.  Use False to apply only
     Study-specific user permissions, e.g. when accessing nested study resources like Lines,
@@ -1168,12 +1204,14 @@ def build_study_query(request, query_params, identifier=None, skip_study_manage_
             study_query = study_query.filter(slug=identifier)
 
     # apply standard filtering options, but skip ID-based filtering we've just finished
-    study_query = optional_edd_object_filtering(query_params, study_query, skip_id_filtering=True)
+    if not skip_non_id_filtering:
+        study_query = optional_edd_object_filtering(query_params, study_query,
+                                                    skip_id_filtering=True)
 
     # apply study permissions
-    enabling_manage_perms = [] if skip_study_manage_perms else None
+    enabling_manage_perms = [] if skip_study_auth_perms else None
     study_query = filter_for_study_permission(request, study_query, Study, '',
-                                              enabling_manage_permissions=enabling_manage_perms)
+                                              enabling_auth_perms=enabling_manage_perms)
 
     return study_query
 
@@ -1318,68 +1356,71 @@ def _filter_for_metadata(query, meta_comparison, comparison_num, comparison_coun
 # TODO: take study active status into account...unlikely in most cases that inactive studies should
 # grant access to the contained lines/metadata/measurements/etc
 def filter_for_study_permission(request, query, result_model_class, study_keyword_prefix,
-                                enabling_manage_permissions=USE_STANDARD_PERMISSIONS,
+                                enabling_auth_perms=USE_STANDARD_PERMISSIONS,
                                 requested_study_permission_override=None):
     """
-        A helper method to filter a Queryset to return only results that the requesting user
-        should have access to, based on django.auth permissions and on explicitly-configured
-        main.models.StudyPermissions. Note the assumption that the requested resource is unique
-        to the study (e.g. Lines).
+        A helper method that filters a Queryset to return only results that the requesting user
+        should have access to, based on class-level django.auth permissions and on
+        study-specific main.models.StudyPermissions. Note the assumption that the
+        requested resource is unique to the study (e.g. Lines).
         :param request: the HttpRequest to access a study-related resource
         :param query: the queryset as defined by the request (with permissions not yet enforced)
         :result_model_class: the Django model class returned by the QuerySet. If the user has
         class-level django.contrib.auth appropriate permissions to view/modify/create objects of
         this type, access will be granted regardless of configured Study-level permissions.
-        :param enabling_manage_permissions: a list of django.util.auth permission codes
+        :param enabling_auth_perms: a list of django.util.auth permission codes
         that optionally overrides the default set of permissions that would otherwise determine
         class-level access to all of the results based on request.method. If None, the default
         permissions will be applied, or django.contrib.auth permissions will be ignored if an empty
         list is provided.
-
      """
 
     # never show anything to un-authenticated users
     user = request.user
     if (not user) or not user.is_authenticated():
         logger.debug('User %s is not authenticated' % user)
-        return result_model_class.objects.none()
+        raise NotAuthenticated()
 
     if requested_study_permission_override is None:
         requested_permission = get_requested_study_permission(request.method)
     else:
         requested_permission = requested_study_permission_override
 
-    # if user role (e.g. admin) grants access to all studies, we can expose all strains
+    # if user role (e.g. admin) grants access to all studies, we can expose all objects
     # without additional queries
     has_role_based_permission = (requested_permission == StudyPermission.READ and
                                  Study.user_role_can_read(user))
     if has_role_based_permission:
         return query
 
-    # test whether explicit "manager" permissions allow user to access all results without
-    # having to drill down into case-by-case study or study/line/strain relationships that would
+    # test whether explicit django.contrib.auth permissions allow user to access all results
+    # without having to drill down into case-by-case study or nested relationships that would
     # grant access to a subset of results
-    has_explicit_manage_permission = False
-    if enabling_manage_permissions is None:
-        enabling_manage_permissions = (
+    if enabling_auth_perms is None:
+        enabling_auth_perms = (
             ImpliedPermissions.get_standard_enabling_permissions(
                     request.method, result_model_class))
 
-    for manage_permission in enabling_manage_permissions:
-        if user.has_perm(manage_permission):
-            has_explicit_manage_permission = True
-            logger.debug('User %(user)s has explicit permission to %(requested_perm)s '
-                         'all %(manage_perm_class)s objects, implied via the "%(granting_perm)s" '
-                         'permission' % {
+    for auth_perm in enabling_auth_perms:
+        if user.has_perm(auth_perm):
+            logger.debug('User %(user)s has DRF permission "%(requested_perm)s" for '
+                         'all %(model_class)s objects, implied via the "%(auth_perm)s" '
+                         'auth permission' % {
                              'user':              user.username,
-                             'manage_perm_class': result_model_class.__class__.__name__,
+                             'model_class': result_model_class.__name__,
                              'requested_perm':    requested_permission,
-                             'granting_perm':     manage_permission,
+                             'auth_perm':     auth_perm,
                          })
-            break
+            return query
 
-    if has_explicit_manage_permission:
-        return query
+    logger.debug('User %(user)s has does NOT have DRF permission "%(requested_perm)s" for '
+                 'all %(model_class)s objects. Granting django.contrib.auth permissions would '
+                 'be the any of (%(auth_perm)s)' % {
+                             'user':              user.username,
+                             'model_class': result_model_class.__name__,
+                             'requested_perm':    requested_permission,
+                             'auth_perm':     ', '.join(['"%s"' % perm for perm in
+                                                         enabling_auth_perms])})
 
     # if user has no global permissions that grant access to all results , filter
     # results to only those exposed in studies the user has read/write
@@ -1387,15 +1428,15 @@ def filter_for_study_permission(request, query, result_model_class, study_keywor
     # via the UI. Where possible, we should encourage clients to access nested study resources via
     # /rest/studies/X/Y to avoid these joins.
 
-    # if user is only requesting read access to the strain, construct a query that
-    # will infer read permission from the existing of either read or write
-    # permission
+    # if user is only requesting read access, construct a query that will infer read permission
+    # from the existing of either read or write permission
     if requested_permission == StudyPermission.READ:
         requested_permission = StudyPermission.CAN_VIEW
+
+    logger.debug('Filtering query for study permissions')
     user_permission_q = Study.user_permission_q(user, requested_permission,
                                                 keyword_prefix=study_keyword_prefix)
-    query = query.filter(user_permission_q).distinct()
-    return query
+    return query.filter(user_permission_q).distinct()
 
 
 NUMERIC_PK_PATTERN = re.compile('^\d+$')
@@ -1551,7 +1592,7 @@ class StudyStrainsView(viewsets.ReadOnlyModelViewSet):
         return strain_query
 
 
-class LinesView(viewsets.ReadOnlyModelViewSet):  # LineView(APIView):
+class LinesView(mixins.ListModelMixin, GenericViewSet):
     """
         API endpoint that allows lines within a study to be searched, viewed, and edited.
     """
@@ -1578,17 +1619,7 @@ class LinesView(viewsets.ReadOnlyModelViewSet):  # LineView(APIView):
             'method': self.get_queryset.__name__,
             'kwargs': self.kwargs
         })
-
-        study_pk_query = nested_study_resource_initial_query(self.request,
-                                                             self.kwargs,
-                                                             _STUDY_NESTED_ID_KWARG)
-
-        queryset = Line.objects.filter(study__pk=study_pk_query.get())
-
-        queryset = optional_edd_object_filtering(self.request.query_params,
-                                                 queryset,
-                                                 identifier_override=self.kwargs.get(self.lookup_url_kwarg))
-        return queryset
+        return build_lines_query(self.request, self.kwargs)
 
     # def create(self, request, *args, **kwargs):
     #     ##############################################################
@@ -1678,10 +1709,8 @@ def build_lines_query(request, query_params, identifier=None,
     # apply study and django.contrib.auth permissions
     query = filter_for_study_permission(
             request, query, Line, 'study__',
-            enabling_manage_permissions=enabling_manage_permissions,
+            enabling_auth_perms=enabling_manage_permissions,
             requested_study_permission_override=requested_study_permission_override)
-
-    logger.debug('Found %d lines' % len(query))  # TODO: remove debug stmt
 
     return query
 

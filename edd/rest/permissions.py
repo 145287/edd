@@ -231,11 +231,12 @@ def user_has_admin_or_manage_perm(
                          })
             return True, False
 
-    logger.debug('User %(username)s has no superusr or class-level auth privileges for '
-                 '%(method)s %(url)s.' % {
+    logger.debug('User %(username)s has no superuser or class-level auth privileges for '
+                 '%(method)s %(url)s. Enabling permissions would be %(enabling_perms)s' % {
                      'username': user.username,
                      'method':   request.method,
-                     'url': request.path, })
+                     'url': request.path,
+                     'enabling_perms': ', '.join(enabling_perms)})
     return False
 
 
