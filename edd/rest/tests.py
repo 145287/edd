@@ -2046,79 +2046,79 @@ class StudyNestedResourceTests(EddApiTestCase):
         raise NotImplementedError()
 
     @property
-    def expected_list_values(self):
+    def privileged_list_values(self):
         raise NotImplementedError()
 
     @property
-    def expected_unprivileged_list_values(self):
+    def unprivileged_list_values(self):
         raise NotImplementedError()
 
     @property
     def privileged_detail_results(self):
         raise NotImplementedError()
 
-    def _enforce_nested_study_resource_access(self, url, is_list, study_based=True):
+    def _enforce_nested_study_resource_access(self, uri, is_list, study_based=True):
         """
            A helper method that does the work to test GET permissions for both list and detail
            views.
         """
 
         # verify that an un-authenticated request gets a 404
-        self._assert_unauthenticated_get_denied(url)
+        self._assert_unauthenticated_get_denied(uri)
 
         # enforce access denied behavior users without access to the enclosing study
         if is_list:
-            privileged_results = self.expected_list_values
+            privileged_results = self.privileged_list_values
             if study_based:
-                self._assert_authenticated_get_denied(url, self.unprivileged_user)
-                self._assert_authenticated_get_denied(url, self.staff_user)
-                self._assert_authenticated_get_denied(url, self.staff_creator)
+                self._assert_authenticated_get_denied(uri, self.unprivileged_user)
+                self._assert_authenticated_get_denied(uri, self.staff_user)
+                self._assert_authenticated_get_denied(uri, self.staff_creator)
             else:
-                unprivileged_list_results = self.expected_unprivileged_list_values
-                privileged_results = self.expected_list_values
-                self._assert_authenticated_get_allowed(url,
+                unprivileged_list_results = self.unprivileged_list_values
+                privileged_results = self.privileged_list_values
+                self._assert_authenticated_get_allowed(uri,
                                                        self.unprivileged_user,
                                                        expected_values=unprivileged_list_results,
                                                        partial_response=True)
-                self._assert_authenticated_get_allowed(url,
+                self._assert_authenticated_get_allowed(uri,
                                                        self.staff_user,
                                                        expected_values=unprivileged_list_results,
                                                        partial_response=True)
-                self._assert_authenticated_get_allowed(url,
+                self._assert_authenticated_get_allowed(uri,
                                                        self.staff_creator,
                                                        expected_values=unprivileged_list_results,
                                                        partial_response=True)
 
         else:
             privileged_results = self.privileged_detail_results
-            self._assert_authenticated_get_denied(url, self.unprivileged_user)
-            self._assert_authenticated_get_denied(url, self.staff_user)
-            self._assert_authenticated_get_denied(url, self.staff_creator)
+            self._assert_authenticated_get_denied(uri, self.unprivileged_user)
+            self._assert_authenticated_get_denied(uri, self.staff_user)
+            self._assert_authenticated_get_denied(uri, self.staff_creator)
 
         # test that users / groups with read access can read study internals
-        self._assert_authenticated_get_allowed(url,
+        self._assert_authenticated_get_allowed(uri,
                                                self.study_read_only_user,
                                                expected_values=privileged_results,
                                                partial_response=True)
 
-        self._assert_authenticated_get_allowed(url,
+        self._assert_authenticated_get_allowed(uri,
                                                self.study_read_group_user,
                                                expected_values=privileged_results,
                                                partial_response=True)
 
         # verify that study write permissions imply read permissions on the internals
-        self._assert_authenticated_get_allowed(url,
+        self._assert_authenticated_get_allowed(uri,
                                                self.study_write_only_user,
                                                expected_values=privileged_results,
                                                partial_response=True)
 
-        self._assert_authenticated_get_allowed(url,
+        self._assert_authenticated_get_allowed(uri,
                                                self.study_write_group_user,
                                                expected_values=privileged_results,
                                                partial_response=True)
 
         # test that a superuser can access study data without any other privileges
-        self._assert_authenticated_get_allowed(url,
+        self._assert_authenticated_get_allowed(uri,
                                                self.superuser,
                                                expected_values=privileged_results,
                                                partial_response=True)
@@ -2128,46 +2128,46 @@ class StudyNestedResourceTests(EddApiTestCase):
         # study title/description/contact).
         if is_list:
             if study_based:
-                self._assert_authenticated_get_denied(url, self.staff_study_changer)
-                self._assert_authenticated_get_denied(url, self.staff_study_creator)
-                self._assert_authenticated_get_denied(url, self.staff_study_deleter)
+                self._assert_authenticated_get_denied(uri, self.staff_study_changer)
+                self._assert_authenticated_get_denied(uri, self.staff_study_creator)
+                self._assert_authenticated_get_denied(uri, self.staff_study_deleter)
             else:
-                self._assert_authenticated_get_allowed(url,
+                self._assert_authenticated_get_allowed(uri,
                                                        self.staff_study_changer,
                                                        expected_values=unprivileged_list_results,
                                                        partial_response=True)
-                self._assert_authenticated_get_allowed(url,
+                self._assert_authenticated_get_allowed(uri,
                                                        self.staff_study_creator,
                                                        expected_values=unprivileged_list_results,
                                                        partial_response=True)
-                self._assert_authenticated_get_allowed(url,
+                self._assert_authenticated_get_allowed(uri,
                                                        self.staff_study_deleter,
                                                        expected_values=unprivileged_list_results,
                                                        partial_response=True)
         else:
-            self._assert_authenticated_get_denied(url, self.staff_study_changer)
-            self._assert_authenticated_get_denied(url, self.staff_study_creator)
-            self._assert_authenticated_get_denied(url, self.staff_study_deleter)
+            self._assert_authenticated_get_denied(uri, self.staff_study_changer)
+            self._assert_authenticated_get_denied(uri, self.staff_study_creator)
+            self._assert_authenticated_get_denied(uri, self.staff_study_deleter)
 
         # test that 'staff' users with class-level django.util.auth mutator privileges for the
         # requested ORM model class have permission on relevant objects even without study-based
         #  permissions
         if is_list:
             if study_based:
-                self._assert_authenticated_get_denied(url, self.staff_creator)
+                self._assert_authenticated_get_denied(uri, self.staff_creator)
             else:
-                self._assert_authenticated_get_allowed(url,
+                self._assert_authenticated_get_allowed(uri,
                                                        self.staff_creator,
                                                        expected_values=unprivileged_list_results,
                                                        partial_response=True)
         else:
-            self._assert_authenticated_get_denied(url, self.staff_creator)
+            self._assert_authenticated_get_denied(uri, self.staff_creator)
 
-        self._assert_authenticated_get_allowed(url,
+        self._assert_authenticated_get_allowed(uri,
                                                self.staff_changer,
                                                expected_values=privileged_results,
                                                partial_response=True)
-        self._assert_authenticated_get_allowed(url,
+        self._assert_authenticated_get_allowed(uri,
                                                self.staff_deleter,
                                                expected_values=privileged_results,
                                                partial_response=True)
@@ -2196,13 +2196,15 @@ class StudyNestedResourceTests(EddApiTestCase):
             self.study.save()
 
             # test that explicitly filtering by active=True status gives the same result as before
+            active_resource_list = self.privileged_list_values
             request_params = {ACTIVE_STATUS_PARAM: QUERY_ACTIVE_OBJECTS_ONLY}
             self._assert_authenticated_get_allowed(list_uri, self.superuser,
-                                                   request_params=request_params)
+                                                   request_params=request_params,
+                                                   expected_values=active_resource_list,
+                                                   partial_response=True)
 
             # create an inactive resource within the study that will show up in the list view
             inactive_resource = self.inactive_model_factory().detail_model
-            active_resource_list = self.expected_list_values
 
             # test that a default request still only returns the active objects
             self._assert_authenticated_get_allowed(list_uri, self.superuser,
@@ -2331,12 +2333,12 @@ class LinesTests(StudyNestedResourceTests):
         create_everyone_studies(cls, uri_elts)
 
         cls.everyone_read_line_uris = UriBuilder(cls.everyone_read_study,
-                                                      nested_orm_models=[cls.everyone_read_line],
-                                                      uri_elts=uri_elts)
+                                                 nested_orm_models=[cls.everyone_read_line],
+                                                 uri_elts=uri_elts)
 
         cls.everyone_write_line_uris = UriBuilder(cls.everyone_write_study,
-                                                       nested_orm_models=[cls.everyone_write_line],
-                                                       uri_elts=uri_elts)
+                                                  nested_orm_models=[cls.everyone_write_line],
+                                                  uri_elts=uri_elts)
 
     @property
     def values_converter(self):
@@ -2642,6 +2644,20 @@ class AssayTests(StudyNestedResourceTests):
             request_params={'protocol': [self.protocol.pk, protocol2.pk]},
             partial_response=True)
 
+    def inactive_model_factory(self):
+        # create an inactive assay
+        inactive_assay = Assay.objects.create(name='Inactive assay',
+                                              line=self.active_line,
+                                              protocol=self.protocol,
+                                              active=False)
+        return UriBuilder(None,
+                          nested_orm_models=[inactive_assay],
+                          uri_elts=[ASSAYS_RESOURCE_NAME])
+
+    @property
+    def values_converter(self):
+        return assay_to_json_dict
+
 
 class StudyAssaysTests(AssayTests):
     """
@@ -2655,30 +2671,16 @@ class StudyAssaysTests(AssayTests):
         super(StudyAssaysTests, StudyAssaysTests)._setUpTestData(True)
 
     @property
-    def expected_list_values(self):
+    def privileged_list_values(self):
         return [self.active_assay]
 
     @property
-    def expected_unprivileged_list_values(self):
+    def unprivileged_list_values(self):
         return [self.active_assay]
 
     @property
     def privileged_detail_results(self):
         return self.active_assay
-
-    @property
-    def values_converter(self):
-        return assay_to_json_dict
-
-    def inactive_model_factory(self):
-        # create an inactive assay
-        inactive_assay = Assay.objects.create(name='Inactive assay',
-                                              line=self.active_line,
-                                              protocol=self.protocol,
-                                              active=False)
-        return UriBuilder(None,
-                          nested_orm_models=[inactive_assay],
-                          uri_elts=[ASSAYS_RESOURCE_NAME])
 
 
 class BaseAssaysTests(AssayTests):
@@ -2692,13 +2694,13 @@ class BaseAssaysTests(AssayTests):
         super(BaseAssaysTests, BaseAssaysTests)._setUpTestData(False)
 
     @property
-    def expected_list_values(self):
+    def privileged_list_values(self):
         return [self.active_assay,
                 self.everyone_read_assay_uris.detail_model,
                 self.everyone_write_assay_uris.detail_model]
 
     @property
-    def expected_unprivileged_list_values(self):
+    def unprivileged_list_values(self):
         return [self.everyone_read_assay_uris.detail_model,
                 self.everyone_write_assay_uris.detail_model]
 
@@ -2706,21 +2708,7 @@ class BaseAssaysTests(AssayTests):
     def privileged_detail_results(self):
         return self.active_assay
 
-    @property
-    def values_converter(self):
-        return assay_to_json_dict
-
-    def inactive_model_factory(self):
-        # create an inactive assay
-        inactive_assay = Assay.objects.create(name='Inactive assay',
-                                              line=self.active_line,
-                                              protocol=self.protocol,
-                                              active=False)
-        return UriBuilder(None,
-                          nested_orm_models=[inactive_assay],
-                          uri_elts=[ASSAYS_RESOURCE_NAME])
-
-    def expected_unprivileged_detail(self):
+    def unprivileged_detail_results(self):
         return None
 
     def test_assay_detail_read_access(self):

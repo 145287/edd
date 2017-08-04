@@ -136,7 +136,6 @@ class StudyAssaysViewSet(mixins.ListModelMixin, GenericViewSet):
         return obj
 
     def get_queryset(self):
-
         logger.debug(_QUERYSET_LOG_MESSAGE % {
             'class': AssaysViewSet.__name__,
             'cls_method': self.get_queryset.__name__,
@@ -174,7 +173,6 @@ class AssaysViewSet(viewsets.ReadOnlyModelViewSet):
         return obj
 
     def get_queryset(self):
-
         logger.debug((_QUERYSET_LOG_MESSAGE + ' query_params: %(query_params)s') % {
             'class': AssaysViewSet.__name__,
             'cls_method': self.get_queryset.__name__,
@@ -218,15 +216,15 @@ def build_assays_query(request, query_params, identifier_override=None,
     ###############################################################################
 
     # if we a study ID is provided, first check study permissions and raise a 404 if the study
-    # doesn't exist or isn't accessible. This helps allows us to return a 404 for
-    # non-existent / inaccessible studies, while avoiding joins that include more than a single
-    # study.
+    # doesn't exist or isn't accessible. This helps allows us to distinguish between 404 for
+    # non-existent / inaccessible studies, return a 200 empty list for valid studies with no
+    # assays, and also to avoid multi-table joins that include more than a single study.
     if study_id:
         study_pk = nested_study_resource_initial_query(request, study_id, Assay)
         logger.debug('Filtering results to those in study %s' % study_id)
         query = query.filter(line__study__pk=study_pk)
 
-    # otherwise, build study permission checks into the query itself.
+    # otherwise, build study permission checks into the query itself
     else:
         logger.debug('No %s identifier found for filtering' % _STUDY_NESTED_ID_KWARG)
         query = filter_for_study_permission(
