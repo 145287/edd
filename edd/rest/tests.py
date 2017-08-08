@@ -1940,8 +1940,7 @@ def define_auth_perms_and_users(test_class, model_name):
                                             is_staff=True,
                                             manage_perms=(test_class.delete_permission,))
 
-
-class StudyInternalsTestMixin(EddApiTestCaseMixin, APITestCase):
+class StudyInternalsTestMixin(EddApiTestCaseMixin):
     """
     A helper class that supports testing REST API access to data considered to fall under a Study
     in the EDD ontology (e.g. Line, Assay, Measurement, MeasurementValue). The assumption of
