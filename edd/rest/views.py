@@ -117,14 +117,11 @@ def schema_view(request):
     return response.Response(generator.get_schema(request=request))
 
 
-class StudyAssaysViewSet(mixins.ListModelMixin, GenericViewSet):
-    permission_classes = [ImpliedPermissions]
-    serializer_class = AssaySerializer
-
+class CustomFilteringMixin(object):
     def get_object(self):
         """
-        Overrides the default implementation to provide flexible lookup for Assay detail
-        views (either based on local numeric primary key, or UUID)
+        Overrides the default implementation to provide flexible lookup for Study Lines (either
+        based on local numeric primary key, or based on the strain UUID from ICE
         """
         queryset = self.get_queryset()
 
@@ -134,6 +131,11 @@ class StudyAssaysViewSet(mixins.ListModelMixin, GenericViewSet):
         obj = get_object_or_404(queryset, **filters)
         self.check_object_permissions(self.request, obj)
         return obj
+
+
+class StudyAssaysViewSet(CustomFilteringMixin, mixins.ListModelMixin, GenericViewSet):
+    permission_classes = [ImpliedPermissions]
+    serializer_class = AssaySerializer
 
     def get_queryset(self):
         logger.debug(_QUERYSET_LOG_MESSAGE % {
@@ -153,24 +155,10 @@ class StudyAssaysViewSet(mixins.ListModelMixin, GenericViewSet):
                                   identifier_override=assay_id)
 
 
-class AssaysViewSet(viewsets.ReadOnlyModelViewSet):
+class AssaysViewSet(CustomFilteringMixin, viewsets.ReadOnlyModelViewSet):
     permission_classes = [ImpliedPermissions]
     serializer_class = AssaySerializer
     lookup_url_kwarg = 'id'
-
-    def get_object(self):
-        """
-        Overrides the default implementation to provide flexible lookup for Assay detail
-        views (either based on local numeric primary key, or UUID)
-        """
-        queryset = self.get_queryset()
-
-        # unlike the DRF example code: for consistency in permissions enforcement, just do all the
-        # filtering in get_queryset() and pass empty filters here
-        filters = {}
-        obj = get_object_or_404(queryset, **filters)
-        self.check_object_permissions(self.request, obj)
-        return obj
 
     def get_queryset(self):
         logger.debug((_QUERYSET_LOG_MESSAGE + ' query_params: %(query_params)s') % {
@@ -220,9 +208,9 @@ def build_assays_query(request, query_params, identifier_override=None,
     # non-existent / inaccessible studies, return a 200 empty list for valid studies with no
     # assays, and also to avoid multi-table joins that include more than a single study.
     if study_id:
-        study_pk = nested_study_resource_initial_query(request, study_id, Assay)
+        study_pk = study_internals_initial_query(request, study_id, Assay)
         logger.debug('Filtering results to those in study %s' % study_id)
-        query = query.filter(line__study__pk=study_pk)
+        query = query.filter(line__study_id=study_pk)
 
     # otherwise, build study permission checks into the query itself
     else:
@@ -235,7 +223,7 @@ def build_assays_query(request, query_params, identifier_override=None,
     return query
 
 
-def nested_study_resource_initial_query(request, study_id, result_model_class):
+def study_internals_initial_query(request, study_id, result_model_class):
     """
     A helper method to simplify REST API queries for studies and study internals.  If this
     method returns without raising an Exception, the user is authenticated and has permission
@@ -283,6 +271,13 @@ def nested_study_resource_initial_query(request, study_id, result_model_class):
 
 
 def build_study_id_q(prefix, identifier):
+    """
+    Helper method for constructing a query that includes a unique study identifier whose type is
+    determine dynimically (could be a pk, slug, or UUID).
+    :param prefix:
+    :param identifier:
+    :return:
+    """
     ############################
     # integer primary key
     ############################
@@ -412,7 +407,7 @@ class MeasurementsViewSet(viewsets.ReadOnlyModelViewSet):
 
         # query study/line/assay relationships first to apply study-level permissions to nested
         # measurements
-        assay_pk_query = nested_study_resource_initial_query(
+        assay_pk_query = study_internals_initial_query(
             self.request,
             self.kwargs,
             _STUDY_NESTED_ID_KWARG,
@@ -491,7 +486,7 @@ class MeasurementValuesViewSet(viewsets.ReadOnlyModelViewSet):
 
         # query study/line/assay relationships first to apply study-level permissions to nested
         # measurements
-        meas_pk_query = nested_study_resource_initial_query(
+        meas_pk_query = study_internals_initial_query(
             self.request,
             self.kwargs,
             _STUDY_NESTED_ID_KWARG,
@@ -795,6 +790,7 @@ PAGING_PARAMETER_DESCRIPTIONS = """
                  message: Insufficient rights to call this procedure
                - code: 500 internal server error
     """
+
 
 class StrainViewSet(mixins.CreateModelMixin,
                     mixins.RetrieveModelMixin,
@@ -1181,25 +1177,7 @@ def build_study_query(request, query_params, identifier=None, skip_study_auth_pe
     # checking is performed up front at queryset construction time (400 error) rather than
     # evaluation time (500 error)
     if identifier:
-        # test whether this is an integer pk
-        found_identifier_format = False
-        try:
-            study_query = study_query.filter(pk=int(identifier))
-            found_identifier_format = True
-        except ValueError:
-            pass
-
-        # if format not found, try UUID
-        if not found_identifier_format:
-            try:
-                study_query = study_query.filter(uuid=UUID(identifier))
-                found_identifier_format = True
-            except ValueError:
-                pass
-
-        # otherwise assume it's a slug
-        if not found_identifier_format:
-            study_query = study_query.filter(slug=identifier)
+        study_query = study_query.filter(build_study_id_q('', identifier))
 
     # apply standard filtering options, but skip ID-based filtering we've just finished
     if not skip_non_id_filtering:
@@ -1590,34 +1568,43 @@ class StudyStrainsView(viewsets.ReadOnlyModelViewSet):
         return strain_query
 
 
-class LinesView(mixins.ListModelMixin, GenericViewSet):
+class LinesViewSet(CustomFilteringMixin, viewsets.ReadOnlyModelViewSet):
     """
-        API endpoint that allows lines within a study to be searched, viewed, and edited.
-    """
+            API endpoint that allows to be searched, viewed, and edited.
+        """
+    permission_classes = [ImpliedPermissions]
     serializer_class = LineSerializer
     lookup_url_kwarg = 'id'
 
-    def get_object(self):
-        """
-        Overrides the default implementation to provide flexible lookup for Study Lines (either
-        based on local numeric primary key, or based on the strain UUID from ICE
-        """
-        queryset = self.get_queryset()
-
-        # unlike the DRF example code: for consistency in permissions enforcement, just do all the
-        # filtering in get_queryset() and pass empty filters here
-        filters = {}
-        obj = get_object_or_404(queryset, **filters)
-        self.check_object_permissions(self.request, obj)
-        return obj
-
     def get_queryset(self):
         logger.debug('in %(class)s.%(method)s. kwargs=%(kwargs)s' % {
-            'class': LinesView.__name__,
+            'class': StudyLinesView.__name__,
             'method': self.get_queryset.__name__,
             'kwargs': self.kwargs
         })
-        return build_lines_query(self.request, self.kwargs)
+        line_id = self.kwargs.get(self.lookup_url_kwarg, None)
+        return build_lines_query(self.request, self.request.query_params,
+                                 identifier_override=line_id)
+
+
+class StudyLinesView(CustomFilteringMixin, mixins.ListModelMixin, GenericViewSet):
+    """
+        API endpoint that allows lines within a study to be searched, viewed, and edited.
+    """
+    permissions_classes = [ImpliedPermissions]
+    serializer_class = LineSerializer
+    lookup_url_kwarg = 'id'
+
+    def get_queryset(self):
+        logger.debug('in %(class)s.%(method)s. kwargs=%(kwargs)s' % {
+            'class': StudyLinesView.__name__,
+            'method': self.get_queryset.__name__,
+            'kwargs': self.kwargs
+        })
+        line_id = self.kwargs.get(self.lookup_url_kwarg, None)
+        study_id = self.kwargs.get(_STUDY_NESTED_ID_KWARG, None)
+        return build_lines_query(self.request, self.request.query_params, study_id=study_id,
+                                 identifier_override=line_id)
 
     # def create(self, request, *args, **kwargs):
     #     ##############################################################
@@ -1696,16 +1683,24 @@ def _optional_timestamp_filter(queryset, query_params):
     return queryset
 
 
-def build_lines_query(request, query_params, identifier=None,
+def build_lines_query(request, query_params, study_id=None, identifier_override=None,
                       enabling_manage_permissions=USE_STANDARD_PERMISSIONS,
                       requested_study_permission_override=None):
+
+    ###############################################################################################
+    # Build the query based on line-specific search parameters, but don't execute yet
+    ###############################################################################################
     query = Line.objects.all()
 
     # filter by common EDDObject characteristics
-    query = optional_edd_object_filtering(query_params, query, identifier_override=identifier)
+    query = optional_edd_object_filtering(query_params, query,
+                                          identifier_override=identifier_override)
 
-    # apply study and django.contrib.auth permissions
-    query = filter_for_study_permission(
+    if study_id:
+        study_pk = study_internals_initial_query(request, study_id, Line)
+        query = query.filter(study_id=study_pk)
+    else:
+        query = filter_for_study_permission(
             request, query, Line, 'study__',
             enabling_auth_perms=enabling_manage_permissions,
             requested_study_permission_override=requested_study_permission_override)

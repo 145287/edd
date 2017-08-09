@@ -1896,7 +1896,7 @@ def create_study_internals(test_class, study, deepest_model, name_prefix):
     return models
 
 
-def create_everyone_studies(test_class):
+def create_everyone_studies(test_class, deepest_elt):
     """
     Creates studies and nested components that have "everyone read" and "everyone write"
     permissions.
@@ -1913,9 +1913,9 @@ def create_everyone_studies(test_class):
     EveryonePermission.objects.create(study=everyone_write_study,
                                       permission_type=StudyPermission.WRITE)
 
-    read_models = create_study_internals(test_class, everyone_read_study, ASSAYS_RESOURCE_NAME,
+    read_models = create_study_internals(test_class, everyone_read_study, deepest_elt,
                                          'Everyone read ')
-    write_models = create_study_internals(test_class, everyone_write_study, ASSAYS_RESOURCE_NAME,
+    write_models = create_study_internals(test_class, everyone_write_study, deepest_elt,
                                           'Everyone write ')
 
     return read_models, write_models
@@ -1940,6 +1940,7 @@ def define_auth_perms_and_users(test_class, model_name):
                                             is_staff=True,
                                             manage_perms=(test_class.delete_permission,))
 
+
 class StudyInternalsTestMixin(EddApiTestCaseMixin):
     """
     A helper class that supports testing REST API access to data considered to fall under a Study
@@ -1956,7 +1957,6 @@ class StudyInternalsTestMixin(EddApiTestCaseMixin):
     """
     @classmethod
     def setUpTestData(cls):
-        super(StudyInternalsTestMixin, StudyInternalsTestMixin).setUpTestData()
 
         # define placeholder data members to silence style checks for data members created in
         # create_study()
@@ -1977,7 +1977,15 @@ class StudyInternalsTestMixin(EddApiTestCaseMixin):
         cls.staff_deleter = None
 
     def inactive_model_factory(self):
-        # must be overridden by children
+        # must be overridden by children to create a sibling INactive model
+        raise NotImplementedError()
+
+    def sibling_model_factory(self):
+        # must be overridde by children to create a sibling active model
+        raise NotImplementedError()
+
+    @property
+    def resource_name(self):
         raise NotImplementedError()
 
     @property
@@ -2257,21 +2265,35 @@ class StudyInternalsTestMixin(EddApiTestCaseMixin):
                 write_orm_model = self.everyone_write_resource.detail_model
                 self.assert_everyone_get_privileges(write_uris, False, [write_orm_model])
 
-    def assert_detail_read_access(self, detail_uris, everyone_read_uris, everyone_write_uris):
+    def test_detail_read_access(self):
+        """
+            Tests GET detail access, e.g. to /rest/assays/{X}/
+        """
+        print(SEPARATOR)
+        print('%s(): ' % self.test_detail_read_access.__name__)
+        print(SEPARATOR)
 
-        # test that permissions are applied consistently across each URI used to access the nested
+        # create a second active sibling model within the study so our tests of detail access can't
+        # stumble on the same result as search without taking requested pk into
+        # account...this happened during early tests!
+        self.sibling_model_factory()
+
+        # test that permissions are applied consistently across each URI used to access the
         # resource
-        for detail_uri in detail_uris.detail_uris:
+        for detail_uri in self.base_uris.detail_uris:
             logger.debug('Testing detail access at GET %s' % detail_uri)
             self._enforce_study_internals_access(detail_uri, False,
-                                                 study_based=self.study_based_uris)
+                                                 study_based=False)
 
-        # test that study-level "everyone" permissions are applied correctly for nested resources
-        self.assert_everyone_get_privileges(everyone_read_uris, True, everyone_read_uris.detail_model)
+        # test that study-level "everyone" permissions are applied correctly for study internals
+        read = self.everyone_read_resource
+        self.assert_everyone_get_privileges(read.base_uris, True,
+                                            read.detail_model)
+        write = self.everyone_write_resource
+        self.assert_everyone_get_privileges(write.base_uris, True,
+                                            write.detail_model)
 
-        self.assert_everyone_get_privileges(everyone_write_uris, True, everyone_write_uris.detail_model)
-
-        # test that a directly request for a resource returns it even if it's marked inactive
+        # test that a direct request for a resource returns it even if it's marked inactive
         # (which would hide it from the list view by default)
         inactive_resource_uris = self.inactive_model_factory()
         inactive_resource_uri = inactive_resource_uris.detail_uris[0]
@@ -2301,8 +2323,38 @@ class StudyInternalsTestMixin(EddApiTestCaseMixin):
                                                    expected_values=expected_values,
                                                    partial_response=True)
 
+    def test_malformed_uri(self):
+        """
+        Tests that the API correctly identifies a client error in URI input, since code has
+        to deliberately avoid a 500 error for invalid ID's
+        """
+        # build a URL with purposefully malformed study UUID
+        line_list_pattern = '%(base_study_uri)s/%(study_uuid)s/%(nested_lines_uri)s/'
+        uri = line_list_pattern % {
+            'base_study_uri': STUDIES_RESOURCE_URI,
+            'study_uuid': 'None',
+            'nested_lines_uri': self.resource_name,
+        }
 
-class LinesTests(StudyInternalsTestMixin):
+        self._assert_unauthenticated_get_denied(uri)
+        self._assert_authenticated_get_not_found(uri, self.unprivileged_user)
+        self._assert_authenticated_get_not_found(uri, self.superuser)
+
+        # build a URL with purposefully malformed study line UUID
+        line_list_pattern = '%(base_uri)s/%(uuid)s/'
+        uri = line_list_pattern % {
+            'base_uri': STUDIES_RESOURCE_URI,
+            'study_uuid': self.study.pk,
+            'nested_lines_uri': self.resource_name,
+            'uuid': 'None',
+        }
+
+        self._assert_unauthenticated_get_denied(uri)
+        self._assert_authenticated_get_not_found(uri, self.unprivileged_user)
+        self._assert_authenticated_get_not_found(uri, self.superuser)
+
+
+class LinesTests(StudyInternalsTestMixin, APITestCase):
     """
     Tests access controls and HTTP return codes for queries to the nested /rest/studies/{X}/lines/
     REST API resource.
@@ -2325,155 +2377,65 @@ class LinesTests(StudyInternalsTestMixin):
         """
         super(LinesTests, LinesTests).setUpTestData()
 
-        # create the study and associated users & permissions
+        # create a study, associated users, permissions, and internals including a single
+        # active Line
         create_study(cls, True)
-        logger.debug('Study pk = %d' % cls.study.pk)
+        models = create_study_internals(cls, cls.study, LINES_RESOURCE_NAME, 'Active ')
+        cls.parent_model = cls.study
+        cls.detail_model = models.line
+
+        # build up lists of all the valid URI's usable to access the line during the test
+        cls.study_based_uris = models.study_based_uris
+        cls.base_uris = models.base_uris
 
         # create class-level django.util.auth permissions for Lines. This isn't a normal use case,
         # but since EDD supports this configuration, it should be tested.
         define_auth_perms_and_users(cls, 'line')
 
-        # create an active line in the study
-        cls.active_line = Line.objects.create(name='Study line 1',
-                                              study=cls.study)
+        # create studies that use everyone read/write permissions to test Line access via those
+        # permissions
+        read_models, write_models = create_everyone_studies(cls, LINES_RESOURCE_NAME)
+        cls.everyone_read_resource = read_models
+        cls.everyone_write_resource = write_models
 
-        logger.debug('Study lines: %s' % Line.objects.filter(study__pk=cls.study.pk))
+    @property
+    def resource_name(self):
+        return LINES_RESOURCE_NAME
 
-        uri_elts = [LINES_RESOURCE_NAME]
-        create_everyone_studies(cls, uri_elts)
+    @property
+    def privileged_detail_results(self):
+        return self.detail_model
 
-        cls.everyone_read_line_uris = UriBuilder(cls.everyone_read_study,
-                                                 nested_orm_models=[cls.everyone_read_line],
-                                                 uri_elts=uri_elts)
+    @property
+    def privileged_study_list_values(self):
+        return [self.detail_model]
 
-        cls.everyone_write_line_uris = UriBuilder(cls.everyone_write_study,
-                                                  nested_orm_models=[cls.everyone_write_line],
-                                                  uri_elts=uri_elts)
+    @property
+    def privileged_base_list_values(self):
+        return [self.detail_model,
+                self.everyone_read_resource.detail_model,
+                self.everyone_write_resource.detail_model]
+
+    @property
+    def unprivileged_base_list_values(self):
+        return [self.everyone_read_resource.detail_model,
+                self.everyone_write_resource.detail_model]
 
     @property
     def values_converter(self):
         return line_to_json_dict
 
-    def test_malformed_uri(self):
-        """
-        Tests that the API correctly identifies a client error in URI input, since code has
-        to deliberately avoid a 500 error for invalid ID's
-        """
-        # build a URL with purposefully malformed study UUID
-        line_list_pattern = '%(base_study_uri)s/%(study_uuid)s/%(nested_lines_uri)s/'
-        url = line_list_pattern % {
-            'base_study_uri': STUDIES_RESOURCE_URI,
-            'study_uuid': 'None',
-            'nested_lines_uri': LINES_RESOURCE_NAME,
-        }
-
-        self._assert_unauthenticated_client_error(url)
-        self._assert_authenticated_get_client_error(url, self.unprivileged_user)
-
-        # build a URL with purposefully malformed study line UUID
-        line_list_pattern = '%(base_study_uri)s/%(study_uuid)s/%(nested_lines_uri)s/%(line_uuid)s/'
-        url = line_list_pattern % {
-            'base_study_uri': STUDIES_RESOURCE_URI,
-            'study_uuid': self.study.pk,
-            'nested_lines_uri': LINES_RESOURCE_NAME,
-            'line_uuid': 'None',
-        }
-
-        self._assert_unauthenticated_client_error(url)
-        self._assert_authenticated_get_client_error(url, self.unprivileged_user)
-
-        # build a URL with valid / accessible line ID that doesn't exist in this study -- verify
-        # the line isn't accessible build a URL with purposefully malformed study line UUID
-        inaccessible_line = Line.objects.create('Not in this study')
-        line_list_pattern = '%(base_study_uri)s/%(study_uuid)s/%(nested_lines_uri)s/%(line_uuid)s/'
-        url = line_list_pattern % {
-            'base_study_uri': STUDIES_RESOURCE_URI,
-            'study_uuid': self.study.pk,
-            'nested_lines_uri': LINES_RESOURCE_NAME,
-            'line_uuid': inaccessible_line.pk,
-        }
-
-        self._assert_unauthenticated_client_error(url)
-        self._assert_authenticated_get_client_error(url, self.superuser)
-
-    def test_study_list_read_access(self):
-        """
-            Tests GET /rest/studies/
-        """
-        print(SEPARATOR)
-        print('%s(): ' % self.test_study_list_read_access.__name__)
-        print(SEPARATOR)
-
-        # test basic use for a single study
-        study_line_urls = make_study_url_variants(self.study, nested_resource_url='lines')
-
-        self._enforce_study_internals_list(study_line_urls)
-
-        if self.study_based_uris:
-
-            # test that study-level "everyone" permissions are correctly applied
-            self.assert_everyone_get_privileges(self.everyone_read_line_uris,
-                                                False,
-                                                [self.everyone_read_line])
-
-            self.assert_everyone_get_privileges(self.everyone_write_line_uris,
-                                                False,
-                                                [self.everyone_write_line])
-
-    def test_line_detail_read_access(self):
-        """
-            Tests GET /rest/studies/{X}/lines/{Y}
-        """
-        print(SEPARATOR)
-        print('%s(): ' % self.test_line_detail_read_access.__name__)
-        print(SEPARATOR)
-
-        # create a second active line in the study so our tests of line detail access can't stumble
-        # on the same result as search without taking requested line pk into account...this
-        # happened during early tests!
-        temp_line = Line.objects.create(name='Other active line',
-                                        study=self.study,
-                                        active=True)
-
-        # build up a list of all the valid URL's by which the study details can be accessed
-        line_detail_urls = make_study_url_variants(self.study,
-                                                   nested_resource_url=LINES_RESOURCE_NAME,
-                                                   nested_resource=self.active_line)
-
-        # test that permissions are applied consistently across each URL used to access the study
-        # / line
-        for study_lines_url in line_detail_urls:
-            logger.debug('Testing line detail access at %s' % study_lines_url)
-            self._enforce_study_internals_access(study_lines_url,
-                                                 expected_privileged_vals=self.active_line)
-
-        # test that study-level "everyone" permissions are applied correctly for nested lines
-        self.assert_everyone_get_privileges(self.everyone_read_line_uris,
-                                            is_detail=True,
-                                            expected_values=self.everyone_read_line)
-        self.assert_everyone_get_privileges(self.everyone_write_line_uris,
-                                            is_detail=True,
-                                            expected_values=self.everyone_write_line)
-
-        # test that a directly request for a line returns it even if it's marked inactive (which
-        # would hide it from
-        # the list view by default)
+    def inactive_model_factory(self):
+        # create an inactive assay
         inactive_line = Line.objects.create(name='Inactive line',
                                             study=self.study,
                                             active=False)
-        inactive_line_url = '/rest/studies/%(study_id)s/lines/%(line_id)s/' % {
-            'study_id': self.study.pk,
-            'line_id': inactive_line.pk}
+        return UriBuilder(None,
+                          nested_orm_models=[inactive_line],
+                          uri_elts=[LINES_RESOURCE_NAME])
 
-        logger.debug('testing inactive line detail access at %s' % inactive_line_url)
-
-        self._assert_authenticated_get_allowed(inactive_line_url,
-                                               self.study_read_only_user,
-                                               expected_values=inactive_line,
-                                               partial_response=True)
-
-        temp_line.delete()
-        inactive_line.delete()
+    def sibling_model_factory(self):
+        Line.objects.create(name='Study line 1', study=self.study)
 
 
 class UriBuilder(object):
@@ -2530,8 +2492,9 @@ class UriBuilder(object):
 
 class AssaysTests(StudyInternalsTestMixin, APITestCase):
     """
-    Tests access controls and HTTP return codes for queries to the /rest/studies/{X}/assays/ (list)
-    and /rest/assays/{X}/ (list + detail view)
+    Tests access controls, HTTP return codes, and content for queries to
+    /rest/studies/{X}/assays/ (list) and
+    /rest/assays/{X}/ (list + detail view)
     """
     @classmethod
     def setUpTestData(cls):
@@ -2554,9 +2517,13 @@ class AssaysTests(StudyInternalsTestMixin, APITestCase):
 
         # create studies that use everyone read/write permissions to test Assay access via those
         # permissions
-        read_models, write_models = create_everyone_studies(cls)
+        read_models, write_models = create_everyone_studies(cls, ASSAYS_RESOURCE_NAME)
         cls.everyone_read_resource = read_models
         cls.everyone_write_resource = write_models
+
+    @property
+    def resource_name(self):
+        return ASSAYS_RESOURCE_NAME
 
     @property
     def privileged_detail_results(self):
@@ -2590,6 +2557,12 @@ class AssaysTests(StudyInternalsTestMixin, APITestCase):
         return UriBuilder(None,
                           nested_orm_models=[inactive_assay],
                           uri_elts=[ASSAYS_RESOURCE_NAME])
+
+    def sibling_model_factory(self):
+        Assay.objects.create(name='Other active assay',
+                             line=self.parent_model,
+                             protocol=self.protocol,
+                             active=True)
 
     def verify_filtering_options(self):
         # create another assay using a different protocol so we can test protocol filtering
@@ -2629,28 +2602,6 @@ class AssaysTests(StudyInternalsTestMixin, APITestCase):
             expected_values=[metabolomics_assay],
             request_params={'protocol': [self.protocol.pk, protocol2.pk]},
             partial_response=True)
-
-    def test_assay_detail_read_access(self):
-        """
-            Tests GET /rest/assays/{X}/
-        """
-        print(SEPARATOR)
-        print('%s(): ' % self.test_assay_detail_read_access.__name__)
-        print(SEPARATOR)
-
-        # create a second active assay in the study so our tests of detail access can't
-        # stumble on the same result as search without taking requested assay pk into
-        # account...this happened during early tests!
-        temp_assay = Assay.objects.create(name='Other active assay',
-                                          line=self.parent_model,
-                                          protocol=self.protocol,
-                                          active=True)
-
-        self.assert_detail_read_access(self.base_uris,
-                                       self.everyone_read_resource.base_uris,
-                                       self.everyone_write_resource.base_uris)
-
-        temp_assay.delete()
 
 
 class MeasurementsTests(StudyInternalsTestMixin):
