@@ -372,25 +372,10 @@ def filter_id_list(query, filter_param_name, model_field_name, requested_filter_
     })
 
 
-class MeasurementsViewSet(viewsets.ReadOnlyModelViewSet):
+class MeasurementsViewSet(CustomFilteringMixin, viewsets.ReadOnlyModelViewSet):
     permission_classes = [ImpliedPermissions]
     serializer_class = MeasurementSerializer
     lookup_url_kwarg = 'id'
-    # TODO: sort out weird router/View.lookup_url_kwarg naming for double-nesting
-
-    def get_object(self):
-        """
-        Overrides the default implementation to provide flexible lookup for Assay detail
-        views (either based on local numeric primary key, or UUID)
-        """
-        queryset = self.get_queryset()
-
-        # unlike the DRF example code: for consistency in permissions enforcement, just do all the
-        # filtering in get_queryset() and pass empty filters here
-        filters = {}
-        obj = get_object_or_404(queryset, **filters)
-        self.check_object_permissions(self.request, obj)
-        return obj
 
     def get_queryset(self):
 
@@ -405,52 +390,99 @@ class MeasurementsViewSet(viewsets.ReadOnlyModelViewSet):
 
         logger.debug('query_params: %s' % self.request.query_params)
 
-        # query study/line/assay relationships first to apply study-level permissions to nested
-        # measurements
-        assay_pk_query = study_internals_initial_query(
-            self.request,
-            self.kwargs,
-            _STUDY_NESTED_ID_KWARG,
-            line_url_kwarg=_LINE_NESTED_ID_KWARG,
-            assay_url_kwarg=_ASSAY_NESTED_ID_KWARG)
-
-        # construct an initial measurement query that verifies the Measurement's
-        # relationship back to the study/line/assay where we've verified user permissions.
-        query_params = self.request.query_params
         measurement_id = self.kwargs.get(self.lookup_url_kwarg)
-        meas_query = Measurement.objects.filter(assay_id=assay_pk_query.get())
+        return build_measurements_query(self.request, self.request.query_params,
+                                        identifier_override=measurement_id)
 
-        # layer on optional filtering on measurement-specific attributes
 
-        # type
-        measurement_type_filter = query_params.get('measurement_type')
-        meas_query = filter_id_list(meas_query, 'measurement_type', 'measurement_type_id',
-                                    measurement_type_filter)
+class StudyMeasurementsViewSet(CustomFilteringMixin, mixins.ListModelMixin, GenericViewSet):
+    permission_classes = [ImpliedPermissions]
+    serializer_class = MeasurementSerializer
+    lookup_url_kwarg = 'id'
 
-        # x-units
-        x_units_filter = query_params.get('x_units')
-        meas_query = filter_id_list(meas_query, 'x_units', 'x_units_id', x_units_filter)
+    def get_queryset(self):
 
-        # y-units
-        y_units_filter = query_params.get('y_units')
-        meas_query = filter_id_list(meas_query, 'y_units', 'y_units_id', y_units_filter)
+        logger.debug((_QUERYSET_LOG_MESSAGE + ' query_params=%(query_params)s') % {
+            'class': MeasurementsViewSet.__name__,
+            'url': self.request.path,
+            'cls_method': self.get_queryset.__name__,
+            'http_method': self.request.method,
+            'kwargs': self.kwargs,
+            'query_params': self.request.query_params,
+        })
 
-        # cellular compartment
-        compartment_filter = query_params.get('compartment')
-        if compartment_filter:
-            meas_query = meas_query.filter(compartment=compartment_filter)
+        logger.debug('query_params: %s' % self.request.query_params)
 
-        # format
-        format_filter = query_params.get('meas_format')  # NOTE: "format" is reserved by DRF
-        if format_filter:
-            logger.debug('MEASUREMENT FORMAT filter: %s' % format_filter)
-            meas_query = meas_query.filter(measurement_format=format_filter)
+        study_id = self.kwargs.get(_STUDY_NESTED_ID_KWARG)
+        measurement_id = self.kwargs.get(self.lookup_url_kwarg)
+        return build_measurements_query(self.request,
+                                        self.request.query_params,
+                                        study_id=study_id,
+                                        identifier_override=measurement_id)
 
-        # use standard filtering code to perform ID and metadata-based filtering
-        return optional_edd_object_filtering(query_params,
+
+def build_measurements_query(request, query_params, identifier_override=None,
+                             study_id=None, enabling_manage_permissions=USE_STANDARD_PERMISSIONS,
+                             requested_study_permission_override=None):
+
+    ###########################################################################################
+    # Build the query based on measurement-specific search parameters, but don't execute yet
+    ###########################################################################################
+
+    query_params = request.query_params
+    meas_query = Measurement.objects.all()
+
+    # type
+    measurement_type_filter = query_params.get('measurement_type')
+    meas_query = filter_id_list(meas_query, 'measurement_type', 'measurement_type_id',
+                                measurement_type_filter)
+
+    # x-units
+    x_units_filter = query_params.get('x_units')
+    meas_query = filter_id_list(meas_query, 'x_units', 'x_units_id', x_units_filter)
+
+    # y-units
+    y_units_filter = query_params.get('y_units')
+    meas_query = filter_id_list(meas_query, 'y_units', 'y_units_id', y_units_filter)
+
+    # cellular compartment
+    compartment_filter = query_params.get('compartment')
+    if compartment_filter:
+        meas_query = meas_query.filter(compartment=compartment_filter)
+
+    # format
+    format_filter = query_params.get('meas_format')  # NOTE: "format" is reserved by DRF
+    if format_filter:
+        logger.debug('MEASUREMENT FORMAT filter: %s' % format_filter)
+        meas_query = meas_query.filter(measurement_format=format_filter)
+
+    # use standard filtering code to perform ID and metadata-based filtering
+    meas_query=optional_edd_object_filtering(query_params,
                                              meas_query,
-                                             identifier_override=measurement_id)
+                                             identifier_override=identifier_override)
 
+    ###############################################################################
+    # Add in context-specific permissions checks for the enclosing study/studies
+    ###############################################################################
+
+    # if we a study ID is provided, first check study permissions and raise a 404 if the study
+    # doesn't exist or isn't accessible. This helps allows us to distinguish between 404 for
+    # non-existent / inaccessible studies, return a 200 empty list for valid studies with no
+    # assays, and also to avoid multi-table joins that include more than a single study.
+    if study_id:
+        study_pk = study_internals_initial_query(request, study_id, Measurement)
+        logger.debug('Filtering results to those in study %s' % study_id)
+        meas_query = meas_query.filter(assay__line__study_id=study_pk)
+
+    # otherwise, build study permission checks into the query itself
+    else:
+        logger.debug('No %s identifier found for filtering' % _STUDY_NESTED_ID_KWARG)
+        meas_query = filter_for_study_permission(
+           request, meas_query, Measurement, 'assay__line__study__',
+           enabling_auth_perms=enabling_manage_permissions,
+           requested_study_permission_override=requested_study_permission_override)
+
+    return meas_query
 
 class MeasurementValuesViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [ImpliedPermissions]

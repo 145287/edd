@@ -7,14 +7,14 @@ from jbei.rest.clients.edd.constants import (ASSAYS_RESOURCE_NAME, LINES_RESOURC
                                              MEASUREMENTS_RESOURCE_NAME,
                                              METADATA_GROUPS_RESOURCE_NAME,
                                              METADATA_TYPES_RESOURCE_NAME, SEARCH_RESOURCE_NAME,
-                                             STRAINS_RESOURCE_NAME, STUDIES_RESOURCE_NAME,
-                                             VALUES_RESOURCE_NAME)
+                                             STRAINS_RESOURCE_NAME, STUDIES_RESOURCE_NAME)
 from views import schema_view
-from .views import (AssaysViewSet, StudyAssaysViewSet, StudyLinesView, MeasurementUnitViewSet,
-                    MeasurementsViewSet, LinesViewSet,
-                    MeasurementValuesViewSet, MetadataGroupViewSet, MetadataTypeViewSet,
-                    ProtocolViewSet, SearchViewSet, StrainStudiesView,
-                    StrainViewSet, StudyViewSet, _STRAIN_NESTED_RESOURCE_PARENT_PREFIX)
+from .views import (AssaysViewSet, LinesViewSet, MeasurementUnitViewSet, MeasurementsViewSet,
+                    MetadataGroupViewSet, MetadataTypeViewSet, ProtocolViewSet, SearchViewSet,
+                    StrainStudiesView,
+                    StrainViewSet, StudyAssaysViewSet, StudyLinesView, StudyMeasurementsViewSet,
+                    StudyViewSet,
+                    _STRAIN_NESTED_RESOURCE_PARENT_PREFIX)
 
 ###################################################################################################
 # Define a router for base REST API methods & views
@@ -22,6 +22,7 @@ from .views import (AssaysViewSet, StudyAssaysViewSet, StudyLinesView, Measureme
 base_rest_api_router = rest_routers.DefaultRouter()
 base_rest_api_router.register(ASSAYS_RESOURCE_NAME, AssaysViewSet, 'assays')
 base_rest_api_router.register(LINES_RESOURCE_NAME, LinesViewSet, 'lines')
+base_rest_api_router.register(MEASUREMENTS_RESOURCE_NAME, MeasurementsViewSet, 'measurements')
 base_rest_api_router.register(SEARCH_RESOURCE_NAME, SearchViewSet, 'search')
 # base_rest_api_router.register(LINES_RESOURCE_NAME, SearchLinesViewSet)
 base_rest_api_router.register(STUDIES_RESOURCE_NAME, StudyViewSet, STUDIES_RESOURCE_NAME)
@@ -38,6 +39,8 @@ study_router = nested_routers.NestedSimpleRouter(base_rest_api_router,
                                                  STUDIES_RESOURCE_NAME, lookup='study')
 study_router.register(LINES_RESOURCE_NAME, StudyLinesView, base_name='study-lines')
 study_router.register(ASSAYS_RESOURCE_NAME, StudyAssaysViewSet, base_name='study-assays')
+study_router.register(MEASUREMENTS_RESOURCE_NAME, StudyMeasurementsViewSet,
+                      base_name='study-measurements')
 # study_nested_resources_router.register(STRAINS_RESOURCE_NAME, StudyStrainsView,
 #                                        base_name='study-strains')
 

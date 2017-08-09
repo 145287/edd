@@ -1861,7 +1861,8 @@ def create_study_internals(test_class, study, deepest_model, name_prefix):
         models.build_uris(study, deepest_model)
         return models
 
-    # get / create measurement types, units, etc as needed for measurements
+    # get / create measurement types, units, etc as needed for measurements. Some of these will
+    # be needed in inactive/sibling_model_factory() methods rather than here
     models.protein = ProteinIdentifier.objects.create(accession_id='1|2|3|4',
                                                       length=255,
                                                       mass=1,
@@ -1870,12 +1871,12 @@ def create_study_internals(test_class, study, deepest_model, name_prefix):
     models.ethanol_metabolite = Metabolite.objects.get(type_name='Ethanol')
     models.oxygen_metabolite = Metabolite.objects.get(type_name='O2')
 
-    models.gram_per_liter_units = MeasurementUnit.objects.get(unit_name='g/L')[0]
+    models.gram_per_liter_units = MeasurementUnit.objects.get(unit_name='g/L')
     models.detection_units = MeasurementUnit.objects.get_or_create(unit_name='detections',
-                                                                   display=True)
+                                                                   display=True)[0]
 
     models.hour_units = MeasurementUnit.objects.get(unit_name='hours')
-    models.min_units = MeasurementUnit.objects.get_or_create(unit_name='minutes')
+    models.min_units = MeasurementUnit.objects.get_or_create(unit_name='minutes')[0]
 
     models.measurement = Measurement.objects.create(
         assay=models.assay,
@@ -2356,17 +2357,9 @@ class StudyInternalsTestMixin(EddApiTestCaseMixin):
 
 class LinesTests(StudyInternalsTestMixin, APITestCase):
     """
-    Tests access controls and HTTP return codes for queries to the nested /rest/studies/{X}/lines/
-    REST API resource.
-
-    Study lines should only be accessible by:
-    1) Superusers
-    2) Users who have explicit StudyPermission granted via their individual account or via user
-    group membership.
-
-    Note that these permissions are enforced by a combination of EDD's custom
-    ImpliedPermissions class and StudyLinesView's get_queryset() method, whose non-empty result
-    implies that the requesting user has access to the returned strains.
+    Tests access controls and HTTP return codes for GET requests to
+    /rest/studies/{X}/lines/ (list)
+    /rest/lines/{X} (list + detail view)
     """
 
     @classmethod
@@ -2492,7 +2485,7 @@ class UriBuilder(object):
 
 class AssaysTests(StudyInternalsTestMixin, APITestCase):
     """
-    Tests access controls, HTTP return codes, and content for queries to
+    Tests access controls, HTTP return codes, and content for GET requests to
     /rest/studies/{X}/assays/ (list) and
     /rest/assays/{X}/ (list + detail view)
     """
@@ -2604,19 +2597,11 @@ class AssaysTests(StudyInternalsTestMixin, APITestCase):
             partial_response=True)
 
 
-class MeasurementsTests(StudyInternalsTestMixin):
+class MeasurementsTests(StudyInternalsTestMixin, APITestCase):
     """
-    Tests access controls and HTTP return codes for queries to the nested /rest/studies/{X}/lines/
-    REST API resource.
-
-    Study lines should only be accessible by:
-    1) Superusers
-    2) Users who have explicit StudyPermission granted via their individual account or via user
-    group membership.
-
-    Note that these permissions are enforced by a combination of EDD's custom
-    ImpliedPermissions class and StudyLinesView's get_queryset() method, whose non-empty result
-    implies that the requesting user has access to the returned strains.
+    Tests access controls, HTTP return codes, and content for GET requests to
+    /rest/studies/{X}/measurements/ (list) and
+    /rest/measurements/{X}/ (list + detail view)
     """
 
     @classmethod
@@ -2627,121 +2612,78 @@ class MeasurementsTests(StudyInternalsTestMixin):
         """
         super(MeasurementsTests, MeasurementsTests).setUpTestData()
 
-        # define placeholder data members to silence PyCharm style checks for data members
-        # created in create_study()
-        cls.study = None
-        cls.unprivileged_user = None
-        cls.study_read_only_user = None
-        cls.study_write_only_user = None
-        cls.study_read_group_user = None
-        cls.study_write_group_user = None
-        cls.staff_user = None
-        cls.staff_study_creator = None
-        cls.staff_study_changer = None
-        cls.staff_study_deleter = None
-        cls.superuser = None
-
-        cls.staff_creator = None
-        cls.staff_changer = None
-        cls.staff_deleter = None
-
-        # create the study and associated users & permissions
+        # create a study, associated users, permissions, and internals including a single
+        # active Measurement
         create_study(cls, True)
-        logger.debug('Study pk = %d' % cls.study.pk)
+        models = create_study_internals(cls, cls.study, MEASUREMENTS_RESOURCE_NAME, 'Active ')
+        cls.parent_model = models.assay
+        cls.detail_model = models.measurement
 
-        # create class-level django.util.auth permissions for Assays. This isn't a normal use case,
-        # but since EDD supports this configuration, it should be tested.
-        define_auth_perms_and_users(cls, 'assay')
+        # save refs to other metadata created along the way to making our study
+        cls.ethanol_metabolite = models.ethanol_metabolite
+        cls.oxygen_metabolite = models.oxygen_metabolite
+        cls.detection_units = models.detection_units
+        cls.gram_per_liter_units = models.gram_per_liter_units
+        cls.hour_units = models.hour_units
+        cls.min_units = models.min_units
+        cls.test_protein = models.protein
 
-        # get / create measurement types, units, etc as needed for measurements
-        cls.test_protein = ProteinIdentifier.objects.create(accession_id='1|2|3|4',
-                                                            length=255,
-                                                            mass=1,
-                                                            type_name='Test protein',
-                                                            short_name='test prot')
-        cls.ethanol_metabolite = Metabolite.objects.get(type_name='Ethanol')
-        cls.oxygen_metabolite = Metabolite.objects.get(type_name='O2')
+        # build up lists of all the valid URI's usable to access the measurement during the test
+        cls.study_based_uris = models.study_based_uris
+        cls.base_uris = models.base_uris
 
-        cls.gram_per_liter_units = MeasurementUnit.objects.get(unit_name='g/L')
-        cls.detection_units = MeasurementUnit.objects.create(unit_name='detections',
-                                                             display=True)
+        # create class-level django.util.auth permissions for Measurements. This isn't a normal
+        # use case, but since EDD supports this configuration, it should be tested.
+        define_auth_perms_and_users(cls, 'measurement')
 
-        cls.hour_units = MeasurementUnit.objects.get(unit_name='hours')
-        cls.min_units = MeasurementUnit.objects.create(unit_name='minutes')
+        read_models, write_models = create_everyone_studies(cls, MEASUREMENTS_RESOURCE_NAME)
+        cls.everyone_read_resource = read_models
+        cls.everyone_write_resource = write_models
 
-        cls.protocol = Protocol.objects.create(name='JBEI Proteomics',
-                                               description='Proteomics protocol used @ '
-                                                           'JBEI',
-                                               owned_by=cls.superuser)
+    @property
+    def resource_name(self):
+        return MEASUREMENTS_RESOURCE_NAME
 
-        # create an active Line/Assay/Measurement in the study so we have something to test
-        cls.active_line = Line.objects.create(name='Study line 1',
-                                              study=cls.study)
+    @property
+    def privileged_detail_results(self):
+        return self.detail_model
 
-        cls.active_assay = Assay.objects.create(name='Study assay 1',
-                                                line=cls.active_line,
-                                                protocol=cls.protocol,
-                                                experimenter=cls.study_write_only_user)
+    @property
+    def privileged_study_list_values(self):
+        return [self.detail_model]
 
-        cls.active_measurement = Measurement.objects.create(
-            assay=cls.active_assay,
-            experimenter=cls.study_write_only_user,
-            measurement_type=cls.oxygen_metabolite,
-            x_units=cls.gram_per_liter_units,
-            y_units=cls.hour_units,
-            compartment=_EXTRACELLULAR,
-            measurement_format=_SCALAR,)
+    @property
+    def privileged_base_list_values(self):
+        return [self.detail_model,
+                self.everyone_read_resource.detail_model,
+                self.everyone_write_resource.detail_model]
 
-        logger.debug('Study lines: %s' % ', '.join([str(line.pk) for line in
-                                                    Line.objects.filter(study__pk=cls.study.pk)]))
+    @property
+    def unprivileged_base_list_values(self):
+        return [self.everyone_read_resource.detail_model,
+                self.everyone_write_resource.detail_model]
 
-        cls.uri_elts = [LINES_RESOURCE_NAME, ASSAYS_RESOURCE_NAME, MEASUREMENTS_RESOURCE_NAME]
-        read_uris, write_uris = create_everyone_studies(cls, cls.uri_elts, cls.protocol,
-                                                        measurement_type=cls.ethanol_metabolite,
-                                                        units=cls.gram_per_liter_units)
-        cls.everyone_read_meas_uris = read_uris
-        cls.everyone_write_meas_uris = write_uris
+    @property
+    def values_converter(self):
+        return measurement_to_json_dict
 
-        # build up lists of all the valid URI's usable to access the assays during the test
+    def inactive_model_factory(self):
+        inactive_measurement = Measurement.objects.create(assay=self.parent_model,
+                                                          experimenter=self.study_write_only_user,
+                                                          measurement_type=self.test_protein,
+                                                          x_units=self.detection_units,
+                                                          y_units=self.hour_units,
+                                                          compartment=_INTRACELLULAR,
+                                                          measurement_format=_SCALAR,
+                                                          active=False)
 
-        cls.active_meas_uris = UriBuilder(cls.study,
-                                               nested_orm_models=[cls.active_line,
-                                                                  cls.active_assay,
-                                                                  cls.active_measurement],
-                                               uri_elts=cls.uri_elts)
+        return UriBuilder(None,
+                          nested_orm_models=[inactive_measurement],
+                          uri_elts=[MEASUREMENTS_RESOURCE_NAME])
 
-    def test_measurement_list_read_access(self):
-        """
-            Tests GET /rest/studies/X/assays/
-        """
-        print(SEPARATOR)
-        print('%s(): ' % self.test_measurement_list_read_access.__name__)
-        print(SEPARATOR)
-
-        ###########################################################################################
-        # Test standard use cases for all REST resources...correct results and access privileges
-        ###########################################################################################
-        self._enforce_study_internals_list(self.active_meas_uris, [self.active_measurement])
-
-        # test that study-level "everyone" permissions are correctly applied
-        everyone_read_meas = self.everyone_read_meas_uris.nested_orm_models[-1]
-        self.assert_everyone_get_privileges(self.everyone_read_meas_uris,
-                                            False,
-                                            [everyone_read_meas])
-
-        everyone_write_meas = self.everyone_write_meas_uris.nested_orm_models[-1]
-        self.assert_everyone_get_privileges(self.everyone_write_meas_uris,
-                                            False,
-                                            [everyone_write_meas])
-
-        ###########################################################################################
-        # Test measurement-specific filtering options
-        ###########################################################################################
-
-        # create a second measurement with different characteristics so we can tell that filters
-        # are applied
-        other_measurement = Measurement.objects.create(
-            assay=self.active_assay,
+    def sibling_model_factory(self):
+        return Measurement.objects.create(
+            assay=self.parent_model,
             experimenter=self.study_write_only_user,
             measurement_type=self.ethanol_metabolite,
             x_units=self.detection_units,
@@ -2749,13 +2691,22 @@ class MeasurementsTests(StudyInternalsTestMixin):
             compartment=_INTRACELLULAR,
             measurement_format=_VECTOR, )
 
+    def verify_filtering_options(self):
+        ###########################################################################################
+        # Test measurement-specific filtering options
+        ###########################################################################################
+
+        # create a second measurement with different characteristics so we can tell that filters
+        # are applied
+        other_measurement = self.sibling_model_factory()
+
         # test that single-value measurement type filtering works
-        list_uri = self.active_meas_uris.list_uris[0]
+        list_uri = self.study_based_uris.list_uris[0]
         logger.debug('Testing filtering options at %s' % list_uri)
         self._assert_authenticated_get_allowed(
             list_uri,
             self.superuser,
-            expected_values=[self.active_measurement],
+            expected_values=[self.detail_model],
             request_params={'measurement_type': self.oxygen_metabolite.pk},
             partial_response=True)
 
@@ -2763,7 +2714,7 @@ class MeasurementsTests(StudyInternalsTestMixin):
         self._assert_authenticated_get_allowed(
             list_uri,
             self.superuser,
-            expected_values=[self.active_measurement],
+            expected_values=[self.detail_model],
             request_params={'x_units': self.gram_per_liter_units.pk},
             partial_response=True)
 
@@ -2790,56 +2741,6 @@ class MeasurementsTests(StudyInternalsTestMixin):
             expected_values=[other_measurement],
             request_params={'meas_format': _VECTOR},
             partial_response=True)
-
-    def test_measurement_detail_read_access(self):
-        """
-            Tests GET /rest/studies/{W}/lines/{X}/assays/{Y}/measurements/{Z}/
-        """
-        print(SEPARATOR)
-        print('%s(): ' % self.test_measurement_detail_read_access.__name__)
-        print(SEPARATOR)
-
-        print('Testing all URIs:')
-        for list_uri in self.active_meas_uris.detail_uris:
-            print(list_uri)
-
-        # create a second active measurement in the study so our tests of detail access can't
-        # stumble on the same result as search without taking requested assay pk into
-        # account...this happened during early tests!
-        inactive_measurement = Measurement.objects.create(assay=self.active_assay,
-                                                          experimenter=self.study_write_only_user,
-                                                          measurement_type=self.test_protein,
-                                                          x_units=self.detection_units,
-                                                          y_units=self.hour_units,
-                                                          compartment=_INTRACELLULAR,
-                                                          measurement_format=_SCALAR,
-                                                          active=False)
-
-        self.assert_detail_read_access(self.active_meas_uris,
-                                       self.everyone_read_meas_uris,
-                                       self.everyone_write_meas_uris)
-
-        inactive_measurement.delete()
-
-    @property
-    def values_converter(self):
-        return measurement_to_json_dict
-
-    def inactive_model_factory(self):
-        inactive_measurement = Measurement.objects.create(assay=self.active_assay,
-                                                          experimenter=self.study_write_only_user,
-                                                          measurement_type=self.test_protein,
-                                                          x_units=self.detection_units,
-                                                          y_units=self.hour_units,
-                                                          compartment=_INTRACELLULAR,
-                                                          measurement_format=_SCALAR,
-                                                          active=False)
-
-        return UriBuilder(self.study,
-                               nested_orm_models=[self.active_line,
-                                                  self.active_assay,
-                                                  inactive_measurement],
-                               uri_elts=self.uri_elts)
 
 
 class MeasurementValuesTests(StudyInternalsTestMixin):
