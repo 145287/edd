@@ -24,7 +24,8 @@ from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import mixins, response, schemas, status, viewsets
 from rest_framework.decorators import api_view, renderer_classes
-from rest_framework.exceptions import APIException, ParseError, ValidationError, NotAuthenticated, NotFound
+from rest_framework.exceptions import (APIException, NotAuthenticated, NotFound, ParseError,
+                                       ValidationError)
 from rest_framework.permissions import DjangoModelPermissions, IsAuthenticated
 from rest_framework.relations import StringRelatedField
 from rest_framework.response import Response
@@ -32,36 +33,41 @@ from rest_framework.status import HTTP_403_FORBIDDEN
 from rest_framework.viewsets import GenericViewSet
 from rest_framework_swagger.renderers import OpenAPIRenderer, SwaggerUIRenderer
 
+from jbei.rest.clients.edd.constants import (ACTIVE_STATUS_DEFAULT, ACTIVE_STATUS_PARAM,
+                                             ALT_NAMES_PARAM, CASE_SENSITIVE_PARAM,
+                                             CREATED_AFTER_PARAM, CREATED_BEFORE_PARAM,
+                                             DESCRIPTION_REGEX_PARAM, LOCALE_PARAM,
+                                             METADATA_TYPE_CONTEXT, METADATA_TYPE_GROUP,
+                                             METADATA_TYPE_I18N, METADATA_TYPE_LOCALE,
+                                             METADATA_TYPE_NAME_REGEX, META_KEY_PARAM,
+                                             META_OPERATOR_PARAM, META_SEARCH_PARAM,
+                                             META_VALUE_PARAM, NAME_REGEX_PARAM,
+                                             QUERY_ACTIVE_OBJECTS_ONLY, QUERY_ANY_ACTIVE_STATUS,
+                                             QUERY_INACTIVE_OBJECTS_ONLY,
+                                             SEARCH_TYPE_LINES, SEARCH_TYPE_MEASUREMENT_UNITS,
+                                             SEARCH_TYPE_METADATA_GROUPS,
+                                             SEARCH_TYPE_METADATA_TYPES, SEARCH_TYPE_PARAM,
+                                             SEARCH_TYPE_PROTOCOLS, SEARCH_TYPE_STRAINS,
+                                             SEARCH_TYPE_STUDIES, STRAIN_CASE_SENSITIVE,
+                                             STRAIN_NAME, STRAIN_NAME_REGEX, STRAIN_REGISTRY_ID,
+                                             STRAIN_REGISTRY_URL_REGEX, STUDIES_RESOURCE_NAME,
+                                             TYPE_GROUP_PARAM, UNIT_NAME_PARAM,
+                                             UPDATED_AFTER_PARAM, UPDATED_BEFORE_PARAM)
+from jbei.rest.utils import is_numeric_pk
+from main.models import (Assay, GeneIdentifier, Line, Measurement, MeasurementType,
+                         MeasurementUnit,
+                         MeasurementValue, Metabolite, MetadataGroup, MetadataType, Phosphor,
+                         ProteinIdentifier,
+                         Protocol, Strain, Study, StudyPermission, User)
 from .permissions import (ImpliedPermissions, StudyResourcePermissions,
                           user_has_admin_or_manage_perm)
-from .serializers import (LineSerializer, MeasurementSerializer,
-                          MeasurementValueSerializer, MeasurementUnitSerializer,
-                          MetadataGroupSerializer, MetadataTypeSerializer,
-                          ProtocolSerializer, StrainSerializer, StudySerializer,
-                          UserSerializer, AssaySerializer)
-from jbei.rest.clients.edd.constants import (CASE_SENSITIVE_PARAM, CREATED_AFTER_PARAM,
-                                             CREATED_BEFORE_PARAM, ACTIVE_STATUS_DEFAULT,
-                                             ACTIVE_STATUS_PARAM, METADATA_TYPE_CONTEXT,
-                                             METADATA_TYPE_GROUP, METADATA_TYPE_I18N,
-                                             METADATA_TYPE_LOCALE, METADATA_TYPE_NAME_REGEX,
-                                             QUERY_ACTIVE_OBJECTS_ONLY, QUERY_ANY_ACTIVE_STATUS,
-                                             QUERY_INACTIVE_OBJECTS_ONLY, STRAIN_CASE_SENSITIVE,
-                                             STRAIN_NAME, STRAIN_NAME_REGEX, STRAIN_REGISTRY_ID,
-                                             STRAIN_REGISTRY_URL_REGEX, STUDIES_RESOURCE_NAME, LINES_RESOURCE_NAME,
-                                             STUDY_LINE_NAME_REGEX, UPDATED_AFTER_PARAM,
-                                             UPDATED_BEFORE_PARAM, ACTIVE_STATUS_PARAM,
-                                             NAME_REGEX_PARAM, DESCRIPTION_REGEX_PARAM,
-                                             META_KEY_PARAM, META_OPERATOR_PARAM, META_VALUE_PARAM,
-                                             META_SEARCH_PARAM, SEARCH_TYPE_LINES,
-                                             SEARCH_TYPE_STUDIES, SEARCH_TYPE_MEASUREMENT_UNITS,
-                                             SEARCH_TYPE_METADATA_TYPES, SEARCH_TYPE_PROTOCOLS,
-                                             SEARCH_TYPE_STRAINS, SEARCH_TYPE_METADATA_GROUPS,
-                                             UNIT_NAME_PARAM, ALT_NAMES_PARAM, TYPE_GROUP_PARAM,
-                                             SEARCH_TYPE_PARAM)
-from jbei.rest.utils import is_numeric_pk
-from main.models import (Assay, Line, Measurement, MeasurementValue, MeasurementUnit,
-                         MetadataGroup, MetadataType, Protocol, Strain, Study, StudyPermission,
-                         User)
+from .serializers import (AssaySerializer, LineSerializer, MeasurementSerializer,
+                          MeasurementTypeSerializer, MeasurementUnitSerializer,
+                          MeasurementValueSerializer,
+                          MetadataGroupSerializer, MetadataTypeSerializer, ProtocolSerializer,
+                          StrainSerializer, MetaboliteSerializer, PhosphorSerializer,
+                          ProteinIdSerializer, GeneIdSerializer,
+                          StudySerializer, UserSerializer)
 
 logger = logging.getLogger(__name__)
 
@@ -119,13 +125,14 @@ def schema_view(request):
 
 class CustomPermFilteringMixin(object):
     """
-    A mixin for DRF views that do their own permissions enforcement via queryset result filtering.
+    A mixin for DRF views that do their own permissions enforcement via queryset result filtering
+    (e.g. based on StudyPermissions)
     """
 
     def get_object(self):
         """
-        Overrides the default implementation to provide flexible lookup for Study internals (either
-        based on local numeric primary key, or based on the strain UUID from ICE
+        Overrides the default implementation to provide flexible ID lookup (
+        either based on local numeric primary key, UUID, or slug when appropriate)
         """
         queryset = self.get_queryset()
 
@@ -222,7 +229,7 @@ def build_assays_query(request, query_params, identifier_override=None,
         query = filter_for_study_permission(
             request, query, Assay, 'line__study__',
             enabling_auth_perms=enabling_manage_permissions,
-            requested_study_permission_override=requested_study_permission_override)
+            enabling_auth_perms_override=requested_study_permission_override)
 
     return query
 
@@ -484,7 +491,7 @@ def build_measurements_query(request, query_params, identifier_override=None,
         meas_query = filter_for_study_permission(
            request, meas_query, Measurement, 'assay__line__study__',
            enabling_auth_perms=enabling_manage_permissions,
-           requested_study_permission_override=requested_study_permission_override)
+           enabling_auth_perms_override=requested_study_permission_override)
 
     return meas_query
 
@@ -574,7 +581,7 @@ def build_values_query(request, query_params, id_override=None, study_id=None,
         query = filter_for_study_permission(
             request, query, MeasurementValue, 'measurement__assay__line__study__',
             enabling_auth_perms=enabling_manage_perms,
-            requested_study_permission_override=requested_study_perm_override)
+            enabling_auth_perms_override=requested_study_perm_override)
 
     return query
 
@@ -591,6 +598,94 @@ def opt_foreign_key_filter(model_field_name, queryset, request_params, request_p
                          'key' % {
                             'request_param': request_param_name,
                             'value': filter_value, })
+
+
+class MeasurementTypesViewSet(viewsets.ReadOnlyModelViewSet):
+    permission_classes = [ImpliedPermissions]
+    serializer_class = MeasurementTypeSerializer
+    lookup_url_kwarg = 'id'
+
+    serializer_lookup = {
+        MeasurementType.Group.GENERIC: MeasurementTypeSerializer,
+        MeasurementType.Group.METABOLITE: MetaboliteSerializer,
+        MeasurementType.Group.GENEID: GeneIdSerializer,
+        MeasurementType.Group.PROTEINID: ProteinIdSerializer,
+        MeasurementType.Group.PHOSPHOR: PhosphorSerializer,
+    }
+
+    def get_queryset(self):
+        identifier = self.kwargs.get('pk', None)
+
+        return build_measurement_type_query(self.request, self.request.query_params,
+                                            identifier=identifier)
+
+    def get_serializer_class(self):
+        """
+        Overrides the parent implementation to provide serialization that's dynamically determined
+        by the requested result type
+        """
+        # TODO: investigate whether there's a way to test whether there's a single query result,
+        # then to test its type and return the correct data even though group wasn't specified
+        group = self.request.query_params.get(TYPE_GROUP_PARAM)
+
+        if not group:
+            return MeasurementTypeSerializer
+
+        serializer = self.serializer_lookup.get(group, None)
+        if not serializer:
+            raise NotImplementedError('No serializer is defined for %(param)s "%(value)s"' % {
+                'param': SEARCH_TYPE_PARAM,
+                'value': self.search_type,
+            })
+
+        return serializer
+
+measurement_type_model_classes = {
+        MeasurementType.Group.GENERIC: MeasurementType,
+        MeasurementType.Group.METABOLITE: Metabolite,
+        MeasurementType.Group.GENEID: GeneIdentifier,
+        MeasurementType.Group.PROTEINID: ProteinIdentifier,
+        MeasurementType.Group.PHOSPHOR: Phosphor,
+}
+
+def build_measurement_type_query(request, query_params, identifier=None):
+
+    # if client has provided a group filter, look up and use the appropriate model object
+    # to provide the full level of available detail
+    group_filter = query_params.get(TYPE_GROUP_PARAM)
+    if group_filter and group_filter not in measurement_type_model_classes:
+        raise ValidationError('%(param)s value "%(val)s" is invalid or unsupported' % {
+                              'param': TYPE_GROUP_PARAM,
+                              'val': group_filter,})
+    model_class = measurement_type_model_classes.get(group_filter, MeasurementType)
+
+    query = model_class.objects.all()
+    if identifier:
+        query = query.filter(build_id_q(identifier))
+
+    if request.method in HTTP_MUTATOR_METHODS:
+        require_auth_perm(request, MeasurementType)
+
+    if not query_params:
+        return query
+
+    _TYPE_NAME_PROPERTY = 'type_name'
+    query = _optional_regex_filter(query_params, query, _TYPE_NAME_PROPERTY, NAME_REGEX_PARAM,
+                                   LOCALE_PARAM)
+
+    if group_filter:
+        query = query.filter(type_group=group_filter)
+
+    # sort
+    sort = query_params.get(SORT_PARAM)
+
+    if sort is not None:
+        query = query.order_by(_TYPE_NAME_PROPERTY)
+
+        if sort == REVERSE_SORT_VALUE:
+            query = query.reverse()
+
+    return query
 
 
 class MetadataTypeViewSet(viewsets.ReadOnlyModelViewSet):
@@ -668,7 +763,6 @@ DEFAULT_UNITS_QUERY_PARAM = 'default_units'
 CATEGORIZATION_QUERY_PARAM = 'categorization'
 
 
-# TODO: make writable for users with permission
 class MeasurementUnitViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = MeasurementUnit.objects.all()  # must be defined for DjangoModelPermissions
     serializer_class = MeasurementUnitSerializer
@@ -1278,7 +1372,6 @@ def optional_edd_object_filtering(params, query, skip_id_filtering=False,
         # otherwise, look for identifiers in the search params
         else:
             identifier = params.get('id')
-
             if identifier:
                 query = query.filter(build_id_q('', identifier))
 
@@ -1401,7 +1494,7 @@ def _filter_for_metadata(query, meta_comparison, comparison_num, comparison_coun
 # grant access to the contained lines/metadata/measurements/etc
 def filter_for_study_permission(request, query, result_model_class, study_keyword_prefix,
                                 enabling_auth_perms=USE_STANDARD_PERMISSIONS,
-                                requested_study_permission_override=None):
+                                enabling_auth_perms_override=None):
     """
         A helper method that filters a Queryset to return only results that the requesting user
         should have access to, based on class-level django.auth permissions and on
@@ -1425,10 +1518,10 @@ def filter_for_study_permission(request, query, result_model_class, study_keywor
         logger.debug('User %s is not authenticated' % user)
         raise NotAuthenticated()
 
-    if requested_study_permission_override is None:
+    if enabling_auth_perms_override is None:
         requested_permission = get_requested_study_permission(request.method)
     else:
-        requested_permission = requested_study_permission_override
+        requested_permission = enabling_auth_perms_override
 
     # if user role (e.g. admin) grants access to all studies, we can expose all objects
     # without additional queries
@@ -1437,40 +1530,16 @@ def filter_for_study_permission(request, query, result_model_class, study_keywor
     if has_role_based_permission:
         return query
 
-    # test whether explicit django.contrib.auth permissions allow user to access all results
-    # without having to drill down into case-by-case study or nested relationships that would
-    # grant access to a subset of results
-    if enabling_auth_perms is None:
-        enabling_auth_perms = (
-            ImpliedPermissions.get_standard_enabling_permissions(
-                    request.method, result_model_class))
+    has_auth_permission = require_auth_perm(request, result_model_class, suppress_exception=True,
+                                            enabling_perms_override=enabling_auth_perms_override)
+    if has_auth_permission:
+        return query
 
-    for auth_perm in enabling_auth_perms:
-        if user.has_perm(auth_perm):
-            logger.debug('User %(user)s has DRF permission "%(requested_perm)s" for '
-                         'all %(model_class)s objects, implied via the "%(auth_perm)s" '
-                         'auth permission' % {
-                             'user':              user.username,
-                             'model_class': result_model_class.__name__,
-                             'requested_perm':    requested_permission,
-                             'auth_perm':     auth_perm,
-                         })
-            return query
-
-    logger.debug('User %(user)s has does NOT have DRF permission "%(requested_perm)s" for '
-                 'all %(model_class)s objects. Granting django.contrib.auth permissions would '
-                 'be the any of (%(auth_perm)s)' % {
-                             'user':              user.username,
-                             'model_class': result_model_class.__name__,
-                             'requested_perm':    requested_permission,
-                             'auth_perm':     ', '.join(['"%s"' % perm for perm in
-                                                         enabling_auth_perms])})
-
-    # if user has no global permissions that grant access to all results , filter
+    # if user has no class-level permissions that grant access to all results , filter
     # results to only those exposed in studies the user has read/write
     # access to. This is significantly more expensive, but exposes the same data available
-    # via the UI. Where possible, we should encourage clients to access nested study resources via
-    # /rest/studies/X/Y to avoid these joins.
+    # via the UI. Where possible, we should encourage clients to access nested study
+    # resources via /rest/studies/X/Y to avoid these joins.
 
     # if user is only requesting read access, construct a query that will infer read permission
     # from the existing of either read or write permission
@@ -1484,6 +1553,57 @@ def filter_for_study_permission(request, query, result_model_class, study_keywor
 
 
 NUMERIC_PK_PATTERN = re.compile('^\d+$')
+
+
+def require_auth_perm(request, result_model_class,
+                      suppress_exception=False,
+                      enabling_perms_override=USE_STANDARD_PERMISSIONS):
+    """
+    A helper method to enforce class-level django.contrib.auth permissions. If this method
+    returns without raising an Exception, the user has the required permission.
+    """
+
+    # test whether explicit django.contrib.auth permissions allow user to access all results
+    # without having to drill down into case-by-case study or nested relationships that would
+    # grant access to a subset of results
+    if enabling_perms_override is USE_STANDARD_PERMISSIONS:
+        enabling_perms = (
+            ImpliedPermissions.get_standard_enabling_permissions(
+                request.method, result_model_class))
+    else:
+        enabling_perms = enabling_perms_override
+
+    user = request.user
+    requested_drf_perm = get_requested_study_permission(request.method)
+    for auth_perm in enabling_perms:
+
+        if user.has_perm(auth_perm):
+            logger.debug('User %(user)s has DRF permission "%(requested_perm)s" for '
+                         'all %(model_class)s objects, implied via the "%(auth_perm)s" '
+                         'auth permission' % {
+                             'user': user.username,
+                             'model_class': result_model_class.__name__,
+                             'requested_perm': requested_drf_perm,
+                             'auth_perm': auth_perm,
+                         })
+            return True
+
+    logger.debug('User %(user)s has does NOT have DRF permission "%(requested_perm)s" for '
+                 'all %(model_class)s objects. Granting django.contrib.auth permissions would '
+                 'be the any of (%(auth_perm)s)' % {
+                     'user': user.username,
+                     'model_class': result_model_class.__name__,
+                     'requested_perm': requested_drf_perm,
+                     'auth_perm': ', '.join(['"%s"' % perm for perm in enabling_perms])})
+
+    if suppress_exception:
+        return False
+
+    raise PermissionDenied('User %(user)s does not have required permission to access '
+                           '%(method) %(uri)' % {
+                               'user': user,
+                               'method': request.method,
+                               'uri': request.path, })
 
 # Notes on DRF nested views:
 # lookup_url_kwargs doesn't seem to be used/respected by nested routers in the same way as plain
@@ -1777,7 +1897,7 @@ def build_lines_query(request, query_params, study_id=None, identifier_override=
         query = filter_for_study_permission(
             request, query, Line, 'study__',
             enabling_auth_perms=enabling_manage_permissions,
-            requested_study_permission_override=requested_study_permission_override)
+            enabling_auth_perms_override=requested_study_permission_override)
 
     return query
 

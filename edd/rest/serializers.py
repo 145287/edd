@@ -3,9 +3,12 @@ Defines serializers for EDD's nascent REST API, as supported by the django rest 
 (http://www.django-rest-framework.org/)
 """
 
-from main.models import (Assay, EDDObject, Line, Measurement, MeasurementValue, MeasurementUnit,
-                         MetadataType, MetadataGroup, Protocol, Strain, Study, Update, User, )
 from rest_framework import serializers
+
+from main.models import (Assay, EDDObject, GeneIdentifier, Line, Measurement, MeasurementType,
+                         MeasurementUnit, MeasurementValue, Metabolite, MetadataGroup,
+                         MetadataType, Phosphor,
+                         ProteinIdentifier, Protocol, Strain, Study, Update, User)
 
 
 ###################################################################################################
@@ -17,6 +20,7 @@ class UpdateSerializer(serializers.ModelSerializer):
         fields = ('mod_time', 'mod_by', 'path', 'origin')
         depth = 0
 ###################################################################################################
+_MEASUREMENT_TYPE_FIELDS = ('pk', 'uuid', 'type_name', 'type_group', 'type_source', 'alt_names')
 
 
 class EDDObjectSerializer(serializers.ModelSerializer):
@@ -87,6 +91,44 @@ class MetadataTypeSerializer(serializers.ModelSerializer):
                   'default_value', 'prefix', 'postfix', 'for_context', 'type_class', 'group')
 
 
+class MeasurementTypeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MeasurementType
+        depth = 0
+        fields = _MEASUREMENT_TYPE_FIELDS
+
+
+class MetaboliteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Metabolite
+        depth = 0
+        fields = _MEASUREMENT_TYPE_FIELDS + ('charge', 'carbon_count', 'molar_mass',
+                                             'molecular_formula', 'smiles', 'id_map', 'tags')
+
+
+class ProteinIdSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProteinIdentifier
+        depth = 0
+        fields = _MEASUREMENT_TYPE_FIELDS + ('accession_id', 'length', 'mass')
+
+
+class GeneIdSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = GeneIdentifier
+        depth = 0
+        fields = _MEASUREMENT_TYPE_FIELDS + ('location_in_genome', 'positive_strand',
+                                             'location_start', 'location_end', 'gene_length')
+
+
+class PhosphorSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Phosphor
+        depth = 0
+        fields = _MEASUREMENT_TYPE_FIELDS + ('excitation_wavelength', 'emission_wavelength',
+                                             'reference_type')
+
+
 class MeasurementUnitSerializer(serializers.ModelSerializer):
     class Meta:
         model = MeasurementUnit
@@ -100,6 +142,9 @@ class ProtocolSerializer(serializers.ModelSerializer):
         depth = 0
         fields = ('pk', 'uuid', 'name', 'description', 'owned_by', 'variant_of', 'default_units',
                   'categorization')
+
+
+
 
 
 class MetadataGroupSerializer(serializers.ModelSerializer):

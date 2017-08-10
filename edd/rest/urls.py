@@ -10,7 +10,8 @@ from jbei.rest.clients.edd.constants import (ASSAYS_RESOURCE_NAME, LINES_RESOURC
                                              STRAINS_RESOURCE_NAME, STUDIES_RESOURCE_NAME,
                                              VALUES_RESOURCE_NAME)
 from views import schema_view
-from .views import (AssaysViewSet, LinesViewSet, MeasurementUnitViewSet, MeasurementsViewSet,
+from .views import (AssaysViewSet, LinesViewSet, MeasurementTypesViewSet, MeasurementUnitViewSet,
+                    MeasurementsViewSet,
                     MetadataGroupViewSet, MetadataTypeViewSet, ProtocolViewSet, SearchViewSet,
                     StrainStudiesView, MeasurementValuesViewSet,
                     StrainViewSet, StudyAssaysViewSet, StudyLinesView, StudyMeasurementsViewSet,
@@ -33,6 +34,7 @@ base_rest_api_router.register(r'measurement_units', MeasurementUnitViewSet, 'mea
 base_rest_api_router.register(METADATA_TYPES_RESOURCE_NAME, MetadataTypeViewSet, 'metadata_type')
 base_rest_api_router.register(METADATA_GROUPS_RESOURCE_NAME, MetadataGroupViewSet)
 base_rest_api_router.register(r'protocols', ProtocolViewSet)
+base_rest_api_router.register(r'measurement_types', MeasurementTypesViewSet, 'measurement_types')
 
 ###################################################################################################
 # /rest/studies nested routers
