@@ -117,10 +117,14 @@ def schema_view(request):
     return response.Response(generator.get_schema(request=request))
 
 
-class CustomFilteringMixin(object):
+class CustomPermFilteringMixin(object):
+    """
+    A mixin for DRF views that do their own permissions enforcement via queryset result filtering.
+    """
+
     def get_object(self):
         """
-        Overrides the default implementation to provide flexible lookup for Study Lines (either
+        Overrides the default implementation to provide flexible lookup for Study internals (either
         based on local numeric primary key, or based on the strain UUID from ICE
         """
         queryset = self.get_queryset()
@@ -133,7 +137,7 @@ class CustomFilteringMixin(object):
         return obj
 
 
-class StudyAssaysViewSet(CustomFilteringMixin, mixins.ListModelMixin, GenericViewSet):
+class StudyAssaysViewSet(CustomPermFilteringMixin, mixins.ListModelMixin, GenericViewSet):
     permission_classes = [ImpliedPermissions]
     serializer_class = AssaySerializer
 
@@ -155,7 +159,7 @@ class StudyAssaysViewSet(CustomFilteringMixin, mixins.ListModelMixin, GenericVie
                                   identifier_override=assay_id)
 
 
-class AssaysViewSet(CustomFilteringMixin, viewsets.ReadOnlyModelViewSet):
+class AssaysViewSet(CustomPermFilteringMixin, viewsets.ReadOnlyModelViewSet):
     permission_classes = [ImpliedPermissions]
     serializer_class = AssaySerializer
     lookup_url_kwarg = 'id'
@@ -372,7 +376,7 @@ def filter_id_list(query, filter_param_name, model_field_name, requested_filter_
     })
 
 
-class MeasurementsViewSet(CustomFilteringMixin, viewsets.ReadOnlyModelViewSet):
+class MeasurementsViewSet(CustomPermFilteringMixin, viewsets.ReadOnlyModelViewSet):
     permission_classes = [ImpliedPermissions]
     serializer_class = MeasurementSerializer
     lookup_url_kwarg = 'id'
@@ -395,7 +399,7 @@ class MeasurementsViewSet(CustomFilteringMixin, viewsets.ReadOnlyModelViewSet):
                                         identifier_override=measurement_id)
 
 
-class StudyMeasurementsViewSet(CustomFilteringMixin, mixins.ListModelMixin, GenericViewSet):
+class StudyMeasurementsViewSet(CustomPermFilteringMixin, mixins.ListModelMixin, GenericViewSet):
     permission_classes = [ImpliedPermissions]
     serializer_class = MeasurementSerializer
     lookup_url_kwarg = 'id'
@@ -484,24 +488,11 @@ def build_measurements_query(request, query_params, identifier_override=None,
 
     return meas_query
 
-class MeasurementValuesViewSet(viewsets.ReadOnlyModelViewSet):
+
+class MeasurementValuesViewSet(CustomPermFilteringMixin, viewsets.ReadOnlyModelViewSet):
     permission_classes = [ImpliedPermissions]
     serializer_class = MeasurementValueSerializer
     lookup_url_kwarg = 'id'
-
-    def get_object(self):
-        """
-        Overrides the default implementation to provide flexible lookup for Assay detail
-        views (either based on local numeric primary key, or UUID)
-        """
-        queryset = self.get_queryset()
-
-        # unlike the DRF example code: for consistency in permissions enforcement, just do all the
-        # filtering in get_queryset() and pass empty filters here
-        filters = {}
-        obj = get_object_or_404(queryset, **filters)
-        self.check_object_permissions(self.request, obj)
-        return obj
 
     def get_queryset(self):
 
@@ -516,30 +507,76 @@ class MeasurementValuesViewSet(viewsets.ReadOnlyModelViewSet):
 
         logger.debug('query_params: %s' % self.request.query_params)
 
-        # query study/line/assay relationships first to apply study-level permissions to nested
-        # measurements
-        meas_pk_query = study_internals_initial_query(
-            self.request,
-            self.kwargs,
-            _STUDY_NESTED_ID_KWARG,
-            line_url_kwarg=_LINE_NESTED_ID_KWARG,
-            assay_url_kwarg=_ASSAY_NESTED_ID_KWARG,
-            measurement_url_kwarg=_MEASUREMENT_NESTED_ID_KWARG)
-
-        # construct an initial measurement value query that verifies the value's
-        # relationship back to the study/line/assay/measurement where we've verified user
-        # permissions.
         value_id = self.kwargs.get(self.lookup_url_kwarg)
+        return build_values_query(self.request,
+                                  self.request.query_params,
+                                  id_override=value_id)
 
-        meas_id_q = Q(measurement_id=meas_pk_query.get())
-        if value_id:
-            filter_q = build_id_q('', value_id) & meas_id_q
-        else:
-            filter_q = meas_id_q
-        val_query = MeasurementValue.objects.filter(filter_q)
 
-        # TODO: add some nice-to-have value-based filtering options
-        return val_query
+class StudyValuesViewSet(CustomPermFilteringMixin, mixins.ListModelMixin, GenericViewSet):
+    permission_classes = [ImpliedPermissions]
+    serializer_class = MeasurementValueSerializer
+    lookup_url_kwarg = 'id'
+
+    def get_queryset(self):
+
+        logger.debug((_QUERYSET_LOG_MESSAGE + ' query_params=%(query_params)s') % {
+            'class': MeasurementsViewSet.__name__,
+            'url': self.request.path,
+            'cls_method': self.get_queryset.__name__,
+            'http_method': self.request.method,
+            'kwargs': self.kwargs,
+            'query_params': self.request.query_params,
+        })
+
+        logger.debug('query_params: %s' % self.request.query_params)
+
+        study_id = self.kwargs.get(_STUDY_NESTED_ID_KWARG)
+        value_id = self.kwargs.get(self.lookup_url_kwarg)
+        return build_values_query(self.request,
+                                  self.request.query_params,
+                                  study_id=study_id,
+                                  id_override=value_id)
+
+
+def build_values_query(request, query_params, id_override=None, study_id=None,
+                       enabling_manage_perms=USE_STANDARD_PERMISSIONS,
+                       requested_study_perm_override=None):
+
+    ###################################################################################
+    # Build the query based on value-specific search parameters, but don't execute yet
+    ##################################################################################
+    query = MeasurementValue.objects.all()
+    if id_override:
+        query = query.filter(pk=id_override)
+    else:
+        identifier = query_params.get('id')
+        if identifier:
+            query = query.filter(pk=identifier)
+    query = _optional_updated_filter(query, query_params)
+
+    ###############################################################################
+    # Add in context-specific permissions checks for the enclosing study/studies
+    ###############################################################################
+
+    # if we a study ID is provided, first check study permissions and raise a 404 if the study
+    # doesn't exist or isn't accessible. This helps allows us to distinguish between 404 for
+    # non-existent / inaccessible studies, return a 200 empty list for valid studies with no
+    # assays, and also to avoid multi-table joins that include more than a single study.
+    if study_id:
+        study_pk = study_internals_initial_query(request, study_id, MeasurementValue)
+        logger.debug('Filtering results to those in study %s' % study_id)
+        query = query.filter(measurement__assay__line__study_id=study_pk)
+
+    # otherwise, build study permission checks into the query itself
+    else:
+        logger.debug('No %s identifier found for filtering' % _STUDY_NESTED_ID_KWARG)
+        query = filter_for_study_permission(
+            request, query, MeasurementValue, 'measurement__assay__line__study__',
+            enabling_auth_perms=enabling_manage_perms,
+            requested_study_permission_override=requested_study_perm_override)
+
+    return query
 
 
 def opt_foreign_key_filter(model_field_name, queryset, request_params, request_param_name):
@@ -552,9 +589,8 @@ def opt_foreign_key_filter(model_field_name, queryset, request_params, request_p
     except ValueError:
         raise ParseError('%(request_param)s value "%(value)s" is not a valid integer primary '
                          'key' % {
-            'request_param': request_param_name,
-            'value': filter_value,
-        })
+                            'request_param': request_param_name,
+                            'value': filter_value, })
 
 
 class MetadataTypeViewSet(viewsets.ReadOnlyModelViewSet):
@@ -1600,7 +1636,7 @@ class StudyStrainsView(viewsets.ReadOnlyModelViewSet):
         return strain_query
 
 
-class LinesViewSet(CustomFilteringMixin, viewsets.ReadOnlyModelViewSet):
+class LinesViewSet(CustomPermFilteringMixin, viewsets.ReadOnlyModelViewSet):
     """
             API endpoint that allows to be searched, viewed, and edited.
         """
@@ -1619,7 +1655,7 @@ class LinesViewSet(CustomFilteringMixin, viewsets.ReadOnlyModelViewSet):
                                  identifier_override=line_id)
 
 
-class StudyLinesView(CustomFilteringMixin, mixins.ListModelMixin, GenericViewSet):
+class StudyLinesView(CustomPermFilteringMixin, mixins.ListModelMixin, GenericViewSet):
     """
         API endpoint that allows lines within a study to be searched, viewed, and edited.
     """
@@ -1695,14 +1731,7 @@ def _optional_timestamp_filter(queryset, query_params):
             queryset = queryset.filter(created__mod_time__lt=created_before_value)
 
         # filter by last update timestamp
-        updated_after = query_params.get(UPDATED_AFTER_PARAM, None)
-        updated_before = query_params.get(UPDATED_BEFORE_PARAM, None)
-        if updated_after:
-            query_param_name, value = UPDATED_AFTER_PARAM, updated_after
-            queryset = queryset.filter(updated__mod_time__gte=updated_after)
-        if updated_before:
-            query_param_name, value = UPDATED_BEFORE_PARAM, updated_before
-            queryset = queryset.filter(updated__mod_time__lt=updated_before)
+        queryset = _optional_updated_filter(queryset, query_params)
 
     # if user provided a date in a format Django doesn't understand,
     # re-raise in a way that makes the client error apparent
@@ -1711,6 +1740,19 @@ def _optional_timestamp_filter(queryset, query_params):
             'param': query_param_name,
             'value': value,
         })
+
+    return queryset
+
+
+def _optional_updated_filter(queryset, query_params):
+    updated_after = query_params.get(UPDATED_AFTER_PARAM, None)
+    updated_before = query_params.get(UPDATED_BEFORE_PARAM, None)
+    if updated_after:
+        query_param_name, value = UPDATED_AFTER_PARAM, updated_after
+        queryset = queryset.filter(updated__mod_time__gte=updated_after)
+    if updated_before:
+        query_param_name, value = UPDATED_BEFORE_PARAM, updated_before
+        queryset = queryset.filter(updated__mod_time__lt=updated_before)
 
     return queryset
 
