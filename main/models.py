@@ -1830,6 +1830,10 @@ class MeasurementType(models.Model, EDDSerialize):
     def is_phosphor(self):
         return self.type_group == MeasurementType.Group.PHOSPHOR
 
+    @classmethod
+    def get_model_class(cls, type_group):
+        return cls._GROUP_TO_MODEL_CLASS.get(type_group)
+
     # TODO: replace use of this in tests, then remove
     @classmethod
     def create_protein(cls, type_name, short_name=None):
@@ -2181,6 +2185,14 @@ class Phosphor(MeasurementType):
         # force PHOSPHOR group
         self.type_group = MeasurementType.Group.PHOSPHOR
         super(Phosphor, self).save(*args, **kwargs)
+
+
+_GROUP_TO_MODEL_CLASS = {
+        MeasurementType.Group.GENERIC: MeasurementType,
+        MeasurementType.Group.METABOLITE: Metabolite,
+        MeasurementType.Group.GENEID: GeneIdentifier,
+        MeasurementType.Group.PROTEINID: ProteinIdentifier,
+        MeasurementType.Group.PHOSPHOR: Phosphor, }
 
 
 @python_2_unicode_compatible

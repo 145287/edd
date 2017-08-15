@@ -11,9 +11,9 @@ from jbei.rest.clients.edd.constants import (ASSAYS_RESOURCE_NAME, LINES_RESOURC
                                              VALUES_RESOURCE_NAME)
 from views import schema_view
 from .views import (AssaysViewSet, LinesViewSet, MeasurementTypesViewSet, MeasurementUnitViewSet,
-                    MeasurementsViewSet,
+                    MeasurementsViewSet, search_test_view,
                     MetadataGroupViewSet, MetadataTypeViewSet, ProtocolViewSet, SearchViewSet,
-                    StrainStudiesView, MeasurementValuesViewSet,
+                    StrainStudiesView, MeasurementValuesViewSet, not_found_view,
                     StrainViewSet, StudyAssaysViewSet, StudyLinesView, StudyMeasurementsViewSet,
                     StudyValuesViewSet, StudyViewSet,
                     _STRAIN_NESTED_RESOURCE_PARENT_PREFIX)
@@ -26,8 +26,7 @@ base_rest_api_router.register(ASSAYS_RESOURCE_NAME, AssaysViewSet, 'assays')
 base_rest_api_router.register(LINES_RESOURCE_NAME, LinesViewSet, 'lines')
 base_rest_api_router.register(MEASUREMENTS_RESOURCE_NAME, MeasurementsViewSet, 'measurements')
 base_rest_api_router.register(VALUES_RESOURCE_NAME, MeasurementValuesViewSet, 'values')
-base_rest_api_router.register(SEARCH_RESOURCE_NAME, SearchViewSet, 'search')
-# base_rest_api_router.register(LINES_RESOURCE_NAME, SearchLinesViewSet)
+#base_rest_api_router.register(SEARCH_RESOURCE_NAME, SearchViewSet, 'search')
 base_rest_api_router.register(STUDIES_RESOURCE_NAME, StudyViewSet, STUDIES_RESOURCE_NAME)
 base_rest_api_router.register(STRAINS_RESOURCE_NAME, StrainViewSet, STRAINS_RESOURCE_NAME)
 base_rest_api_router.register(r'measurement_units', MeasurementUnitViewSet, 'measurement_units')
@@ -72,7 +71,7 @@ urlpatterns = [
     url(r'^', include(study_router.urls)),
     url(r'^', include(strain_nested_resources_router.urls)),
     url(r'^', include('rest_framework.urls', namespace='rest_framework')),
+    url(r'search_lines_test/', search_test_view),
     url(r'docs/', schema_view),
-
-
+#    url(r'^', not_found_view), # TODO: this improves consistency, but stops the docs from working
 ]

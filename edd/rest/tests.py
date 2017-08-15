@@ -27,7 +27,8 @@ from rest_framework.status import (HTTP_200_OK, HTTP_201_CREATED, HTTP_400_BAD_R
                                    HTTP_405_METHOD_NOT_ALLOWED)
 from rest_framework.test import APITestCase
 
-from edd.rest.views import SEARCH_TYPE_PARAM
+from edd.rest.views import (SEARCH_TYPE_PARAM, key_lookup_pattern, key_lookup_regex,
+                            non_key_lookup_pattern, non_key_lookup_regex)
 from jbei.rest.clients.edd.constants import (ACTIVE_STATUS_PARAM, CASE_SENSITIVE_PARAM,
                                              CREATED_AFTER_PARAM, CREATED_BEFORE_PARAM,
                                              DESCRIPTION_REGEX_PARAM, LINES_RESOURCE_NAME,
@@ -87,7 +88,7 @@ PLAINTEXT_TEMP_USER_PASSWORD = 'password'
 
 STRAINS_RESOURCE_URL = '/rest/%(resource)s' % {'resource': STRAINS_RESOURCE_NAME}
 STUDIES_RESOURCE_URI = '/rest/%(resource)s' % {'resource': STUDIES_RESOURCE_NAME}
-SEARCH_RESOURCE_URL = '/rest/search'
+LINES_SEARCH_RESOURCE_URL = '/rest/lines'
 
 DRF_UPDATE_ACTION = 'update'
 DRF_CREATE_ACTION = 'create'
@@ -173,12 +174,14 @@ class EddApiTestCaseMixin(object):
         return self._do_post(url, user, post_data, HTTP_201_CREATED,
             expected_values=required_response, partial_response=partial_response)
 
-    def _assert_authenticated_search_allowed(self, url, user, post_data,
+    def _assert_authenticated_search_allowed(self, url, user,
                                              expected_values=None,
                                              partial_response=False,
                                              request_params=None):
-        return self._do_post(url, user, post_data, HTTP_200_OK, expected_values=expected_values,
-            partial_response=partial_response, request_params=request_params)
+        return self._do_get(url, user, HTTP_200_OK,
+                            expected_values=expected_values,
+                            partial_response=partial_response,
+                            request_params=request_params)
 
     def _assert_authenticated_put_allowed(self, url, user, put_data,
                                           expected_values=None, partial_response=False):
@@ -259,6 +262,7 @@ class EddApiTestCaseMixin(object):
                                       expected_values=expected_values,
                                       partial_response=partial_response)
         self.client.logout()
+        return response
 
     def _compare_expected_values(self, url, method, user, response, expected_status,
                                  expected_values=None, partial_response=False):
@@ -385,7 +389,7 @@ class EddApiTestCaseMixin(object):
         self.assertEquals(None, content_dict['next'])
 
 
-class StrainResourceTests(EddApiTestCaseMixin):
+class StrainResourceTests(EddApiTestCaseMixin, APITestCase):
     """
     Tests access controls and HTTP return codes for queries to the /rest/strains/ REST API resource
 
@@ -1085,10 +1089,6 @@ def line_to_json_dict(line):
 
     # define common EddObject attributes
     edd_obj_to_json_dict(line, val)
-
-    print('Test-serialized line')
-    from pprint import pprint
-    pprint(val)
     return val
 
 
@@ -1186,7 +1186,7 @@ def _create_user(username, email='staff.study@localhost',
     return user
 
 
-class StudiesTests(EddApiTestCaseMixin):
+class StudiesTests(EddApiTestCaseMixin, APITestCase):
     """
     Tests access controls and HTTP return codes for queries to the base /rest/studies REST API
     resource (not any nested resources).
@@ -2832,7 +2832,7 @@ class MeasurementValuesTests(StudyInternalsTestMixin, APITestCase):
                                         x=[1], y=[2])
 
 
-class SearchLinesResourceTest(EddApiTestCaseMixin):
+class SearchLinesResourceTest(EddApiTestCaseMixin, APITestCase):
     @property
     def values_converter(self):
         return line_to_json_dict
@@ -2843,9 +2843,13 @@ class SearchLinesResourceTest(EddApiTestCaseMixin):
         Creates strains, users, and study/line combinations to test the REST resource's application
         of user permissions.
         """
-        super(StudiesTests, StudiesTests).setUpTestData()
+        super(cls, cls).setUpTestData()
 
         create_study(cls, create_auth_perms_and_users=True)
+
+        # create class-level django.util.auth permissions for Assays. This isn't a normal use case,
+        # but since EDD supports this configuration, it should be tested.
+        define_auth_perms_and_users(cls, 'assay')
 
         cls.growth_temp = MetadataType.objects.get(type_name='Growth temperature',
                                                    for_context=MetadataType.LINE)
@@ -2866,85 +2870,6 @@ class SearchLinesResourceTest(EddApiTestCaseMixin):
                                                 study=cls.study,
                                                 active=False)
 
-    def test_line_search_permissions(self):
-        """
-            Tests GET /rest/studies/
-        """
-        print(SEPARATOR)
-        print('%s(): ' % self.test_line_search_permissions.__name__)
-        print(SEPARATOR)
-
-        # test basic use for a single study
-        search_url = '%s/' % SEARCH_RESOURCE_URL
-        print("Testing permissions for %s" % search_url)
-
-        search_params = {
-            SEARCH_TYPE_PARAM: 'lines'
-        }
-
-        # verify that unauthenticated users get no access
-        self._assert_unauthenticated_post_denied(search_url, search_params)
-
-        # verify that user with no study access gets zero search results
-        self._assert_authenticated_search_allowed(search_url, self.unprivileged_user,
-                                                  search_params, expected_values=[])
-
-        expected_results = [self.line]
-
-        # verify that users with access to this study can search its lines
-        self._assert_authenticated_search_allowed(search_url,
-                                                  self.study_read_only_user,
-                                                  search_params,
-                                                  expected_values=expected_results,)
-
-        self._assert_authenticated_search_allowed(search_url, self.study_write_only_user,
-                                                  search_params, expected_values=expected_results,)
-
-        self._assert_authenticated_search_allowed(search_url, self.study_read_group_user,
-                                                  search_params, expected_values=expected_results,)
-
-        self._assert_authenticated_search_allowed(search_url, self.study_write_group_user,
-                                                  search_params, expected_values=expected_results,)
-
-        self._assert_authenticated_search_allowed(search_url, self.superuser,
-                                                  post_data=search_params,
-                                                  expected_values=expected_results,)
-
-        # verify that users with class level manage permissions on base study
-        # attributes (e.g. name/description) still don't have access to lines...they need
-        # read/write permissions on individual studies to get the lines.
-        self._assert_authenticated_search_allowed(search_url, self.staff_study_creator,
-                                                  search_params, expected_values=[])
-
-        self._assert_authenticated_search_allowed(search_url, self.staff_study_changer,
-                                                  search_params, expected_values=[])
-
-        self._assert_authenticated_search_allowed(search_url, self.staff_study_deleter,
-                                                  search_params, expected_values=[])
-
-        # create a study everyone can read
-        everyone_read_study = Study.objects.create(name='Readable by everyone')
-        EveryonePermission.objects.create(study=everyone_read_study,
-                                          permission_type=StudyPermission.READ)
-        everyone_read_line = Line.objects.create(name='Everyone read line',
-                                                 study=everyone_read_study)
-        self._assert_authenticated_search_allowed(search_url, self.unprivileged_user,
-                                                  search_params,
-                                                  expected_values=[everyone_read_line],)
-
-        # create a study everyone can write
-        # wait before saving the study to guarantee a different creation/update timestamp
-        everyone_write_study = Study.objects.create(name='Writable be everyone')
-        EveryonePermission.objects.create(study=everyone_write_study,
-                                          permission_type=StudyPermission.WRITE)
-        everyone_write_line = Line.objects.create(name='Everyone read line',
-                                                  study=everyone_read_study)
-
-        self._assert_authenticated_search_allowed(search_url, self.unprivileged_user,
-                                                  search_params,
-                                                  expected_values=[everyone_read_line,
-                                                                   everyone_write_line],)
-
     def test_edd_object_attr_search(self):
         """
             Tests GET /rest/search/ for metadata-based searching. Note that these searches
@@ -2957,7 +2882,7 @@ class SearchLinesResourceTest(EddApiTestCaseMixin):
         print('%s(): ' % self.test_edd_object_attr_search.__name__)
         print(SEPARATOR)
 
-        search_url = '%s/' % SEARCH_RESOURCE_URL
+        search_url = '%s/' % LINES_SEARCH_RESOURCE_URL
         print("Testing EDDObject attribute search using %s" % search_url)
 
         # test that the default search filter returns only active lines.
@@ -2967,26 +2892,30 @@ class SearchLinesResourceTest(EddApiTestCaseMixin):
             SEARCH_TYPE_PARAM: 'lines'
         }
         expected_results = [self.line]
-        self._assert_authenticated_search_allowed(search_url, self.superuser, search_params,
+        self._assert_authenticated_search_allowed(search_url, self.superuser,
+                                                  request_params=search_params,
                                                   expected_values=expected_results)
 
         # test that explicitly requesting only active lines returns the same result as the
         # default search
         search_params[ACTIVE_STATUS_PARAM] = QUERY_ACTIVE_OBJECTS_ONLY
 
-        self._assert_authenticated_search_allowed(search_url, self.superuser, search_params,
+        self._assert_authenticated_search_allowed(search_url, self.superuser,
+                                                  request_params=search_params,
                                                   expected_values=expected_results)
 
         # test that searching for inactive lines works
         search_params[ACTIVE_STATUS_PARAM] = QUERY_INACTIVE_OBJECTS_ONLY
         expected_results = [self.inactive_line]
-        self._assert_authenticated_search_allowed(search_url, self.superuser, search_params,
+        self._assert_authenticated_search_allowed(search_url, self.superuser,
+                                                  request_params=search_params,
                                                   expected_values=expected_results)
 
         # test that searching for all lines works
         search_params[ACTIVE_STATUS_PARAM] = QUERY_ANY_ACTIVE_STATUS
         expected_results = [self.line, self.inactive_line]
-        self._assert_authenticated_search_allowed(search_url, self.superuser, search_params,
+        self._assert_authenticated_search_allowed(search_url, self.superuser,
+                                                  request_params=search_params,
                                                   expected_values=expected_results)
 
         # add another active line so we know name/description searches are actually applied
@@ -2997,14 +2926,16 @@ class SearchLinesResourceTest(EddApiTestCaseMixin):
         search_params.pop(ACTIVE_STATUS_PARAM)
         search_params[NAME_REGEX_PARAM] = 'STRAIN1'
         expected_results = [self.line]
-        self._assert_authenticated_search_allowed(search_url, self.superuser, search_params,
+        self._assert_authenticated_search_allowed(search_url, self.superuser,
+                                                  request_params=search_params,
                                                   expected_values=expected_results)
 
         # test that clients can configure whether the search is case sensitive
         search_params[NAME_REGEX_PARAM] = 'STRAIN1'
         search_params[CASE_SENSITIVE_PARAM] = True
         expected_results = []
-        self._assert_authenticated_search_allowed(search_url, self.superuser, search_params,
+        self._assert_authenticated_search_allowed(search_url, self.superuser,
+                                                  request_params=search_params,
                                                   expected_values=expected_results)
         search_params.pop(NAME_REGEX_PARAM)
         search_params.pop(CASE_SENSITIVE_PARAM)
@@ -3012,30 +2943,76 @@ class SearchLinesResourceTest(EddApiTestCaseMixin):
         # test that the default description search is case insensitive
         search_params[DESCRIPTION_REGEX_PARAM] = 'ION123'
         expected_results = [self.line]
-        self._assert_authenticated_search_allowed(search_url, self.superuser, search_params,
+        self._assert_authenticated_search_allowed(search_url, self.superuser,
+                                                  request_params=search_params,
                                                   expected_values=expected_results)
 
         # test that case-sensitive search param also controls description search
         search_params[CASE_SENSITIVE_PARAM] = True
         expected_results = []
-        self._assert_authenticated_search_allowed(search_url, self.superuser, search_params,
+        self._assert_authenticated_search_allowed(search_url, self.superuser,
+                                                  request_params=search_params,
                                                   expected_values=expected_results)
         search_params.pop(DESCRIPTION_REGEX_PARAM)
         search_params.pop(CASE_SENSITIVE_PARAM)
 
-        # test that pk-based search works
-        search_params['pk'] = self.line.pk
-        expected_results = [self.line]
-        self._assert_authenticated_search_allowed(search_url, self.superuser, search_params,
-                                                  expected_values=expected_results)
-        search_params.pop('pk')
+    def test_edd_objects_meta_search_regexes(self):
+        # key lookup
+        input = '11=200'
+        match = key_lookup_pattern.match(input)
+        self.assertTrue(match)
+        self.assertEquals('11', match.group('key'))
+        self.assertEquals('=', match.group('operator'))
+        self.assertEquals('200', match.group('test'))
 
-        # test that UUID-based search works
-        search_params['uuid'] = self.line.pk
-        expected_results = [self.line]
-        self._assert_authenticated_search_allowed(search_url, self.superuser, search_params,
-                                                  expected_values=expected_results)
-        search_params.pop('uuid')
+        # contains
+        input = 'contains={18: 200}'
+        match = non_key_lookup_pattern.match(input)
+        self.assertTrue(match)
+        self.assertEquals('contains', match.group('operator'))
+        self.assertEquals('{18: 200}', match.group('test'))
+
+        # contained_by
+        input = 'contained_by={18: 200}'
+        match = non_key_lookup_pattern.match(input)
+        self.assertTrue(match)
+        self.assertEquals('contained_by', match.group('operator'))
+        self.assertEquals('{18: 200}', match.group('test'))
+
+        # has_key
+        input = 'has_key=18'
+        match = non_key_lookup_pattern.match(input)
+        self.assertTrue(match)
+        self.assertEquals('has_key', match.group('operator'))
+        self.assertEquals('18', match.group('test'))
+
+        # has_any_keys
+        input = 'has_any_keys=[18, 10]'
+        match = non_key_lookup_pattern.match(input)
+        self.assertTrue(match)
+        self.assertEquals('has_any_keys', match.group('operator'))
+        self.assertEquals('[18, 10]', match.group('test'))
+
+        # has_keys
+        input = 'has_keys=[18, 10]'
+        match = non_key_lookup_pattern.match(input)
+        self.assertTrue(match)
+        self.assertEquals('has_keys', match.group('operator'))
+        self.assertEquals('[18, 10]', match.group('test'))
+
+        # keys
+        input = 'keys__overlap=[18, 10]'
+        match = non_key_lookup_pattern.match(input)
+        self.assertTrue(match)
+        self.assertEquals('keys__overlap', match.group('operator'))
+        self.assertEquals('[18, 10]', match.group('test'))
+
+        # values
+        input = 'values__contains=[18, 10]'
+        match = non_key_lookup_pattern.match(input)
+        self.assertTrue(match)
+        self.assertEquals('values__contains', match.group('operator'))
+        self.assertEquals('[18, 10]', match.group('test'))
 
     def test_edd_object_metadata_search(self):
         """
@@ -3049,102 +3026,109 @@ class SearchLinesResourceTest(EddApiTestCaseMixin):
         print('%s(): ' % self.test_edd_object_metadata_search.__name__)
         print(SEPARATOR)
 
-        search_url = '%s/' % SEARCH_RESOURCE_URL
+        unused_metadata = MetadataType.objects.get(type_name='Flask Volume')
+
+        valid_ops = ['contains', 'contained_by', 'has_key', 'has_any_keys', 'keys', 'values']
+
+        search_url = '%s/' % LINES_SEARCH_RESOURCE_URL
         print("Testing edd object metadata search using %s" % search_url)
 
-        search_params = {
-            SEARCH_TYPE_PARAM: 'lines'
-        }
-        _META_COMPARISON_KEY = 'metadata'
-        _KEY = 'key'
-        _OP = 'op'
-        _TEST = 'test'
+        search_params = {}
+        _META_COMPARISON_KEY = 'meta'
 
-        # add another active line so we know metadata searches are actually applied
+        # add another active line so we know metadata searches are actually applied.
+        # the line created in createTestData() only has growth temperature metadata
         shaking_speed = MetadataType.objects.get(type_name='Shaking speed',
                                                  for_context=MetadataType.LINE)
-        line = Line.objects.create(name='Study no strain line', description='Description456 ',
-                                   study=self.study)
-        line.metadata_add(shaking_speed, 200)
-        line.save()
+
+        _SHAKING_SPEED_VAL = '200'
+        _EXP_GROWTH_TEMP = '37'
+        line_with_shaking_speed = Line.objects.create(
+            name='Study no strain line',
+            description='Description456 ',
+            study=self.study,
+            meta_store={
+                str(shaking_speed.pk): _SHAKING_SPEED_VAL,
+                str(self.growth_temp.pk): _EXP_GROWTH_TEMP,
+            })
+
+        # line.metadata_add(shaking_speed, _SHAKING_SPEED_VAL)
+        # line.save()
 
         # test that simple value equality comparison works
-        search_params[_META_COMPARISON_KEY] = {
-            _KEY: self.growth_temp.pk, _OP: '=', _TEST: '37'
-        }
-        expected_results = [self.line]
-        self._assert_authenticated_search_allowed(search_url, self.superuser, search_params,
+        search_params[_META_COMPARISON_KEY] = '%(meta_pk)s=%(val)s' % {
+            'meta_pk': shaking_speed.pk,
+            'val': _SHAKING_SPEED_VAL, }
+        expected_results = [line_with_shaking_speed]
+        self._assert_authenticated_search_allowed(search_url, self.superuser,
+                                                  request_params=search_params,
                                                   expected_values=expected_results)
 
-        # test that simple value 'contains' comparison works
-        search_params[_META_COMPARISON_KEY] = {
-            _KEY: self.growth_temp.pk, _OP: 'contains', _TEST: '7'
-        }
-        expected_results = [self.line]
-        self._assert_authenticated_search_allowed(search_url, self.superuser, search_params,
+        # test that single-key 'contains' comparison works
+        search_params[_META_COMPARISON_KEY] = '%s__contains=2' % shaking_speed.pk
+        expected_results = [line_with_shaking_speed]
+        self._assert_authenticated_search_allowed(search_url, self.superuser,
+                                                  request_params=search_params,
                                                   expected_values=expected_results)
 
         # test that dict-based 'contains' comparison works
-        search_params[_META_COMPARISON_KEY] = {
-            _OP: 'contains', _TEST: {self.growth_temp.pk: '37'}
-        }
-        expected_results = [self.line]
-        self._assert_authenticated_search_allowed(search_url, self.superuser, search_params,
+        search_params[_META_COMPARISON_KEY] = 'contains=%s' % json.dumps({
+            shaking_speed.pk: _SHAKING_SPEED_VAL})
+        expected_results = [line_with_shaking_speed]
+        self._assert_authenticated_search_allowed(search_url, self.superuser,
+                                                  request_params=search_params,
                                                   expected_values=expected_results)
 
         # test 'contained_by' comparison
         print('Line meta_store: %s' % str(self.line.meta_store))
+        print('Shaking speed meta_store: %s' % str(line_with_shaking_speed.meta_store))
         # test that dict-based 'contained_by' comparison works
-        search_params[_META_COMPARISON_KEY] = {
-            _OP: 'contained_by', _TEST: {
-                self.growth_temp.pk: '37', 1: '2'
-            }
-        }
-        expected_results = [self.line]
+        search_params[_META_COMPARISON_KEY] = 'contained_by=%s' % json.dumps({
+            shaking_speed.pk: _SHAKING_SPEED_VAL,
+            self.growth_temp.pk: _EXP_GROWTH_TEMP,
+            unused_metadata.pk: 2})
+        expected_results = [line_with_shaking_speed, self.line]
         response = self._assert_authenticated_search_allowed(search_url, self.superuser,
-                                                             search_params,
+                                                             request_params=search_params,
                                                              expected_values=expected_results)
         from pprint import pprint
         pprint('Response: %s' % response.content)
 
         # test 'has_key' comparison
-        search_params[_META_COMPARISON_KEY] = {
-            _OP: 'has_key', _TEST: self.growth_temp.pk,
-        }
-        expected_results = [self.line]
-        self._assert_authenticated_search_allowed(search_url, self.superuser, search_params,
+        search_params[_META_COMPARISON_KEY] = 'has_key=%s' % self.growth_temp.pk
+        expected_results = [self.line, line_with_shaking_speed]
+        self._assert_authenticated_search_allowed(search_url, self.superuser,
+                                                  request_params=search_params,
                                                   expected_values=expected_results)
 
         # test 'has_any_keys' comparison
-        search_params[_META_COMPARISON_KEY] = {
-            _OP: 'has_any_keys', _TEST: [self.growth_temp.pk],
-        }
-        expected_results = [self.line]
-        self._assert_authenticated_search_allowed(search_url, self.superuser, search_params,
+        search_params[_META_COMPARISON_KEY] = 'has_any_keys=%s' % [self.growth_temp.pk]
+        expected_results = [self.line, line_with_shaking_speed]
+        self._assert_authenticated_search_allowed(search_url, self.superuser,
+                                                  request_params=search_params,
                                                   expected_values=expected_results)
 
         # test 'has_keys' comparison
-        search_params[_META_COMPARISON_KEY] = {
-            _OP: 'has_keys', _TEST: [self.growth_temp.pk],
-        }
-        expected_results = [self.line]
-        self._assert_authenticated_search_allowed(search_url, self.superuser, search_params,
+        search_params[_META_COMPARISON_KEY] = 'has_keys=%s' % [self.growth_temp.pk,
+                                                               shaking_speed.pk]
+        expected_results = [line_with_shaking_speed]
+        self._assert_authenticated_search_allowed(search_url, self.superuser,
+                                                  request_params=search_params,
                                                   expected_values=expected_results)
 
         # test 'keys' comparison
-        search_params[_META_COMPARISON_KEY] = {
-            _OP: 'keys__overlap', _TEST: [self.growth_temp.pk],
-        }
-        expected_results = [self.line]
-        self._assert_authenticated_search_allowed(search_url, self.superuser, search_params,
+        search_params[_META_COMPARISON_KEY] = 'keys__overlap=%s' % [self.growth_temp.pk]
+        expected_results = [self.line, line_with_shaking_speed]
+        self._assert_authenticated_search_allowed(search_url, self.superuser,
+                                                  request_params=search_params,
                                                   expected_values=expected_results)
 
         # test 'values' comparison
-        search_params[_META_COMPARISON_KEY] = {
-            _OP: 'keys__overlap', _TEST: [self.growth_temp.pk],
-        }
-        expected_results = [self.line]
-        self._assert_authenticated_search_allowed(search_url, self.superuser, search_params,
+        search_params[_META_COMPARISON_KEY] = 'values__contains=%s' % json.dumps(
+            [_SHAKING_SPEED_VAL])
+        expected_results = [line_with_shaking_speed]
+        self._assert_authenticated_search_allowed(search_url, self.superuser,
+                                                  request_params=search_params,
                                                   expected_values=expected_results)
 
     def test_eddobject_timestamp_search(self):
@@ -3152,7 +3136,7 @@ class SearchLinesResourceTest(EddApiTestCaseMixin):
         print('%s(): ' % self.test_eddobject_timestamp_search.__name__)
         print(SEPARATOR)
 
-        search_url = '%s/' % SEARCH_RESOURCE_URL
+        search_url = '%s/' % LINES_SEARCH_RESOURCE_URL
         print("Testing edd object timestamp search using %s" % search_url)
 
         # create some lines with a known minimum time gap between their creation times
@@ -3184,7 +3168,7 @@ class SearchLinesResourceTest(EddApiTestCaseMixin):
         expected_values = [line1, line2, line3]
         self._assert_authenticated_search_allowed(search_url,
                                                   self.superuser,
-                                                  search_params,
+                                                  request_params=search_params,
                                                   expected_values=expected_values)
 
         search_params = {
@@ -3192,7 +3176,8 @@ class SearchLinesResourceTest(EddApiTestCaseMixin):
             UPDATED_AFTER_PARAM: line1.created.mod_time,
         }
         self._assert_authenticated_search_allowed(search_url,
-                                                  self.superuser, search_params,
+                                                  self.superuser,
+                                                  request_params=search_params,
                                                   expected_values=expected_values)
 
         # test single-bounded search where exclusive end boundary is set
@@ -3201,14 +3186,16 @@ class SearchLinesResourceTest(EddApiTestCaseMixin):
             CREATED_BEFORE_PARAM: line3.created.mod_time,
         }
         expected_values = [self.line, line1, line2, ]
-        self._assert_authenticated_search_allowed(search_url, self.superuser, search_params,
+        self._assert_authenticated_search_allowed(search_url, self.superuser,
+                                                  request_params=search_params,
                                                   expected_values=expected_values)
 
         search_params = {
             SEARCH_TYPE_PARAM: 'lines', UPDATED_BEFORE_PARAM: line3.updated.mod_time,
         }
         expected_values = [self.line, line2, line2, ]
-        self._assert_authenticated_search_allowed(search_url, self.superuser, search_params,
+        self._assert_authenticated_search_allowed(search_url, self.superuser,
+                                                  request_params=search_params,
                                                   expected_values=expected_values)
 
         # for good measure, test searches bounded on both ends
@@ -3217,7 +3204,8 @@ class SearchLinesResourceTest(EddApiTestCaseMixin):
             CREATED_AFTER_PARAM: line1.created.mod_time,
             CREATED_BEFORE_PARAM: line2.created.mod_time,
         }
-        self._assert_authenticated_search_allowed(search_url, self.superuser, search_params,
+        self._assert_authenticated_search_allowed(search_url, self.superuser,
+                                                  request_params=search_params,
                                                   expected_values=[line1])
 
         search_params = {
@@ -3225,10 +3213,11 @@ class SearchLinesResourceTest(EddApiTestCaseMixin):
             UPDATED_AFTER_PARAM: line2.updated.mod_time,
             UPDATED_BEFORE_PARAM: line3.updated.mod_time,
         }
-        self._assert_authenticated_search_allowed(search_url, self.superuser, search_params,
+        self._assert_authenticated_search_allowed(search_url, self.superuser,
+                                                  request_params=search_params,
                                                   expected_values=[line2])
 
-    def _assert_authenticated_search_allowed(self, url, user, post_data,
+    def _assert_authenticated_search_allowed(self, url, user,
                                              expected_values=None,
                                              partial_response=True,
                                              request_params=None):
@@ -3237,7 +3226,7 @@ class SearchLinesResourceTest(EddApiTestCaseMixin):
         values_converter and partial_response with repetitive calls
         """
         return super(SearchLinesResourceTest, self)._assert_authenticated_search_allowed(
-                url, user, post_data,
+                url, user,
                 expected_values=expected_values,
                 partial_response=partial_response,
                 request_params=request_params)
