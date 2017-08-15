@@ -287,6 +287,11 @@ def build_study_id_q(prefix, identifier):
 
 
 def build_id_q(prefix, identifier):
+    """
+    Helper method for simplifying repetitive/flexible ID lookup of multiple Django models.
+    :raise: ParseError if identifier isn't a valid integer primary key or UUID
+    """
+    # TODO: optimize by trying data_member_id first if it's an integer
     try:
         id_keyword = '%spk' % prefix
         return Q(**{id_keyword: int(identifier)})
@@ -749,9 +754,10 @@ def build_measurement_units_query(query_params, queryset, identifier=None):
     return queryset
 
 
-class ProtocolViewSet(viewsets.ReadOnlyModelViewSet):
+class ProtocolViewSet(CustomPermFilteringMixin, viewsets.ReadOnlyModelViewSet):
     queryset = Protocol.objects.all()  # must be defined for DjangoModelPermissions
     serializer_class = ProtocolSerializer
+    lookup_url_kwarg = 'id'
 
     # Django model object property (used several times)
     NAME_PROPERTY = 'name'
@@ -763,34 +769,20 @@ class ProtocolViewSet(viewsets.ReadOnlyModelViewSet):
     DEFAULT_UNITS_PROPERTY = 'default_units'
 
     def get_queryset(self):
-        pk = self.kwargs.get('pk', None)
 
         queryset = Protocol.objects.all()
-        if pk:
-            if is_numeric_pk(pk):
-                queryset = queryset.filter(pk=pk)
-            # TODO: revisit / retest UUID-based lookup...not working
-            else:
-                queryset = queryset.filter(uuid=pk)
+        identifier = self.kwargs.get(self.lookup_url_kwarg)
+        if identifier:
+            queryset = queryset.filter(build_id_q('', identifier))
 
         i18n_placeholder = ''  # TODO: implement if I18N implemented for Protocol model
 
         params = self.request.query_params
         if params:
             # owned by
-            owned_by = params.get(OWNED_BY)
-            if is_numeric_pk(owned_by):
-                queryset = queryset.filter(owned_by=owned_by)
-            else:
-                # first try UUID-based input since UUID instantiation is the best way to error
-                # check UUID input
-                try:
-                    queryset = queryset.filter(owned_by__uuid=owned_by)
-                except Exception:
-                    # if this wasn't a valid UUID, assume it's a regex for the username
-                    queryset = _optional_regex_filter(params, queryset, 'owned_by__username',
-                                                      self.OWNED_BY_QUERY_PARAM,
-                                                      i18n_placeholder)
+            owned_by_id = params.get(OWNED_BY)
+            if owned_by_id:
+                queryset = queryset.filter(owned_by=owned_by_id)
 
             # variant of
             variant_of = params.get(VARIANT_OF)
@@ -800,19 +792,8 @@ class ProtocolViewSet(viewsets.ReadOnlyModelViewSet):
             # default units
             default_units = params.get(DEFAULT_UNITS_QUERY_PARAM)
             if default_units:
-                if is_numeric_pk(default_units):
-                    queryset = queryset.filter(default_units=default_units)
-                # first try UUID-based input since UUID instantiation is the best way to error
-                # check UUID input
-                try:
-                    queryset = queryset.filter(default_units__uuid=default_units)
-                except Exception:
-                    # if this wasn't a valid UUID, assume it's a regex for the unit name
+                queryset = queryset.filter(build_id_q('default_units__', default_units))
 
-                    queryset = _optional_regex_filter(params, queryset,
-                                                      'default_units__unit_name',
-                                                      DEFAULT_UNITS_QUERY_PARAM,
-                                                      i18n_placeholder)
             # categorization
             queryset = _optional_regex_filter(params, queryset, 'categorization',
                                               CATEGORIZATION_QUERY_PARAM, i18n_placeholder)
