@@ -27,16 +27,14 @@ from rest_framework.status import (HTTP_200_OK, HTTP_201_CREATED, HTTP_400_BAD_R
                                    HTTP_405_METHOD_NOT_ALLOWED)
 from rest_framework.test import APITestCase
 
-from edd.rest.views import (SEARCH_TYPE_PARAM, key_lookup_pattern, key_lookup_regex,
-                            non_key_lookup_pattern, non_key_lookup_regex)
-from jbei.rest.clients.edd.constants import (ACTIVE_STATUS_PARAM, CASE_SENSITIVE_PARAM,
-                                             CREATED_AFTER_PARAM, CREATED_BEFORE_PARAM,
-                                             DESCRIPTION_REGEX_PARAM, LINES_RESOURCE_NAME,
-                                             ASSAYS_RESOURCE_NAME,
-                                             MEASUREMENTS_RESOURCE_NAME,
-                                             NAME_REGEX_PARAM,
-                                             NEXT_PAGE_KEY, PREVIOUS_PAGE_KEY,
-                                             QUERY_ACTIVE_OBJECTS_ONLY, QUERY_ANY_ACTIVE_STATUS,
+from edd.rest.views import (SEARCH_TYPE_PARAM, _KEY_LOOKUP_PATTERN, _NON_KEY_LOOKUP_PATTERN)
+from jbei.rest.clients.edd.constants import (ACTIVE_STATUS_PARAM, ASSAYS_RESOURCE_NAME,
+                                             CASE_SENSITIVE_PARAM, CREATED_AFTER_PARAM,
+                                             CREATED_BEFORE_PARAM, DESCRIPTION_REGEX_PARAM,
+                                             LINES_RESOURCE_NAME, MEASUREMENTS_RESOURCE_NAME,
+                                             NAME_REGEX_PARAM, NEXT_PAGE_KEY,
+                                             PREVIOUS_PAGE_KEY, QUERY_ACTIVE_OBJECTS_ONLY,
+                                             QUERY_ANY_ACTIVE_STATUS,
                                              QUERY_INACTIVE_OBJECTS_ONLY, RESULTS_KEY,
                                              RESULT_COUNT_KEY, STRAINS_RESOURCE_NAME,
                                              STRAIN_DESCRIPTION_KEY, STRAIN_NAME_KEY,
@@ -49,7 +47,6 @@ from main.models import (Assay, EveryonePermission, GroupPermission, Line, Measu
                          MeasurementUnit, MeasurementValue, Metabolite, MetadataType,
                          ProteinIdentifier, Protocol,
                          Strain, Study, StudyPermission, Update, User, UserPermission, )
-
 
 logger = logging.getLogger(__name__)
 
@@ -172,7 +169,8 @@ class EddApiTestCaseMixin(object):
                                            required_response=None,
                                            partial_response=False):
         return self._do_post(url, user, post_data, HTTP_201_CREATED,
-            expected_values=required_response, partial_response=partial_response)
+                             expected_values=required_response,
+                             partial_response=partial_response)
 
     def _assert_authenticated_search_allowed(self, url, user,
                                              expected_values=None,
@@ -750,8 +748,9 @@ class StrainResourceTests(EddApiTestCaseMixin, APITestCase):
         line1.strains.add(everyone_read_strain)
         line1.save()
 
-        self._assert_authenticated_get_allowed(list_url, self.unprivileged_user,
-            expected_values=[everyone_read_strain])
+        self._assert_authenticated_get_allowed(list_url,
+                                               self.unprivileged_user,
+                                               expected_values=[everyone_read_strain])
 
         # everyone write
         everyone_write_study = Study.objects.create(name='Writable be everyone')
@@ -820,7 +819,8 @@ class StrainResourceTests(EddApiTestCaseMixin, APITestCase):
         EveryonePermission.objects.create(study=everyone_read_study,
                                           permission_type=StudyPermission.READ)
         everyone_read_strain = Strain.objects.create(name='Readable by everyone via study '
-                                                          'read', registry_id=uuid4())
+                                                          'read',
+                                                     registry_id=uuid4())
         line1 = Line.objects.create(name='Everyone read line', study=everyone_read_study)
         line1.strains.add(everyone_read_strain)
         line1.save()
@@ -837,8 +837,9 @@ class StrainResourceTests(EddApiTestCaseMixin, APITestCase):
             # verify that an un-authenticated request gets a 404
             self._assert_unauthenticated_get_denied(everyone_read_url)
 
-            self._assert_authenticated_get_allowed(everyone_read_url, self.unprivileged_user,
-                expected_values=everyone_read_strain)
+            self._assert_authenticated_get_allowed(everyone_read_url,
+                                                   self.unprivileged_user,
+                                                   expected_values=everyone_read_strain)
 
         # everyone write
         everyone_write_study = Study.objects.create(name='Writable be everyone')
@@ -863,8 +864,9 @@ class StrainResourceTests(EddApiTestCaseMixin, APITestCase):
             self._assert_unauthenticated_get_denied(everyone_write_url)
 
             # verify study-level "everyone" permissions allow access to view associated strains
-            self._assert_authenticated_get_allowed(everyone_write_url, self.unprivileged_user,
-                expected_values=everyone_write_strain)
+            self._assert_authenticated_get_allowed(everyone_write_url,
+                                                   self.unprivileged_user,
+                                                   expected_values=everyone_write_strain)
 
 
 def to_paged_result_dict(expected_values, values_converter):
@@ -1001,8 +1003,8 @@ def order_agnostic_result_comparison(testcase, expected_values_list, observed_va
 
 def _compare_partial_value(testcase, exp_value, observed_value, key=None):
     """
-    A helper method for comparing nested JSON query results.  Dictionaries are compared without order taken
-    into consideration, while all other elements are
+    A helper method for comparing nested JSON query results.  Dictionaries are compared without
+    order taken into consideration, while all other elements are
     :param testcase:
     :param exp_value:
     :param observed_value:
@@ -1017,7 +1019,8 @@ def _compare_partial_value(testcase, exp_value, observed_value, key=None):
                 obs_inner = observed_value[unique_key]
                 _compare_partial_value(testcase, exp_inner, obs_inner, key=unique_key)
             except KeyError:
-                err_msg = ('Expected key "%(key)s" to be present, but it was missing. \n\n"Expected: %(expected)s\n\n"'
+                err_msg = ('Expected key "%(key)s" to be present, but it was missing. \n\n'
+                           '"Expected: %(expected)s\n\n"'
                            'Observed: %(observed)s' % {
                                'key': unique_key,
                                'expected': pformat(str(exp_value)),
@@ -1268,28 +1271,42 @@ class StudiesTests(EddApiTestCaseMixin, APITestCase):
             self._assert_authenticated_get_denied(url, self.staff_study_creator)
 
         # test that users / groups with read access can read the study
-        self._assert_authenticated_get_allowed(url, self.study_read_only_user,
-            expected_values=expected_values, partial_response=True)
+        self._assert_authenticated_get_allowed(url,
+                                               self.study_read_only_user,
+                                               expected_values=expected_values,
+                                               partial_response=True)
 
-        self._assert_authenticated_get_allowed(url, self.study_read_group_user,
-            expected_values=expected_values, partial_response=True)
+        self._assert_authenticated_get_allowed(url,
+                                               self.study_read_group_user,
+                                               expected_values=expected_values,
+                                               partial_response=True)
 
         # verify that study write permissions imply read permissions
-        self._assert_authenticated_get_allowed(url, self.study_write_only_user,
-            expected_values=expected_values, partial_response=True)
+        self._assert_authenticated_get_allowed(url,
+                                               self.study_write_only_user,
+                                               expected_values=expected_values,
+                                               partial_response=True)
 
-        self._assert_authenticated_get_allowed(url, self.study_write_group_user,
-            expected_values=expected_values, partial_response=True)
+        self._assert_authenticated_get_allowed(url,
+                                               self.study_write_group_user,
+                                               expected_values=expected_values,
+                                               partial_response=True)
 
         # test that an 'admin' user can access study data without other privileges
-        self._assert_authenticated_get_allowed(url, self.superuser,
-            expected_values=expected_values, partial_response=True)
+        self._assert_authenticated_get_allowed(url,
+                                               self.superuser,
+                                               expected_values=expected_values,
+                                               partial_response=True)
 
         # test that 'staff' users with any study mutator privileges have implied read permission
-        self._assert_authenticated_get_allowed(url, self.staff_study_changer,
-            expected_values=expected_values, partial_response=True)
-        self._assert_authenticated_get_allowed(url, self.staff_study_deleter,
-            expected_values=expected_values, partial_response=True)
+        self._assert_authenticated_get_allowed(url,
+                                               self.staff_study_changer,
+                                               expected_values=expected_values,
+                                               partial_response=True)
+        self._assert_authenticated_get_allowed(url,
+                                               self.staff_study_deleter,
+                                               expected_values=expected_values,
+                                               partial_response=True)
 
     def test_malformed_uri(self):
         """
@@ -1531,8 +1548,11 @@ class StudiesTests(EddApiTestCaseMixin, APITestCase):
 
         request_params = {ACTIVE_STATUS_PARAM: QUERY_INACTIVE_OBJECTS_ONLY}
         logger.debug('request params: %s' % request_params)  # TODO: remove debug stmt
-        self._assert_authenticated_get_allowed(list_url, self.superuser,
-            expected_values=[self.study], request_params=request_params, partial_response=True)
+        self._assert_authenticated_get_allowed(list_url,
+                                               self.superuser,
+                                               expected_values=[self.study],
+                                               request_params=request_params,
+                                               partial_response=True)
 
         # create a study everyone can read
         # wait before saving the study to guarantee a different creation/update timestamp
@@ -1541,8 +1561,10 @@ class StudiesTests(EddApiTestCaseMixin, APITestCase):
         EveryonePermission.objects.create(study=everyone_read_study,
                                           permission_type=StudyPermission.READ)
 
-        self._assert_authenticated_get_allowed(list_url, self.unprivileged_user,
-            expected_values=[everyone_read_study], partial_response=True)
+        self._assert_authenticated_get_allowed(list_url,
+                                               self.unprivileged_user,
+                                               expected_values=[everyone_read_study],
+                                               partial_response=True)
 
         # create a study everyone can write
         # wait before saving the study to guarantee a different creation/update timestamp
@@ -1663,8 +1685,10 @@ class StudiesTests(EddApiTestCaseMixin, APITestCase):
             # verify that an un-authenticated request gets a 404
             self._assert_unauthenticated_get_denied(everyone_read_url)
 
-            self._assert_authenticated_get_allowed(everyone_read_url, self.unprivileged_user,
-                expected_values=everyone_read_study, partial_response=True)
+            self._assert_authenticated_get_allowed(everyone_read_url,
+                                                   self.unprivileged_user,
+                                                   expected_values=everyone_read_study,
+                                                   partial_response=True)
 
         # everyone write
         everyone_write_study = Study.objects.create(name='Writable be everyone')
@@ -1678,8 +1702,10 @@ class StudiesTests(EddApiTestCaseMixin, APITestCase):
             self._assert_unauthenticated_get_denied(everyone_write_url)
 
             # verify study-level "everyone" permissions allow access to view associated strains
-            self._assert_authenticated_get_allowed(everyone_write_url, self.unprivileged_user,
-                expected_values=everyone_write_study, partial_response=True)
+            self._assert_authenticated_get_allowed(everyone_write_url,
+                                                   self.unprivileged_user,
+                                                   expected_values=everyone_write_study,
+                                                   partial_response=True)
 
 
 def create_study(test_class, create_auth_perms_and_users=False):
@@ -2959,7 +2985,7 @@ class SearchLinesResourceTest(EddApiTestCaseMixin, APITestCase):
     def test_edd_objects_meta_search_regexes(self):
         # key lookup
         input = '11=200'
-        match = key_lookup_pattern.match(input)
+        match = _KEY_LOOKUP_PATTERN.match(input)
         self.assertTrue(match)
         self.assertEquals('11', match.group('key'))
         self.assertEquals('=', match.group('operator'))
@@ -2967,49 +2993,49 @@ class SearchLinesResourceTest(EddApiTestCaseMixin, APITestCase):
 
         # contains
         input = 'contains={18: 200}'
-        match = non_key_lookup_pattern.match(input)
+        match = _NON_KEY_LOOKUP_PATTERN.match(input)
         self.assertTrue(match)
         self.assertEquals('contains', match.group('operator'))
         self.assertEquals('{18: 200}', match.group('test'))
 
         # contained_by
         input = 'contained_by={18: 200}'
-        match = non_key_lookup_pattern.match(input)
+        match = _NON_KEY_LOOKUP_PATTERN.match(input)
         self.assertTrue(match)
         self.assertEquals('contained_by', match.group('operator'))
         self.assertEquals('{18: 200}', match.group('test'))
 
         # has_key
         input = 'has_key=18'
-        match = non_key_lookup_pattern.match(input)
+        match = _NON_KEY_LOOKUP_PATTERN.match(input)
         self.assertTrue(match)
         self.assertEquals('has_key', match.group('operator'))
         self.assertEquals('18', match.group('test'))
 
         # has_any_keys
         input = 'has_any_keys=[18, 10]'
-        match = non_key_lookup_pattern.match(input)
+        match = _NON_KEY_LOOKUP_PATTERN.match(input)
         self.assertTrue(match)
         self.assertEquals('has_any_keys', match.group('operator'))
         self.assertEquals('[18, 10]', match.group('test'))
 
         # has_keys
         input = 'has_keys=[18, 10]'
-        match = non_key_lookup_pattern.match(input)
+        match = _NON_KEY_LOOKUP_PATTERN.match(input)
         self.assertTrue(match)
         self.assertEquals('has_keys', match.group('operator'))
         self.assertEquals('[18, 10]', match.group('test'))
 
         # keys
         input = 'keys__overlap=[18, 10]'
-        match = non_key_lookup_pattern.match(input)
+        match = _NON_KEY_LOOKUP_PATTERN.match(input)
         self.assertTrue(match)
         self.assertEquals('keys__overlap', match.group('operator'))
         self.assertEquals('[18, 10]', match.group('test'))
 
         # values
         input = 'values__contains=[18, 10]'
-        match = non_key_lookup_pattern.match(input)
+        match = _NON_KEY_LOOKUP_PATTERN.match(input)
         self.assertTrue(match)
         self.assertEquals('values__contains', match.group('operator'))
         self.assertEquals('[18, 10]', match.group('test'))
@@ -3027,8 +3053,6 @@ class SearchLinesResourceTest(EddApiTestCaseMixin, APITestCase):
         print(SEPARATOR)
 
         unused_metadata = MetadataType.objects.get(type_name='Flask Volume')
-
-        valid_ops = ['contains', 'contained_by', 'has_key', 'has_any_keys', 'keys', 'values']
 
         search_url = '%s/' % LINES_SEARCH_RESOURCE_URL
         print("Testing edd object metadata search using %s" % search_url)
@@ -3262,6 +3286,7 @@ def make_study_url_variants(study, nested_resource_url=None, nested_resource=Non
             nested_resource_urls.append(nested_detail_url % nested_resource.uuid)
 
     return nested_resource_urls
+
 
 def make_url_variants(list_url, edd_obj):
     pattern = list_url + '/%s/'

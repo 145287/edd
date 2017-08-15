@@ -1,5 +1,5 @@
 """
-Defines the supported views and browsable API endpoint documentation for EDD's REST framework.
+Defines the supported views and browseable API endpoint documentation for EDD's REST framework.
 
 Assuming Django REST Framework (DRF) will be adopted in EDD, new and existing views should be
 ported to this class over time. Many potential REST resources are currently defined in
@@ -33,16 +33,12 @@ from jbei.rest.clients.edd.constants import (ACTIVE_STATUS_DEFAULT, ACTIVE_STATU
                                              DESCRIPTION_REGEX_PARAM, LOCALE_PARAM,
                                              METADATA_TYPE_CONTEXT, METADATA_TYPE_GROUP,
                                              METADATA_TYPE_I18N, METADATA_TYPE_LOCALE,
-                                             METADATA_TYPE_NAME_REGEX, META_KEY_PARAM,
-                                             META_OPERATOR_PARAM, META_SEARCH_PARAM,
-                                             META_VALUE_PARAM, NAME_REGEX_PARAM,
+                                             METADATA_TYPE_NAME_REGEX, META_SEARCH_PARAM,
+                                             NAME_REGEX_PARAM,
                                              QUERY_ACTIVE_OBJECTS_ONLY, QUERY_ANY_ACTIVE_STATUS,
                                              QUERY_INACTIVE_OBJECTS_ONLY,
-                                             SEARCH_TYPE_LINES, SEARCH_TYPE_MEASUREMENT_UNITS,
-                                             SEARCH_TYPE_METADATA_GROUPS,
-                                             SEARCH_TYPE_METADATA_TYPES, SEARCH_TYPE_PARAM,
-                                             SEARCH_TYPE_PROTOCOLS, SEARCH_TYPE_STRAINS,
-                                             SEARCH_TYPE_STUDIES, STRAIN_CASE_SENSITIVE,
+                                             SEARCH_TYPE_PARAM,
+                                             STRAIN_CASE_SENSITIVE,
                                              STRAIN_NAME, STRAIN_NAME_REGEX, STRAIN_REGISTRY_ID,
                                              STRAIN_REGISTRY_URL_REGEX, STUDIES_RESOURCE_NAME,
                                              TYPE_GROUP_PARAM, UNIT_NAME_PARAM,
@@ -63,21 +59,6 @@ from .serializers import (AssaySerializer, GeneIdSerializer, LineSerializer, Mea
                           StudySerializer, UserSerializer)
 
 logger = logging.getLogger(__name__)
-
-# Note on REST resource permissions:
-# Many important resources below require some cludgy code to work with DjangoModelPermissions (a
-# placeholder QuerySet in addition to overriding get_queryset()). See
-# http://www.django-rest-framework.org/api-guide/permissions/#djangomodelpermissions
-
-# class IsStudyReadable(permissions.BasePermission):
-#     """
-#     Custom permission to only allow owners of an object to edit it.
-#     """
-#
-#     def has_object_permission(self, request, view, study):
-#
-#         # studies are only available to users who have read permissions on them
-#         return study.user_can_read(request.user)
 
 _QUERYSET_LOG_MESSAGE = '%(class)s.%(cls_method)s(). %(http_method)s %(url)s: kwargs=%(kwargs)s'
 
@@ -103,11 +84,18 @@ USE_STANDARD_PERMISSIONS = None
 NON_KEY_DJANGO_HSTORE_COMPARISONS = ('contains', 'contained_by', 'has_key',
                                      'has_any_keys', 'has_keys', 'keys', 'values')
 
+_NON_KEY_LOOKUP_REGEX = r'(?P<operator>(?:%s)(?:__[\w_]+)?)=(?P<test>.+)$' % ('|'.join(
+        NON_KEY_DJANGO_HSTORE_COMPARISONS))
+_NON_KEY_LOOKUP_PATTERN = re.compile(_NON_KEY_LOOKUP_REGEX)
+
+_KEY_LOOKUP_REGEX = r'(?P<key>[0-9]+)(?P<operator>=|(?:__[\w_]+))=?(?P<test>.+)$'
+_KEY_LOOKUP_PATTERN = re.compile(_KEY_LOOKUP_REGEX)
+
 
 def permission_denied_handler(request):
     # same as DRF provides in /rest/
-    return HttpResponse('{"detail":"Authentication credentials were not provided."}',
-                        HTTP_403_FORBIDDEN)
+    return response.HttpResponse('{"detail":"Authentication credentials were not provided."}',
+                                 status.HTTP_403_FORBIDDEN)
 
 
 @api_view()
@@ -154,10 +142,8 @@ class StudyAssaysViewSet(CustomPermFilteringMixin, mixins.ListModelMixin, Generi
         study_id = self.kwargs.get(_STUDY_NESTED_ID_KWARG)
         assay_id = self.kwargs.get(self.lookup_url_kwarg, None)
 
-        return build_assays_query(self.request,
-                                  self.request.query_params,
-                                  study_id=study_id,
-                                  identifier_override=assay_id)
+        return build_assays_query(self.request, self.request.query_params,
+                                  identifier_override=assay_id, study_id=study_id)
 
 
 class AssaysViewSet(CustomPermFilteringMixin, viewsets.ReadOnlyModelViewSet):
@@ -177,8 +163,7 @@ class AssaysViewSet(CustomPermFilteringMixin, viewsets.ReadOnlyModelViewSet):
 
         assay_id = self.kwargs.get(self.lookup_url_kwarg, None)
 
-        return build_assays_query(self.request,
-                                  self.request.query_params,
+        return build_assays_query(self.request, self.request.query_params,
                                   identifier_override=assay_id)
 
     def get_serializer_class(self):
@@ -187,10 +172,7 @@ class AssaysViewSet(CustomPermFilteringMixin, viewsets.ReadOnlyModelViewSet):
         return super(AssaysViewSet, self).get_serializer_class()
 
 
-def build_assays_query(request, query_params, identifier_override=None,
-                       study_id=None,
-                       enabling_manage_permissions=USE_STANDARD_PERMISSIONS,
-                       requested_study_perm_override=None):
+def build_assays_query(request, query_params, identifier_override=None, study_id=None):
 
     ###################################################################################
     # Build the query based on assay-specific search parameters, but don't execute yet
@@ -220,8 +202,7 @@ def build_assays_query(request, query_params, identifier_override=None,
     # otherwise, build study permission checks into the query itself
     else:
         logger.debug('No %s identifier found for filtering' % _STUDY_NESTED_ID_KWARG)
-        query = filter_for_study_permission(request, query, Assay, 'line__study__',
-                                            requested_auth_perm_override=requested_study_perm_override)
+        query = filter_for_study_permission(request, query, Assay, 'line__study__')
 
     return query
 
@@ -324,12 +305,7 @@ def build_id_q(prefix, identifier):
 def filter_id_list(query, filter_param_name, model_field_name, requested_filter_values):
     """
     Helper method for filtering a query to only results that contain an identifier that falls
-    within a given list
-    :param query:
-    :param filter_param_name:
-    :param model_field_name:
-    :param requested_filter_values:
-    :return:
+    within the given list
     """
     if not requested_filter_values:
         return query
@@ -351,21 +327,18 @@ def filter_id_list(query, filter_param_name, model_field_name, requested_filter_
                     raise ParseError('Invalid value "%(invalid)s" in %(param)s was not a valid '
                                      'integer primary key' % {
                                          'invalid': token,
-                                         'param': filter_param_name,
-                    })
-            # TODO: remove debug stmt
+                                         'param': filter_param_name, })
             logger.debug('filter_id_list() %s: %s' % (model_field_name, {filter_kwarg: pks}))
             return query.filter(**{filter_kwarg: pks})
 
     elif isinstance(requested_filter_values, list):
         # TODO: remove debug stmt
-        logger.debug('filter_id_list() %s: %s' % (model_field_name, {filter_kwarg:
-                                                                requested_filter_values}))
+        logger.debug('filter_id_list() %s: %s' % (model_field_name,
+                                                  {filter_kwarg: requested_filter_values}))
         return query.filter(**{filter_kwarg: requested_filter_values})
     elif isinstance(requested_filter_values, int):
-        # TODO: remove debug stmt
-        logger.debug(
-        'filter_id_list() %s: %s' % (model_field_name, {model_field_name: requested_filter_values}))
+        logger.debug('filter_id_list() %s: %s' % (model_field_name,
+                                                  {model_field_name: requested_filter_values}))
         return query.filter(**{model_field_name: requested_filter_values})
 
     raise ParseError('Unsupported %(param)s value "%(value)s"' % {
@@ -421,8 +394,7 @@ class StudyMeasurementsViewSet(CustomPermFilteringMixin, mixins.ListModelMixin, 
                                         id_override=measurement_id, study_id=study_id)
 
 
-def build_measurements_query(request, query_params, id_override=None, study_id=None,
-                             requested_study_perm_override=None):
+def build_measurements_query(request, query_params, id_override=None, study_id=None):
 
     ###########################################################################################
     # Build the query based on measurement-specific search parameters, but don't execute yet
@@ -477,8 +449,7 @@ def build_measurements_query(request, query_params, id_override=None, study_id=N
     else:
         logger.debug('No %s identifier found for filtering' % _STUDY_NESTED_ID_KWARG)
         meas_query = filter_for_study_permission(request, meas_query, Measurement,
-                                                 'assay__line__study__',
-                                                 requested_auth_perm_override=requested_study_perm_override)
+                                                 'assay__line__study__')
 
     return meas_query
 
@@ -566,8 +537,7 @@ def build_values_query(request, query_params, id_override=None, study_id=None,
     else:
         logger.debug('No %s identifier found for filtering' % _STUDY_NESTED_ID_KWARG)
         query = filter_for_study_permission(request, query, MeasurementValue,
-                                            'measurement__assay__line__study__',
-                                            requested_auth_perm_override=requested_study_perm_override)
+                                            'measurement__assay__line__study__')
 
     return query
 
@@ -1391,17 +1361,12 @@ def optional_edd_object_filtering(params, query, skip_id_filtering=False, id_ove
 
     return query
 
-non_key_lookup_regex = r'(?P<operator>(?:%s)(?:__[\w_]+)?)=(?P<test>.+)$' % ('|'.join(
-        NON_KEY_DJANGO_HSTORE_COMPARISONS))
-non_key_lookup_pattern = re.compile(non_key_lookup_regex)
-
-key_lookup_regex = r'(?P<key>[0-9]+)(?P<operator>=|(?:__[\w_]+))=?(?P<test>.+)$'
-key_lookup_pattern = re.compile(key_lookup_regex)
-
 
 def _filter_for_metadata(query, meta_comparison, comparison_num, comparison_count):
+    def keep_as_str(s):
+        return s
 
-    match = key_lookup_pattern.match(meta_comparison)
+    match = _KEY_LOOKUP_PATTERN.match(meta_comparison)
     if match:
         meta_key = match.group('key')
         meta_operator = match.group('operator')
@@ -1414,11 +1379,11 @@ def _filter_for_metadata(query, meta_comparison, comparison_num, comparison_coun
                          'op': meta_operator,
                          'test': meta_test})
     else:
-        match = non_key_lookup_pattern.match(meta_comparison)
+        match = _NON_KEY_LOOKUP_PATTERN.match(meta_comparison)
         if not match:
             logger.debug('URL input "%(input)s" did not match non-key regex "%(regex)s"' % {
                              'input': meta_comparison,
-                             'regex': non_key_lookup_regex,
+                             'regex': _NON_KEY_LOOKUP_REGEX,
             })
             raise ValidationError('Invalid metadata comparison "%s"' % meta_comparison)
 
@@ -1441,20 +1406,7 @@ def _filter_for_metadata(query, meta_comparison, comparison_num, comparison_coun
     elif isinstance(meta_test, basestring) and (('[' in meta_test) or ('{' in meta_test)):
         # convert from URL-derived string to list/dict, but leave numbers as strings so they
         # can be passed directly as kwargs to QuerySet.filter() below
-        keep_as_str = lambda s: s
         meta_test = json.loads(meta_test, parse_float=keep_as_str, parse_int=keep_as_str)
-
-    # if isinstance(meta_test, list):
-    #     for index, item in enumerate(meta_test):
-    #         if isinstance(item, numbers.Number):
-    #             meta_test[index] = str(item)
-    # elif isinstance(meta_test, dict):
-    #     for key, value in meta_test.iteritems():
-    #         if isinstance(value, numbers.Number):
-    #             meta_test[key] = str(value)
-
-    comparison_desc = (('%s (comparison %d): ' % (META_SEARCH_PARAM, comparison_num))
-                       if comparison_count > 1 else ('%s: ' % META_SEARCH_PARAM))
 
     prefix = 'meta_store__'
     comparison = meta_operator
@@ -1468,15 +1420,12 @@ def _filter_for_metadata(query, meta_comparison, comparison_num, comparison_coun
     }
     filter_dict = {filter_key: meta_test}
 
-    # TODO: remove print stmt
-    print('Metadata filter %d of %d: %s' % (comparison_num, comparison_count, str(filter_dict)))
-
-    # TODO: test/investigate/wrap? raised Errors...here or when queryset is actually executed?
+    logger.debug('Metadata filter %d of %d: %s' % (comparison_num, comparison_count,
+                                                   str(filter_dict)))
     return query.filter(**filter_dict)
 
 
-def filter_for_study_permission(request, query, result_model_class, study_keyword_prefix,
-                                requested_auth_perm_override=None):
+def filter_for_study_permission(request, query, result_model_class, study_keyword_prefix):
     """
         A helper method that filters a Queryset to return only results that the requesting user
         should have access to, based on class-level django.auth permissions and on
@@ -1499,10 +1448,7 @@ def filter_for_study_permission(request, query, result_model_class, study_keywor
         logger.debug('User %s is not authenticated' % user)
         raise NotAuthenticated()
 
-    if requested_auth_perm_override is None:
-        requested_permission = get_requested_study_permission(request.method)
-    else:
-        requested_permission = requested_auth_perm_override
+    requested_permission = get_requested_study_permission(request.method)
 
     # if user role (e.g. admin) grants access to all Studies, we can expose all objects
     # without additional queries
@@ -1511,8 +1457,7 @@ def filter_for_study_permission(request, query, result_model_class, study_keywor
     if has_role_based_permission:
         return query
 
-    has_auth_permission = require_auth_perm(request, result_model_class, suppress_exception=True,
-                                            enabling_perms_override=requested_auth_perm_override)
+    has_auth_permission = require_auth_perm(request, result_model_class, suppress_exception=True)
     if has_auth_permission:
         return query
 
@@ -1754,8 +1699,7 @@ class LinesViewSet(CustomPermFilteringMixin, viewsets.ReadOnlyModelViewSet):
                          'query_params': self.request.query_params,
                      })
         line_id = self.kwargs.get(self.lookup_url_kwarg, None)
-        return build_lines_query(self.request, self.request.query_params,
-                                 id_override=line_id)
+        return build_lines_query(self.request, self.request.query_params, id_override=line_id)
 
 
 class StudyLinesView(CustomPermFilteringMixin, mixins.ListModelMixin, GenericViewSet):
@@ -1858,9 +1802,7 @@ def _optional_updated_filter(queryset, query_params):
     return queryset
 
 
-def build_lines_query(request, query_params, study_id=None, id_override=None,
-                      enabling_manage_permissions=USE_STANDARD_PERMISSIONS,
-                      requested_study_perm_override=USE_STANDARD_PERMISSIONS):
+def build_lines_query(request, query_params, study_id=None, id_override=None):
 
     ###############################################################################################
     # Build the query based on line-specific search parameters, but don't execute yet
@@ -1875,179 +1817,10 @@ def build_lines_query(request, query_params, study_id=None, id_override=None,
         study_pk = study_internals_initial_query(request, study_id, Line)
         query = query.filter(study_id=study_pk)
     else:
-        query = filter_for_study_permission(request, query, Line, 'study__',
-                                            requested_auth_perm_override=requested_study_perm_override)
+        query = filter_for_study_permission(request, query, Line, 'study__')
 
     return query
 
-
-class SearchViewSet(GenericViewSet):
-    """
-    A generic search view that uses code from other API resources to enforce permissions and query
-    results based on the requested result type.
-    """
-    # TODO: Remove/simplify if no additional permissions classes are used during API implementation
-    permissions_lookup = {
-        SEARCH_TYPE_LINES:   (ImpliedPermissions,),
-        SEARCH_TYPE_MEASUREMENT_UNITS: (ImpliedPermissions,),
-        SEARCH_TYPE_METADATA_TYPES: (ImpliedPermissions,),
-        SEARCH_TYPE_PROTOCOLS: (ImpliedPermissions,),
-        SEARCH_TYPE_STUDIES: (ImpliedPermissions,),
-    }
-
-    queryset_lookup = {
-        SEARCH_TYPE_LINES: build_lines_query,
-        SEARCH_TYPE_MEASUREMENT_UNITS: build_measurement_units_query,
-        SEARCH_TYPE_METADATA_TYPES: build_metadata_type_query,
-        SEARCH_TYPE_STUDIES: build_study_query,
-    }
-
-    serializer_lookup = {
-        SEARCH_TYPE_LINES: LineSerializer,
-        SEARCH_TYPE_MEASUREMENT_UNITS: MeasurementUnitSerializer,
-        SEARCH_TYPE_METADATA_GROUPS: MetadataGroupSerializer,
-        SEARCH_TYPE_METADATA_TYPES: MetadataTypeSerializer,
-        SEARCH_TYPE_PROTOCOLS: ProtocolSerializer,
-        SEARCH_TYPE_STRAINS: StrainSerializer,
-        SEARCH_TYPE_STUDIES: StudySerializer,
-    }
-
-    study_permission_controlled_types = ('lines', 'strains', 'measurements')
-
-    lookup_url_kwarg = 'id'
-
-    def __init__(self, **kwargs):
-        super(SearchViewSet, self).__init__(**kwargs)
-        self.request_params = None
-        self.search_type = None
-
-    def create(self, request, *args, **kwargs):
-        """
-             Required method name to get benefits of supporting ViewSet / Router code, but actually
-             just handles a POST request in this case
-        """
-
-        if not request.user.is_authenticated():
-            raise NotAuthenticated()
-
-        # code pasted/modified from ListModelMixin to implement pagination / asymmetric
-        # serialization (input format doesn't match output for search)
-        queryset = self.get_queryset()
-
-        page = self.paginate_queryset(queryset)
-        if page is not None:
-            serializer = self.get_serializer(page, many=True)
-            return self.get_paginated_response(serializer.data)
-
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
-
-    def initialize_request(self, request, *args, **kwargs):
-        """
-            Overrides the inherited 'request' attribute to add request body parsing / cache.
-            Prevents get_queryset() and get_permissions() from having to parse the request body
-            more than once.
-        """
-        result = super(SearchViewSet, self).initialize_request(request, args, kwargs)
-        if not request.body:
-            valid_values = ('"%s"' % val for val in self.permissions_lookup.viewkeys() &
-                            self.queryset_lookup.viewkeys() &
-                            self.serializer_lookup.viewkeys())
-            raise ValidationError('No JSON search parameters were provided.  At a minimum, '
-                                  '"%(type)s" is required. Valid %(type)s values are %(values)s' %
-                                  {
-                                      'type': SEARCH_TYPE_PARAM,
-                                      'values': ', '.join(valid_values),
-                                  })
-
-        self.request_params = json.loads(request.body)
-        self.search_type = self.request_params.get(SEARCH_TYPE_PARAM, None)
-        if not self.search_type:
-            raise ValidationError('%s is a required parameter' % SEARCH_TYPE_PARAM)
-
-        return result
-
-    def get_queryset(self):
-        request_params = self.request_params
-        search_type = self.search_type
-
-        queryset_function = self.queryset_lookup.get(search_type)
-
-        if not queryset_function:
-            queryset_lookup = self.queryset_lookup
-            raise ValidationError('%(search_type)s is not a supported value of %(param_name)s. '
-                                  'Valid values are %(valid_values)s'
-                                  % {
-                                        'search_type': search_type,
-                                        'param_name': SEARCH_TYPE_PARAM,
-                                        'valid_values': ', '.join([
-                                            '"%s"' % key for key in queryset_lookup.iterkeys()])
-                                  })
-
-        identifier = request_params.get('pk', request_params.get('uuid'))
-
-        # execute the query function.  if result permissions are derived from study permissions,
-        # override the default behavior of treating a POST request as requesting mutator permission
-        if search_type in self.study_permission_controlled_types:
-            queryset = queryset_function(
-                    self.request, request_params, id_override=identifier,
-                    requested_study_permission_override=StudyPermission.CAN_VIEW)
-        else:
-            queryset = queryset_function(self.request, request_params, identifier=identifier, )
-
-        logger.debug('Query created by %(function)s is:\n%(query)s' % {
-            'function': str(queryset_function),
-            'query': queryset.query, })
-        return queryset
-
-    def get_permissions(self):
-        """
-        Overrides the default get_permissions() to delegate permissions to the appropriate class
-        based on which Django model class we're searching.  Note that we also have to override the
-        default django.util.auth permissions assumed in the delegated classes since for search
-        we're using HTTP POST to return results normally provided by GET.
-        :return:
-        """
-
-        search_class = self.search_type
-        permissions_classes = self.permissions_lookup.get(search_class)
-        if not permissions_classes:
-            raise ValidationError('"%(type)s" is not a valid value for %(type_param)s. Valid '
-                                  'values are %(valid_values)s' % {
-                                      'type':         search_class,
-                                      'type_param':   SEARCH_TYPE_PARAM,
-                                      'valid_values': ', '.join(self.permissions_lookup.keys())
-                                  })
-        logger.debug('Delegating permissions enforcement to permissions classes: %s'
-                     % ', '.join([str(perm_class) for perm_class in permissions_classes]))
-
-        # alter standard application of POST since search uses HTTP POST, but applies permissions
-        # normally applied to GET requests
-        permissions_instances = (permission_class() for permission_class in permissions_classes)
-        for permissions_instance in permissions_instances:
-
-            if isinstance(permissions_instance, ImpliedPermissions):
-                permissions_instance.django_perms_map['POST'] = (
-                    ImpliedPermissions._AUTH_IMPLICIT_VIEW_PERMISSION)
-                permissions_instance.method_to_inferred_perms_map['POST'] = (
-                    ImpliedPermissions.QS_INFERRED_VIEW_PERMISSION)
-
-        return permissions_instances
-
-    def get_serializer_class(self):
-        """
-        Overrides the parent implementation to provide serialization that's dynamically determined
-        by the requested result type
-        """
-
-        serializer = self.serializer_lookup.get(self.search_type, None)
-        if not serializer:
-            raise NotImplementedError('No serializer is defined for %(param)s "%(value)s"' % {
-                'param': SEARCH_TYPE_PARAM,
-                'value': self.search_type,
-            })
-
-        return serializer
 
 @api_view()
 def search_test_view(request):
@@ -2067,6 +1840,7 @@ def search_test_view(request):
     else:
         query = _filter_for_metadata(query, meta_comparisons, 1, 1)
     return JsonResponse({'msg': msg})
+
 
 @api_view()
 def not_found_view(request):
