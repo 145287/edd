@@ -66,31 +66,17 @@ DRF_UNAUTHENTICATED_PERMISSION_DENIED_CODES = (HTTP_403_FORBIDDEN, HTTP_401_UNAU
 # -responses
 DRF_AUTHENTICATED_BUT_DENIED = HTTP_403_FORBIDDEN
 
-UNPRIVILEGED_USERNAME = 'unprivileged_user'
-STAFF_USERNAME = 'staff.user'
-STAFF_STUDY_USERNAME = 'staff.study.user'
-ADMIN_USERNAME = 'admin.user'
-ADMIN_STAFF_USERNAME = 'admin.staff.user'
-
-STUDY_OWNER_USERNAME = 'unprivileged.study.owner'
-STUDY_READER_USERNAME = 'study.reader.user'
-STUDY_READER_GROUP_USER = 'study.reader.group.user'
-STUDY_READER_GROUP_NAME = 'study_readers'
-STUDY_WRITER_GROUP_USER = 'study.writer.group.user'
-STUDY_WRITER_USERNAME = 'study.writer.user'
-
-# Note: ApiTestCase runs in a transction that aborts at the end of the test, so this password will
+# Note: ApiTestCase runs in a transaction that aborts at the end of the test, so this password will
 # never be externally exposed.
-PLAINTEXT_TEMP_USER_PASSWORD = 'password'
+_PLAINTEXT_TEMP_USER_PASSWORD = 'password'
 
 STRAINS_RESOURCE_URL = '/rest/%(resource)s' % {'resource': STRAINS_RESOURCE_NAME}
 STUDIES_RESOURCE_URI = '/rest/%(resource)s' % {'resource': STUDIES_RESOURCE_NAME}
-LINES_SEARCH_RESOURCE_URL = '/rest/lines'
+LINES_RESOURCE_URI = '/rest/lines'
 
-DRF_UPDATE_ACTION = 'update'
-DRF_CREATE_ACTION = 'create'
-DRF_LIST_ACTION = 'list'
-DRF_DELETE_ACTION = 'delete'
+_UNPRIVILEGED_USERNAME = 'unprivileged_user'
+_ADMIN_USERNAME = 'admin.user'
+_STAFF_USERNAME = 'staff.user'
 
 # Note: some uses have an iterable of expected statuses...hence string format
 _WRONG_STATUS_MSG = ('Wrong response status code from %(method)s %(url)s for user %(user)s. '
@@ -99,9 +85,8 @@ _WRONG_STATUS_MSG = ('Wrong response status code from %(method)s %(url)s for use
 
 class EddApiTestCaseMixin(object):
     """
-    Overrides APITestCase to provide helper methods that improve test error messages and simplify
-    repetitive test code.  Helper methods also enforce consistency in return codes across EDD's
-    REST API.
+    Provides helper methods that improve test error messages and simplify repetitive test code.
+    Helper methods also enforce consistency in return codes across EDD's REST API.
     """
 
     @property
@@ -194,7 +179,7 @@ class EddApiTestCaseMixin(object):
                  partial_response=False, request_params=None):
 
         logged_in = self.client.login(username=user.username,
-                                      password=PLAINTEXT_TEMP_USER_PASSWORD)
+                                      password=_PLAINTEXT_TEMP_USER_PASSWORD)
         self.assertTrue(logged_in, 'Client login failed. Unable to continue with the test.')
 
         response = self.client.post(url, post_data, format='json')
@@ -209,7 +194,7 @@ class EddApiTestCaseMixin(object):
     def _do_put(self, url, user, put_data, expected_status, expected_values=None,
                 partial_response=False):
         logged_in = self.client.login(username=user.username,
-                                      password=PLAINTEXT_TEMP_USER_PASSWORD)
+                                      password=_PLAINTEXT_TEMP_USER_PASSWORD)
         self.assertTrue(logged_in, 'Client login failed. Unable to continue with the test.')
         response = self.client.put(url, put_data, format='json')
         self.client.logout()
@@ -220,7 +205,7 @@ class EddApiTestCaseMixin(object):
 
     def _assert_authenticated_get_denied(self, url, user):
         logged_in = self.client.login(username=user.username,
-                                      password=PLAINTEXT_TEMP_USER_PASSWORD)
+                                      password=_PLAINTEXT_TEMP_USER_PASSWORD)
         self.assertTrue(logged_in, 'Client login failed. Unable to continue with the test.')
 
         response = self.client.get(url)
@@ -247,14 +232,10 @@ class EddApiTestCaseMixin(object):
     def _do_get(self, url, user, expected_status, expected_values=None,
                 partial_response=False, request_params=None):
         logged_in = self.client.login(username=user.username,
-                                      password=PLAINTEXT_TEMP_USER_PASSWORD)
+                                      password=_PLAINTEXT_TEMP_USER_PASSWORD)
         self.assertTrue(logged_in, 'Client login failed. Unable to continue with the test.')
 
         response = self.client.get(url, data=request_params)
-
-        # TODO: remove debug block
-        # logger.debug('expected: %s' % expected_values)
-        # logger.debug('actual: %s' % response.content)
 
         self._compare_expected_values(url, 'GET', user, response, expected_status,
                                       expected_values=expected_values,
@@ -264,7 +245,6 @@ class EddApiTestCaseMixin(object):
 
     def _compare_expected_values(self, url, method, user, response, expected_status,
                                  expected_values=None, partial_response=False):
-
         # compare expected return code
         self.assertEquals(
                 expected_status, response.status_code,
@@ -299,7 +279,7 @@ class EddApiTestCaseMixin(object):
 
     def _do_delete(self, url, user, expected_status):
         logged_in = self.client.login(username=user.username,
-                                      password=PLAINTEXT_TEMP_USER_PASSWORD)
+                                      password=_PLAINTEXT_TEMP_USER_PASSWORD)
         self.assertTrue(logged_in, 'Client login failed. Unable to continue with the test.')
 
         response = self.client.delete(url)
@@ -314,7 +294,7 @@ class EddApiTestCaseMixin(object):
 
     def _assert_authenticated_get_not_found(self, url, user):
         logged_in = self.client.login(username=user.username,
-                                      password=PLAINTEXT_TEMP_USER_PASSWORD)
+                                      password=_PLAINTEXT_TEMP_USER_PASSWORD)
 
         self.assertTrue(logged_in, 'Client login failed. Unable to continue with the test.')
 
@@ -330,7 +310,7 @@ class EddApiTestCaseMixin(object):
 
     def _assert_authenticated_get_client_error(self, url, user):
         logged_in = self.client.login(username=user.username,
-                                      password=PLAINTEXT_TEMP_USER_PASSWORD)
+                                      password=_PLAINTEXT_TEMP_USER_PASSWORD)
 
         self.assertTrue(logged_in, 'Client login failed. Unable to continue with the test.')
 
@@ -346,7 +326,7 @@ class EddApiTestCaseMixin(object):
 
     def _assert_authenticated_get_empty_result(self, url, user):
         logged_in = self.client.login(username=user.username,
-                                      password=PLAINTEXT_TEMP_USER_PASSWORD)
+                                      password=_PLAINTEXT_TEMP_USER_PASSWORD)
 
         self.assertTrue(logged_in, 'Client login failed. Unable to continue with the test.')
 
@@ -366,7 +346,7 @@ class EddApiTestCaseMixin(object):
 
     def _assert_authenticated_get_empty_paged_result(self, url, user, request_params=None):
         logged_in = self.client.login(username=user.username,
-                                      password=PLAINTEXT_TEMP_USER_PASSWORD)
+                                      password=_PLAINTEXT_TEMP_USER_PASSWORD)
 
         self.assertTrue(logged_in, 'Client login failed. Unable to continue with the test.')
 
@@ -418,19 +398,6 @@ class StrainResourceTests(EddApiTestCaseMixin, APITestCase):
         """
         super(StrainResourceTests, StrainResourceTests).setUpTestData()
 
-        # define placeholder data members to silence PyCharm style checks for data members
-        # created in create_study()
-        cls.study = None
-        cls.unprivileged_user = None
-        cls.study_read_only_user = None
-        cls.study_write_only_user = None
-        cls.study_read_group_user = None
-        cls.study_write_group_user = None
-        cls.staff_study_creator = None
-        cls.staff_study_changer = None
-        cls.staff_study_deleter = None
-        cls.superuser = None
-
         # create the study and associated users & permissions
         create_study(cls)
 
@@ -439,7 +406,7 @@ class StrainResourceTests(EddApiTestCaseMixin, APITestCase):
         cls.delete_strain_permission = Permission.objects.get(codename='delete_strain')
 
         # plain staff w/ no extra privileges
-        cls.staff_user = _create_user(username=STAFF_USERNAME, email='staff@localhost',
+        cls.staff_user = _create_user(username=_STAFF_USERNAME, email='staff@localhost',
                                       is_staff=True)
 
         cls.staff_strain_user = _create_user(username='staff.strain.user',
@@ -873,7 +840,9 @@ def to_paged_result_dict(expected_values, values_converter):
     }
 
 
-# TODO: resolve William's related comment
+# TODO: prefer testcase.assertDictEqual(expected, observed) where feasible. For now
+# this method is helpful for building up comparisons where only some of the results are tested. It
+# should work as a stopgap.
 def compare_paged_result_dict(testcase, expected, observed, order_agnostic=True,
                               partial_response=False):
     """
@@ -1005,8 +974,6 @@ def _compare_partial_value(testcase, exp_value, observed_value, key=None):
     """
 
     if isinstance(exp_value, dict):
-        # print('Expected: %s' % str(exp_value))  # TODO: remove debug stmts
-        # print('Observed: %s' % str(observed_value))
         for unique_key, exp_inner in exp_value.iteritems():
             try:
                 obs_inner = observed_value[unique_key]
@@ -1024,7 +991,6 @@ def _compare_partial_value(testcase, exp_value, observed_value, key=None):
     elif isinstance(exp_value, collections.Sequence) and not isinstance(exp_value, basestring):
         for index, exp_inner in enumerate(exp_value):
             obs_inner = observed_value[index]
-            print('Expected value %s' % str(exp_inner))  # TODO: remove debug stmt
             _compare_partial_value(testcase, exp_inner, obs_inner, key)
     elif isinstance(exp_value, float) or isinstance(observed_value, float):
         testcase.assertAlmostEqual(exp_value, observed_value,
@@ -1159,7 +1125,7 @@ def _create_user(username, email='staff.study@localhost',
     # note: some password is required to allow successful login
     user = User.objects.create_user(username=username,
                                     email=email,
-                                    password=PLAINTEXT_TEMP_USER_PASSWORD)
+                                    password=_PLAINTEXT_TEMP_USER_PASSWORD)
 
     # return early if no updates to user or its foreign key relationships
     if not (is_staff or is_superuser):
@@ -1182,7 +1148,7 @@ def _create_user(username, email='staff.study@localhost',
     return user
 
 
-# TODO: consider StudyInternalsTestCase / delete some code here
+# TODO: consider merging with / leveraging newer StudyInternalsTestMixin
 class StudiesTests(EddApiTestCaseMixin, APITestCase):
     """
     Tests access controls and HTTP return codes for queries to the base /rest/studies REST API
@@ -1341,16 +1307,13 @@ class StudiesTests(EddApiTestCaseMixin, APITestCase):
         self._do_delete(url, self.staff_study_deleter, HTTP_405_METHOD_NOT_ALLOWED)
         self._do_delete(url, self.superuser, HTTP_405_METHOD_NOT_ALLOWED)
 
-        # delete the study via the ORM
-        study.delete()
-
     def test_study_add(self):
         """
         Tests that the /rest/strains/ resource responds correctly to configured user permissions
         for adding strains.  Note that django.auth permissions calls this 'add' while DRF
         uses the 'create' action
         """
-        # TODO: as a future impromement, test that less-used fields are also settable using this
+        # TODO: as a future improvemement, test that less-used fields are also settable using this
         #  resource.  E.g. metabolic map, contact_extra, slug (but only by admins for slug)
 
         # Note: missing slash causes 301 response when authenticated
@@ -1376,12 +1339,9 @@ class StudiesTests(EddApiTestCaseMixin, APITestCase):
         # verify that an un-authenticated request gets a 404
         self._assert_unauthenticated_post_denied(_URL, post_data)
 
-        _SUPERUSER_CREATE_TEMP = (settings.EDD_ONLY_SUPERUSER_CREATE
-                                  if hasattr(settings, 'EDD_ONLY_SUPERUSER_CREATE') else None)
+        _SUPERUSER_CREATE_TEMP = getattr(settings, 'EDD_ONLY_SUPERUSER_CREATE', None)
 
-        _DEFAULT_GRPS_TEMP = (settings.EDD_DEFAULT_STUDY_READ_GROUPS
-                              if hasattr(settings, 'EDD_DEFAULT_STUDY_READ_GROUPS')
-                              else None)
+        _DEFAULT_GRPS_TEMP = getattr(settings, 'EDD_DEFAULT_STUDY_READ_GROUPS', None)
 
         try:
             # with normal settings, verify all users can create studies, regardless of privileges
@@ -1445,8 +1405,6 @@ class StudiesTests(EddApiTestCaseMixin, APITestCase):
 
             # verify that UUID input is ignored during study creation
             post_data[UUID_KEY] = str(self.study.uuid)
-            # TODO: remove print stmt
-            print('Attempting to create a study with duplicate UUID %s' % str(self.study.uuid))
             response = self._assert_authenticated_post_allowed(_URL, self.superuser, post_data)
             self.assertNotEqual(post_data[UUID_KEY], json.loads(response.content)[UUID_KEY])
 
@@ -1526,7 +1484,7 @@ class StudiesTests(EddApiTestCaseMixin, APITestCase):
 
         # test basic use for a single study
         list_url = '%s/' % STUDIES_RESOURCE_URI
-        print("Testing read access for %s" % list_url)
+        logger.info("Testing read access for %s" % list_url)
         self._enforce_study_read_access(list_url, True, expected_values=[self.study])
 
         # test study filtering based on active status
@@ -1541,7 +1499,6 @@ class StudiesTests(EddApiTestCaseMixin, APITestCase):
                                                           request_params=request_params)
 
         request_params = {ACTIVE_STATUS_PARAM: QUERY_INACTIVE_OBJECTS_ONLY}
-        logger.debug('request params: %s' % request_params)  # TODO: remove debug stmt
         self._assert_authenticated_get_allowed(list_url,
                                                self.superuser,
                                                expected_values=[self.study],
@@ -1708,47 +1665,51 @@ def create_study(test_class, create_auth_perms_and_users=False):
     class-level, and group-level permissions on the study (except everyone permissions,
     which would supercede several of the others).
     """
+    _STUDY_READER_USERNAME = 'study.reader.user'
+    _STUDY_READER_GROUP_USER = 'study.reader.group.user'
+    _STUDY_WRITER_GROUP_USER = 'study.writer.group.user'
+    _STUDY_WRITER_USERNAME = 'study.writer.user'
 
     # unprivileged user
     test_class.unprivileged_user = User.objects.create_user(
-            username=UNPRIVILEGED_USERNAME,
+            username=_UNPRIVILEGED_USERNAME,
             email='unprivileged@localhost',
-            password=PLAINTEXT_TEMP_USER_PASSWORD)
+            password=_PLAINTEXT_TEMP_USER_PASSWORD)
 
     # superuser w/ no extra privileges
-    test_class.superuser = _create_user(username=ADMIN_USERNAME,
+    test_class.superuser = _create_user(username=_ADMIN_USERNAME,
                                         email='admin@localhost',
                                         is_superuser=True)
 
     # user with read only access to this study
     test_class.study_read_only_user = User.objects.create_user(
-            username=STUDY_READER_USERNAME,
+            username=_STUDY_READER_USERNAME,
             email='study_read_only@localhost',
-            password=PLAINTEXT_TEMP_USER_PASSWORD)
+            password=_PLAINTEXT_TEMP_USER_PASSWORD)
 
     # user with write only access to this study
     test_class.study_write_only_user = User.objects.create_user(
-            username=STUDY_WRITER_USERNAME,
+            username=_STUDY_WRITER_USERNAME,
             email='study.writer@localhost',
-            password=PLAINTEXT_TEMP_USER_PASSWORD)
+            password=_PLAINTEXT_TEMP_USER_PASSWORD)
 
     # user with read only access to the study via group membership
     test_class.study_read_group_user = User.objects.create_user(
-            username=STUDY_READER_GROUP_USER,
+            username=_STUDY_READER_GROUP_USER,
             email='study.group_reader@localhost',
-            password=PLAINTEXT_TEMP_USER_PASSWORD)
+            password=_PLAINTEXT_TEMP_USER_PASSWORD)
 
     # user with write only access to the study via group membership
     test_class.study_write_group_user = User.objects.create_user(
-            username=STUDY_WRITER_GROUP_USER,
+            username=_STUDY_WRITER_GROUP_USER,
             email='study.group_writer@localhost',
-            password=PLAINTEXT_TEMP_USER_PASSWORD)
+            password=_PLAINTEXT_TEMP_USER_PASSWORD)
 
-    # user with access to the study via the default read permission TODO: relocate!
+    # user with access to the study via the default read permission
     test_class.study_default_read_group_user = User.objects.create_user(
             username='Default read group user',
             email='study.default_read_group.user',
-            password=PLAINTEXT_TEMP_USER_PASSWORD, )
+            password=_PLAINTEXT_TEMP_USER_PASSWORD, )
 
     # create groups for testing group-level user permissions
     study_read_group = Group.objects.create(name='study_read_only_group')
@@ -1794,7 +1755,7 @@ def create_study(test_class, create_auth_perms_and_users=False):
         test_class.change_study_permission = Permission.objects.get(codename='change_study')
         test_class.delete_study_permission = Permission.objects.get(codename='delete_study')
 
-        test_class.staff_user = _create_user(username=STAFF_USERNAME,
+        test_class.staff_user = _create_user(username=_STAFF_USERNAME,
                                              email='staff@localhost',
                                              is_staff=True)
 
@@ -2467,8 +2428,8 @@ class LinesTests(StudyInternalsTestMixin, APITestCase):
 class UriBuilder(object):
     """
     Builds valid URI's combinatorially for nested resources (e.g. using study slug/pk/uuid
-    combinations). TODO: enable config-based random use of URL combinations...will significantly
-    cut down on runtime for repetitive use.
+    combinations). TODO: as an improvement, enable config-based random use of URL
+    combinations...will significantly cut down on runtime for repetitive use.
     """
     def __init__(self, study, nested_orm_models, uri_elts):
         self.study = study
@@ -2852,7 +2813,13 @@ class MeasurementValuesTests(StudyInternalsTestMixin, APITestCase):
                                         x=[1], y=[2])
 
 
-class SearchLinesResourceTest(EddApiTestCaseMixin, APITestCase):
+class EddObjectSearchTest(EddApiTestCaseMixin, APITestCase):
+    """
+    Tests search options for EDDObjects using /rest/lines/.  This test is an initial
+    proof-of-concept/risk mitigation for related search options, and included tests should
+    eventually be run individually on each EddObject API endpoint.
+    """
+    # TODO: generalize and run tests on each EDDObject endpoint.
     @property
     def values_converter(self):
         return line_to_json_dict
@@ -2902,7 +2869,7 @@ class SearchLinesResourceTest(EddApiTestCaseMixin, APITestCase):
         print('%s(): ' % self.test_edd_object_attr_search.__name__)
         print(SEPARATOR)
 
-        search_url = '%s/' % LINES_SEARCH_RESOURCE_URL
+        search_url = '%s/' % LINES_RESOURCE_URI
         print("Testing EDDObject attribute search using %s" % search_url)
 
         # test that the default search filter returns only active lines.
@@ -3046,7 +3013,7 @@ class SearchLinesResourceTest(EddApiTestCaseMixin, APITestCase):
 
         unused_metadata = MetadataType.objects.get(type_name='Flask Volume')
 
-        search_url = '%s/' % LINES_SEARCH_RESOURCE_URL
+        search_url = '%s/' % LINES_RESOURCE_URI
         print("Testing edd object metadata search using %s" % search_url)
 
         search_params = {}
@@ -3152,7 +3119,7 @@ class SearchLinesResourceTest(EddApiTestCaseMixin, APITestCase):
         print('%s(): ' % self.test_eddobject_timestamp_search.__name__)
         print(SEPARATOR)
 
-        search_url = '%s/' % LINES_SEARCH_RESOURCE_URL
+        search_url = '%s/' % LINES_RESOURCE_URI
         print("Testing edd object timestamp search using %s" % search_url)
 
         # create some lines with a known minimum time gap between their creation times
@@ -3236,7 +3203,7 @@ class SearchLinesResourceTest(EddApiTestCaseMixin, APITestCase):
         Overrides default values from the parent class to avoid repetetively passing the same
         values_converter and partial_response with repetitive calls
         """
-        return super(SearchLinesResourceTest, self)._assert_authenticated_search_allowed(
+        return super(EddObjectSearchTest, self)._assert_authenticated_search_allowed(
                 url, user,
                 expected_values=expected_values,
                 partial_response=partial_response,

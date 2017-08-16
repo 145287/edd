@@ -56,6 +56,10 @@ PAGE_SIZE_QUERY_PARAM = 'page_size'
 PAGE_NUMBER_QUERY_PARAM = 'page'
 RESULTS_OFFSET_QUERY_PARAM = 'offset'
 
+SORT_PARAM = 'sort_order'
+FORWARD_SORT_VALUE = 'ascending'
+REVERSE_SORT_VALUE = 'descending'
+
 TYPE_GROUP_PARAM = 'type_group'
 
 ###################################################################################################

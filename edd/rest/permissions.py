@@ -38,12 +38,12 @@ class ImpliedPermissions(BasePermission):
          1) Unauthenticated users are always denied access
          2) A user who has class-level add/change/delete django.contrib.auth permissions
             may exercise those capabilities
-         3) A user who has any add/change/delete class-level django.contrib.auth permission
-            granted also has implied class-level view access (though view isn't explicitly
-            defined as an auth permission)
+         3) A user who has any class-level add/change/delete django.contrib.auth
+            permission granted also has implied class-level view access (though view isn't
+            explicitly defined as an auth permission)
          4) If the inferred_permissions property is defined / non-empty, the existence of one or
          more results  in the queryset implies that the user has a level of inferred permission
-         only on the objects returned by queryset. This inference should align with DRF's
+         *only* on the objects returned by queryset. This inference should align with DRF's
          pattern of queryset filtering based on only the objects a user has access to. In most
          cases, this feature will probably only be used to infer view access to queryset results
          while avoiding a separate DB query in this class to check user permissions that are
@@ -149,12 +149,12 @@ class ImpliedPermissions(BasePermission):
 
         # unauthenticated users never have permission
         if not (user and user.is_authenticated()):
-            logger.debug('%(class)s: User %(username)s is not authenticated. Denying access to %('
-                         'url)s' % {
-                            'class': ImpliedPermissions.__class__.__name__,
-                            'username': user.username,
-                            'url': request.path,
-                        })
+            logger.debug('%(class)s: User %(username)s is not authenticated. Denying access to '
+                         '%(url)s' % {
+                             'class': ImpliedPermissions.__class__.__name__,
+                             'username': user.username,
+                             'url': request.path,
+                         })
             return False
 
         if user_has_admin_or_manage_perm(request, queryset, self.get_enabling_permissions):

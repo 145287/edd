@@ -19,7 +19,7 @@ from .views import (AssaysViewSet, LinesViewSet, MeasurementTypesViewSet, Measur
                     ProtocolViewSet, StrainsViewSet, StudyAssaysViewSet,
                     StudyLinesView,
                     StudyMeasurementsViewSet, StudyValuesViewSet, StudyViewSet, UsersViewSet,
-                    _STRAIN_NESTED_RESOURCE_PARENT_PREFIX)
+                    )
 
 ###################################################################################################
 # Define a router for base REST API methods & views
@@ -51,14 +51,6 @@ study_router.register(MEASUREMENTS_RESOURCE_NAME, StudyMeasurementsViewSet,
                       base_name='study-measurements')
 study_router.register(VALUES_RESOURCE_NAME, StudyValuesViewSet, base_name='study-values')
 
-###################################################################################################
-# /rest/strains nested router
-###################################################################################################
-strain_nested_resources_router = (
-    nested_routers.NestedSimpleRouter(base_rest_api_router, _STRAIN_NESTED_RESOURCE_PARENT_PREFIX,
-                                      lookup='strains'))
-# strain_nested_resources_router.register(STUDIES_RESOURCE_NAME, StrainStudiesView,
-#                                        base_name='strain-studies')
 
 ###################################################################################################
 # Use routers & supporting frameworks to construct URL patterns
@@ -68,7 +60,6 @@ urlpatterns = [
 
     url(r'^', include(base_rest_api_router.urls)),
     url(r'^', include(study_router.urls)),
-    url(r'^', include(strain_nested_resources_router.urls)),
     url(r'^', include('rest_framework.urls', namespace='rest_framework')),
     url(r'docs/', schema_view),
     # url(r'^', not_found_view), # TODO: this improves consistency, but stops the docs from working
