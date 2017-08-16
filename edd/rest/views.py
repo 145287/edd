@@ -31,16 +31,15 @@ from jbei.rest.clients.edd.constants import (ACTIVE_STATUS_DEFAULT, ACTIVE_STATU
                                              ALT_NAMES_PARAM, CASE_SENSITIVE_PARAM,
                                              CREATED_AFTER_PARAM, CREATED_BEFORE_PARAM,
                                              DESCRIPTION_REGEX_PARAM, LOCALE_PARAM,
+                                             MEASUREMENT_TYPE_PARAM,
                                              METADATA_TYPE_CONTEXT, METADATA_TYPE_GROUP,
                                              METADATA_TYPE_I18N, METADATA_TYPE_LOCALE,
                                              METADATA_TYPE_NAME_REGEX, META_SEARCH_PARAM,
                                              NAME_REGEX_PARAM,
                                              QUERY_ACTIVE_OBJECTS_ONLY, QUERY_ANY_ACTIVE_STATUS,
                                              QUERY_INACTIVE_OBJECTS_ONLY,
-                                             SEARCH_TYPE_PARAM,
-                                             STRAIN_CASE_SENSITIVE,
-                                             STRAIN_NAME, STRAIN_NAME_REGEX, STRAIN_REGISTRY_ID,
-                                             STRAIN_REGISTRY_URL_REGEX, STUDIES_RESOURCE_NAME,
+                                             STRAIN_NAME_REGEX, STRAIN_REGISTRY_URL_REGEX,
+                                             STUDIES_RESOURCE_NAME,
                                              TYPE_GROUP_PARAM, UNIT_NAME_PARAM,
                                              UPDATED_AFTER_PARAM, UPDATED_BEFORE_PARAM)
 from jbei.rest.utils import is_numeric_pk
@@ -57,10 +56,9 @@ from .serializers import (AssaySerializer, GeneIdSerializer, LineSerializer, Mea
                           PhosphorSerializer,
                           ProteinIdSerializer, ProtocolSerializer, StrainSerializer,
                           StudySerializer, UserSerializer)
+from threadlocals.threadlocals import get_request_variable, set_request_variable
 
 logger = logging.getLogger(__name__)
-
-_QUERYSET_LOG_MESSAGE = '%(class)s.%(cls_method)s(). %(http_method)s %(url)s: kwargs=%(kwargs)s'
 
 _STRAIN_NESTED_RESOURCE_PARENT_PREFIX = r'strains'
 _STUDY_NESTED_ID_KWARG = 'study_id'
@@ -105,10 +103,10 @@ def schema_view(request):
     return response.Response(generator.get_schema(request=request))
 
 
-class CustomPermFilteringMixin(object):
+class CustomFilteringMixin(object):
     """
-    A mixin for DRF views that do their own permissions enforcement via queryset result filtering
-    (e.g. based on StudyPermissions)
+    A mixin for class-based DRF views that do their own permissions enforcement via queryset
+    result filtering (e.g. based on StudyPermissions)
     """
 
     def get_object(self):
@@ -126,19 +124,50 @@ class CustomPermFilteringMixin(object):
         return obj
 
 
-class StudyAssaysViewSet(CustomPermFilteringMixin, mixins.ListModelMixin, GenericViewSet):
+def cached_request_queryset(get_queryset):
+    """
+    A simple decorator to prevent multiple calls to get_queryset() during a single request
+    from performing the same database query twice.  Presence or absence of queryset results is
+    used by ImpliedPermissions to determine user access to Study internals based on
+    StudyPermissions, which without this decorator would result in running the query twice.
+    """
+    def wrapper(*args):
+        _CACHE_VAR_NAME = 'edd_rest_cached_queryset'
+        queryset = get_request_variable(_CACHE_VAR_NAME,
+                                        use_threadlocal_if_no_request=False)
+
+        view = args[0]
+        log_msg = ('%(class)s.%(method)s. %(http_method)s %(uri)s: kwargs=%(kwargs)s,'
+                   ' query_params = %(query_params)s' % {
+                       'class': view.__class__.__name__,
+                       'method': get_queryset.__name__,
+                       'http_method': view.request.method,
+                       'uri': view.request.path,
+                       'kwargs': view.kwargs,
+                       'query_params': view.request.query_params,
+                   })
+
+        # if we've already cached this queryset during this request, use the cached copy
+        if queryset:
+            logger.debug('Using cache for %s' % log_msg)
+            return queryset
+
+        # otherwise, cache a reference to the queryset
+        else:
+            logger.debug(log_msg)
+            queryset = get_queryset(*args)
+            set_request_variable(_CACHE_VAR_NAME, queryset, use_threadlocal_if_no_request=False)
+            return queryset
+
+    return wrapper
+
+
+class StudyAssaysViewSet(CustomFilteringMixin, mixins.ListModelMixin, GenericViewSet):
     permission_classes = [ImpliedPermissions]
     serializer_class = AssaySerializer
 
+    @cached_request_queryset
     def get_queryset(self):
-        logger.debug(_QUERYSET_LOG_MESSAGE % {
-            'class': AssaysViewSet.__name__,
-            'cls_method': self.get_queryset.__name__,
-            'http_method': self.request.method,
-            'url': self.request.path,
-            'kwargs': self.kwargs
-        })
-
         study_id = self.kwargs.get(_STUDY_NESTED_ID_KWARG)
         assay_id = self.kwargs.get(self.lookup_url_kwarg, None)
 
@@ -146,29 +175,20 @@ class StudyAssaysViewSet(CustomPermFilteringMixin, mixins.ListModelMixin, Generi
                                   identifier_override=assay_id, study_id=study_id)
 
 
-class AssaysViewSet(CustomPermFilteringMixin, viewsets.ReadOnlyModelViewSet):
+class AssaysViewSet(CustomFilteringMixin, viewsets.ReadOnlyModelViewSet):
     permission_classes = [ImpliedPermissions]
     serializer_class = AssaySerializer
     lookup_url_kwarg = 'id'
 
+    @cached_request_queryset
     def get_queryset(self):
-        logger.debug((_QUERYSET_LOG_MESSAGE + ' query_params: %(query_params)s') % {
-            'class': AssaysViewSet.__name__,
-            'cls_method': self.get_queryset.__name__,
-            'http_method': self.request.method,
-            'url': self.request.path,
-            'kwargs': self.kwargs,
-            'query_params': self.request.query_params,
-        })
-
         assay_id = self.kwargs.get(self.lookup_url_kwarg, None)
-
         return build_assays_query(self.request, self.request.query_params,
                                   identifier_override=assay_id)
 
     def get_serializer_class(self):
-        # TODO: override to support optional bulk measurement / data requests for the study rather
-        # than returning just assays
+        # TODO: consider overriding to support optional bulk measurement / data requests for the
+        # study rather than returning just assays
         return super(AssaysViewSet, self).get_serializer_class()
 
 
@@ -256,11 +276,13 @@ def study_internals_initial_query(request, study_id, result_model_class):
 def build_study_id_q(prefix, identifier):
     """
     Helper method for constructing a query that includes a unique study identifier whose type is
-    determine dynimically (could be a pk, slug, or UUID).
-    :param prefix:
-    :param identifier:
-    :return:
+    determine dynamically (could be a pk, slug, or UUID).
+    :param prefix: optional prefix to prepend to filter keywords to relate the current QuerySet
+    back to Study.
+    :param identifier: the study identifier to filter on
+    :return: the filtered queryset
     """
+    # TODO: optimize by testing study_id first if it's an integer
     ############################
     # integer primary key
     ############################
@@ -352,47 +374,25 @@ def filter_id_list(query, filter_param_name, model_field_name, requested_filter_
     })
 
 
-class MeasurementsViewSet(CustomPermFilteringMixin, viewsets.ReadOnlyModelViewSet):
+class MeasurementsViewSet(CustomFilteringMixin, viewsets.ReadOnlyModelViewSet):
     permission_classes = [ImpliedPermissions]
     serializer_class = MeasurementSerializer
     lookup_url_kwarg = 'id'
 
+    @cached_request_queryset
     def get_queryset(self):
-
-        logger.debug((_QUERYSET_LOG_MESSAGE + ' query_params=%(query_params)s') % {
-            'class': MeasurementsViewSet.__name__,
-            'url': self.request.path,
-            'cls_method': self.get_queryset.__name__,
-            'http_method': self.request.method,
-            'kwargs': self.kwargs,
-            'query_params': self.request.query_params,
-        })
-
-        logger.debug('query_params: %s' % self.request.query_params)
-
         measurement_id = self.kwargs.get(self.lookup_url_kwarg)
         return build_measurements_query(self.request, self.request.query_params,
                                         id_override=measurement_id)
 
 
-class StudyMeasurementsViewSet(CustomPermFilteringMixin, mixins.ListModelMixin, GenericViewSet):
+class StudyMeasurementsViewSet(CustomFilteringMixin, mixins.ListModelMixin, GenericViewSet):
     permission_classes = [ImpliedPermissions]
     serializer_class = MeasurementSerializer
     lookup_url_kwarg = 'id'
 
+    @cached_request_queryset
     def get_queryset(self):
-
-        logger.debug((_QUERYSET_LOG_MESSAGE + ' query_params=%(query_params)s') % {
-            'class': MeasurementsViewSet.__name__,
-            'url': self.request.path,
-            'cls_method': self.get_queryset.__name__,
-            'http_method': self.request.method,
-            'kwargs': self.kwargs,
-            'query_params': self.request.query_params,
-        })
-
-        logger.debug('query_params: %s' % self.request.query_params)
-
         study_id = self.kwargs.get(_STUDY_NESTED_ID_KWARG)
         measurement_id = self.kwargs.get(self.lookup_url_kwarg)
         return build_measurements_query(self.request, self.request.query_params,
@@ -455,52 +455,29 @@ def build_measurements_query(request, query_params, id_override=None, study_id=N
         logger.debug('No %s identifier found for filtering' % _STUDY_NESTED_ID_KWARG)
         meas_query = filter_for_study_permission(request, meas_query, Measurement,
                                                  'assay__line__study__')
-
     return meas_query
 
 
-class MeasurementValuesViewSet(CustomPermFilteringMixin, viewsets.ReadOnlyModelViewSet):
+class MeasurementValuesViewSet(CustomFilteringMixin, viewsets.ReadOnlyModelViewSet):
     permission_classes = [ImpliedPermissions]
     serializer_class = MeasurementValueSerializer
     lookup_url_kwarg = 'id'
 
+    @cached_request_queryset
     def get_queryset(self):
-
-        logger.debug((_QUERYSET_LOG_MESSAGE + ' query_params=%(query_params)s') % {
-            'class': MeasurementsViewSet.__name__,
-            'url': self.request.path,
-            'cls_method': self.get_queryset.__name__,
-            'http_method': self.request.method,
-            'kwargs': self.kwargs,
-            'query_params': self.request.query_params,
-        })
-
-        logger.debug('query_params: %s' % self.request.query_params)
-
         value_id = self.kwargs.get(self.lookup_url_kwarg)
         return build_values_query(self.request,
                                   self.request.query_params,
                                   id_override=value_id)
 
 
-class StudyValuesViewSet(CustomPermFilteringMixin, mixins.ListModelMixin, GenericViewSet):
+class StudyValuesViewSet(CustomFilteringMixin, mixins.ListModelMixin, GenericViewSet):
     permission_classes = [ImpliedPermissions]
     serializer_class = MeasurementValueSerializer
     lookup_url_kwarg = 'id'
 
+    @cached_request_queryset
     def get_queryset(self):
-
-        logger.debug((_QUERYSET_LOG_MESSAGE + ' query_params=%(query_params)s') % {
-            'class': MeasurementsViewSet.__name__,
-            'url': self.request.path,
-            'cls_method': self.get_queryset.__name__,
-            'http_method': self.request.method,
-            'kwargs': self.kwargs,
-            'query_params': self.request.query_params,
-        })
-
-        logger.debug('query_params: %s' % self.request.query_params)
-
         study_id = self.kwargs.get(_STUDY_NESTED_ID_KWARG)
         value_id = self.kwargs.get(self.lookup_url_kwarg)
         return build_values_query(self.request,
@@ -509,9 +486,7 @@ class StudyValuesViewSet(CustomPermFilteringMixin, mixins.ListModelMixin, Generi
                                   id_override=value_id)
 
 
-def build_values_query(request, query_params, id_override=None, study_id=None,
-                       enabling_manage_perms=USE_STANDARD_PERMISSIONS,
-                       requested_study_perm_override=None):
+def build_values_query(request, query_params, id_override=None, study_id=None):
 
     ###################################################################################
     # Build the query based on value-specific search parameters, but don't execute yet
@@ -574,9 +549,9 @@ class MeasurementTypesViewSet(viewsets.ReadOnlyModelViewSet):
         MeasurementType.Group.PHOSPHOR: PhosphorSerializer,
     }
 
+    @cached_request_queryset
     def get_queryset(self):
-        identifier = self.kwargs.get('pk', None)
-
+        identifier = self.kwargs.get(self.lookup_url_kwarg, None)
         return build_measurement_type_query(self.request, self.request.query_params,
                                             identifier=identifier)
 
@@ -595,7 +570,7 @@ class MeasurementTypesViewSet(viewsets.ReadOnlyModelViewSet):
         serializer = self.serializer_lookup.get(group, None)
         if not serializer:
             raise NotImplementedError('No serializer is defined for %(param)s "%(value)s"' % {
-                'param': SEARCH_TYPE_PARAM,
+                'param': TYPE_GROUP_PARAM,
                 'value': self.search_type,
             })
 
@@ -619,7 +594,7 @@ def build_measurement_type_query(request, query_params, identifier=None):
 
     query = model_class.objects.all()
     if identifier:
-        query = query.filter(build_id_q(identifier))
+        query = query.filter(build_id_q('', identifier))
 
     if request.method in HTTP_MUTATOR_METHODS:
         require_auth_perm(request, model_class)
@@ -646,7 +621,7 @@ def build_measurement_type_query(request, query_params, identifier=None):
     return query
 
 
-class MetadataTypeViewSet(viewsets.ReadOnlyModelViewSet):
+class MetadataTypeViewSet(CustomFilteringMixin, viewsets.ReadOnlyModelViewSet):
     """
     API endpoint that supports viewing and searching .EDD's metadata types
     TODO: implement/confirm access controls for unsafe methods, then make writable
@@ -656,9 +631,10 @@ class MetadataTypeViewSet(viewsets.ReadOnlyModelViewSet):
     # related  comment/URL above
     permission_classes = [ImpliedPermissions]
     serializer_class = MetadataTypeSerializer
+    lookup_url_kwarg = 'id'
 
     def get_queryset(self):
-        identifier = self.kwargs.get('pk', None)
+        identifier = self.kwargs.get(self.lookup_url_kwarg, None)
 
         queryset = MetadataType.objects.all()
         return build_metadata_type_query(queryset, self.request.query_params,
@@ -721,16 +697,17 @@ DEFAULT_UNITS_QUERY_PARAM = 'default_units'
 CATEGORIZATION_QUERY_PARAM = 'categorization'
 
 
-class MeasurementUnitViewSet(viewsets.ReadOnlyModelViewSet):
+class MeasurementUnitViewSet(CustomFilteringMixin, viewsets.ReadOnlyModelViewSet):
     queryset = MeasurementUnit.objects.all()  # must be defined for DjangoModelPermissions
     serializer_class = MeasurementUnitSerializer
+    lookup_url_kwarg = 'id'
 
     def get_queryset(self):
 
         queryset = MeasurementUnit.objects.all()
 
         # Note: at the time of writing, MeasurementUnit doesn't support a UUID
-        pk = self.kwargs.get('pk', None)
+        pk = self.kwargs.get(self.lookup_url_kwarg, None)
 
         return build_measurement_units_query(self.request.query_params, queryset, pk)
 
@@ -754,7 +731,7 @@ def build_measurement_units_query(query_params, queryset, identifier=None):
     return queryset
 
 
-class ProtocolViewSet(CustomPermFilteringMixin, viewsets.ReadOnlyModelViewSet):
+class ProtocolViewSet(CustomFilteringMixin, viewsets.ReadOnlyModelViewSet):
     queryset = Protocol.objects.all()  # must be defined for DjangoModelPermissions
     serializer_class = ProtocolSerializer
     lookup_url_kwarg = 'id'
@@ -847,8 +824,7 @@ def _optional_regex_filter(query_params_dict, queryset, data_member_name, regex_
 
 class MetadataGroupViewSet(viewsets.ReadOnlyModelViewSet):
     """
-    API endpoint that supports view-only access to EDD's metadata groups.
-    TODO: implement/confirm access controls for unsafe methods, then make this writable
+    API endpoint that supports read-only access to EDD's metadata groups.
     """
     queryset = MetadataGroup.objects.all()  # must be defined for DjangoModelPermissions
     serializer_class = MetadataGroupSerializer
@@ -859,7 +835,7 @@ class MetadataGroupViewSet(viewsets.ReadOnlyModelViewSet):
         """
 
 
-class UserViewSet(viewsets.ReadOnlyModelViewSet):
+class UsersViewSet(viewsets.ReadOnlyModelViewSet):
     # TODO: allows unrestricted read access
     permission_classes = [IsAuthenticated, DjangoModelPermissions]
     """
@@ -868,8 +844,13 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
     """
     serializer_class = UserSerializer
 
+    @cached_request_queryset
     def get_queryset(self):
-        return User.objects.filter(self.kwargs['user'])
+        user = self.kwargs.get('pk')
+
+        if user:
+            return User.objects.filter(pk=user)
+        return User.objects.filter()
 
 
 PAGING_PARAMETER_DESCRIPTIONS = """
@@ -888,12 +869,12 @@ PAGING_PARAMETER_DESCRIPTIONS = """
     """
 
 
-class StrainViewSet(mixins.CreateModelMixin,
-                    mixins.RetrieveModelMixin,
-                    mixins.UpdateModelMixin,
-                    # mixins.DestroyModelMixin,  TODO: implement & test later as a low priority
-                    mixins.ListModelMixin,
-                    GenericViewSet):
+class StrainsViewSet(CustomFilteringMixin, mixins.CreateModelMixin,
+                     mixins.RetrieveModelMixin,
+                     mixins.UpdateModelMixin,
+                     # mixins.DestroyModelMixin,  TODO: implement & test later as a low priority
+                     mixins.ListModelMixin,
+                     GenericViewSet):
     """
     Defines the set of REST API views available for the base /rest/strain/ resource. Nested views
     are defined elsewhere (e.g. StrainStudiesView).
@@ -907,46 +888,14 @@ class StrainViewSet(mixins.CreateModelMixin,
     serializer_class = StrainSerializer
     lookup_url_kwarg = BASE_STRAIN_URL_KWARG
 
-    def get_object(self):
-        """
-        Overrides the default implementation to provide flexible lookup for Strain detail
-        views (either based on local numeric primary key, or based on the strain UUID from ICE
-        """
-        queryset = self.get_queryset()
-
-        # unlike the DRF example code: for consistency in permissions enforcement, just do all the
-        # filtering in get_queryset() and pass empty filters here
-        filters = {}
-        obj = get_object_or_404(queryset, **filters)
-        self.check_object_permissions(self.request, obj)
-        return obj
-
+    @cached_request_queryset
     def get_queryset(self):
-        """
-        Overrides the default implementation to provide:
-        * flexible list view filtering based on a number of useful input parameters
-        * flexible strain detail lookup by local numeric pk OR by UUID from ICE
-        """
-
-        logger.debug(_QUERYSET_LOG_MESSAGE % {
-            'class': self.__class__.__name__,
-            'cls_method': self.get_queryset.__name__,
-            'http_method': self.request.method,
-            'url': self.request.path,
-            'kwargs': self.kwargs})
-
-        # build a query, filtering by the provided user inputs (starting out unfiltered).
-        # TODO: Strain has been recently updated to be an EDDObject.  We can reuse more code here
-        # than before, and also likely take advantage of newer/more standard search features in
-        # optional_edd_object_filtering().
-        # However, there are now two UUID's for a strain...
         query = Strain.objects.all()
 
         # if a strain UUID or local numeric pk was provided via the URL, get it
         identifier = None
         if self.kwargs:
             identifier = self.kwargs.get(self.lookup_url_kwarg)
-
             try:
                 if is_numeric_pk(identifier):
                     query = query.filter(pk=int(identifier))
@@ -960,11 +909,6 @@ class StrainViewSet(mixins.CreateModelMixin,
             # parse optional query parameters
             query_params = self.request.query_params
             identifier = query_params.get(self.lookup_url_kwarg)
-            local_pk_filter = query_params.get('pk')
-            registry_id_filter = query_params.get(STRAIN_REGISTRY_ID)
-            registry_url_regex_filter = query_params.get(STRAIN_REGISTRY_URL_REGEX)
-            case_sensitive = query_params.get(STRAIN_CASE_SENSITIVE)
-            name_filter = query_params.get(STRAIN_NAME)
 
             try:
                 # if provided an ambiguously-defined unique ID for the strain, apply it based
@@ -975,28 +919,11 @@ class StrainViewSet(mixins.CreateModelMixin,
                     else:
                         query = query.filter(registry_id=UUID(identifier))
 
-                if local_pk_filter:
-                    identifier = local_pk_filter
-                    query = query.filter(pk=local_pk_filter)
-
-                if registry_id_filter:
-                    identifier = registry_id_filter
-                    query = query.filter(registry_id=UUID(registry_id_filter))
             except ValueError:
                 raise ParseError('Identifier %s is not a valid integer nor UUID' % identifier)
 
-            if registry_url_regex_filter:
-                if case_sensitive:
-                    query = query.filter(registry_url__regex=registry_url_regex_filter)
-                else:
-                    query = query.filter(registry_url__iregex=registry_url_regex_filter)
-
-            if name_filter:
-                if case_sensitive:
-                    query = query.filter(name__contains=name_filter)
-                else:
-                    query = query.filter(name__icontains=name_filter)
-
+            query = _optional_regex_filter(query_params, query, 'registry_url',
+                                           STRAIN_REGISTRY_URL_REGEX, '')
             query = _optional_regex_filter(query_params, query, 'name', STRAIN_NAME_REGEX, None)
             query = _optional_timestamp_filter(query, query_params)
 
@@ -1060,7 +987,7 @@ class StrainViewSet(mixins.CreateModelMixin,
                  description: "The requested maximum page size for results. May not be respected
                  by EDD if this value exceeds the server's maximum supported page size."
             """
-        return super(StrainViewSet, self).list(request, *args, **kwargs)
+        return super(StrainsViewSet, self).list(request, *args, **kwargs)
 
     def retrieve(self, request, *args, **kwargs):
         """
@@ -1077,7 +1004,7 @@ class StrainViewSet(mixins.CreateModelMixin,
                - code: 500
                  message: Internal server error
         """
-        return super(StrainViewSet, self).retrieve(request, *args, **kwargs)
+        return super(StrainsViewSet, self).retrieve(request, *args, **kwargs)
 
     def create(self, request, *args, **kwargs):
         """
@@ -1098,7 +1025,7 @@ class StrainViewSet(mixins.CreateModelMixin,
         # granted to ICE itself to update strain data for ICE-72).  For now, we can just limit
         # strain creation privileges to control consistency of newly-created strains (which
         # should be created via the UI in most cases anyway).
-        return super(StrainViewSet, self).create(request, *args, **kwargs)
+        return super(StrainsViewSet, self).create(request, *args, **kwargs)
 
     def update(self, request, *args, **kwargs):
         """
@@ -1116,7 +1043,7 @@ class StrainViewSet(mixins.CreateModelMixin,
                - code: 500
                  message: Internal server error
         """
-        return super(StrainViewSet, self).update(request, *args, **kwargs)
+        return super(StrainsViewSet, self).update(request, *args, **kwargs)
 
     def partial_update(self, request, *args, **kwargs):
         """
@@ -1204,7 +1131,7 @@ def filter_by_active_status(queryset, active_status=QUERY_ACTIVE_OBJECTS_ONLY, q
     return queryset.filter(active_criterion)
 
 
-class StudyViewSet(mixins.CreateModelMixin,
+class StudyViewSet(CustomFilteringMixin, mixins.CreateModelMixin,
                    mixins.RetrieveModelMixin,
                    mixins.UpdateModelMixin,
                    # TODO: implement & test later as a low priority...study deletion via the
@@ -1223,22 +1150,8 @@ class StudyViewSet(mixins.CreateModelMixin,
     permission_classes = [StudyResourcePermissions]
     lookup_url_kwarg = 'id'
 
-    def get_object(self):
-        """
-        Overrides the default implementation to provide flexible lookup for Study detail
-        views (either based on local numeric primary key, slug, or UUID
-        """
-        queryset = self.get_queryset()
-
-        # unlike the DRF example code: for consistency in permissions enforcement, just do all the
-        # filtering in get_queryset() and pass empty filters here
-        filters = {}
-        obj = get_object_or_404(queryset, **filters)
-        self.check_object_permissions(self.request, obj)
-        return obj
-
+    @cached_request_queryset
     def get_queryset(self):
-
         params = self.request.query_params
         study_id = self.kwargs.get(self.lookup_url_kwarg, None)
         return build_study_query(self.request, params, identifier=study_id)
@@ -1507,17 +1420,13 @@ def require_auth_perm(request, result_model_class,
         return False
 
     raise PermissionDenied('User %(user)s does not have required permission to access '
-                           '%(method) %(uri)' % {
+                           '%(method)s %(uri)s' % {
                                'user': user,
                                'method': request.method,
                                'uri': request.path, })
 
-# Notes on DRF nested views:
-# lookup_url_kwargs doesn't seem to be used/respected by nested routers in the same way as plain
-# DRF - see StrainStudiesView for an example that works, but isn't clearly the most clear yet
 
-
-class StrainStudiesView(viewsets.ReadOnlyModelViewSet):
+class StrainStudiesView(CustomFilteringMixin, mixins.ListModelMixin, GenericViewSet):
     """
     API endpoint that allows read-only access to the studies a given strain is used in (subject to
     user/role read access privileges on the studies).
@@ -1525,20 +1434,7 @@ class StrainStudiesView(viewsets.ReadOnlyModelViewSet):
     serializer_class = StudySerializer
     lookup_url_kwarg = 'study_pk'
 
-    def get_object(self):
-        """
-        Overrides the default implementation to provide flexible lookup for nested strain
-        views (either based on local numeric primary key, or based on the strain UUID from ICE
-        """
-        # unlike the example, just do all the filtering in get_queryset() for consistency
-        filters = {}
-        queryset = self.get_queryset()
-
-        obj = get_object_or_404(queryset, **filters)
-        # verify class-level strain access. study permissions are enforced in get_queryset()
-        self.check_object_permissions(self.request, obj)
-        return obj
-
+    @cached_request_queryset
     def get_queryset(self):
         kwarg = '%s_%s' % (_STRAIN_NESTED_RESOURCE_PARENT_PREFIX, BASE_STRAIN_URL_KWARG)
         # get the strain identifier, which could be either a numeric (local) primary key, or a UUID
@@ -1569,7 +1465,7 @@ class StrainStudiesView(viewsets.ReadOnlyModelViewSet):
             study_pks_query = Line.objects.filter(strains__registry_id=strain_uuid)
         study_pks_query = filter_by_active_status(
                 study_pks_query, active_status=line_active_status).values_list(
-                'study__pk').distinct()  # distict() needed bc of line active status filtering
+                'study__pk').distinct()  # distinct() needed bc of line active status filtering
         studies_query = Study.objects.filter(pk__in=study_pks_query)
 
         study_pk = self.kwargs.get(self.lookup_url_kwarg)
@@ -1614,17 +1510,13 @@ class StudyStrainsView(viewsets.ReadOnlyModelViewSet):
         self.check_object_permissions(self.request, obj)
         return obj
 
+    @cached_request_queryset
     def get_queryset(self):
         # TODO: this query takes way too long to complete (at least in
         # local tests on a laptop) for users who are granted read
         # permission on a single study, but have no superuser basis for accessing it . Performance
         # problem appears to be related to study_user_permission_q and related joins. Consider
         # using Solr to index in addition to optimizing the query.
-        logger.debug('%(class)s.%(method)s: kwargs = %(kwargs)s' % {
-            'class':  StudyStrainsView.__name__,
-            'method': self.get_queryset.__name__,
-            'kwargs': self.kwargs
-        })
 
         # extract URL keyword arguments
         study_id = self.kwargs[self.STUDY_URL_KWARG]
@@ -1663,7 +1555,7 @@ class StudyStrainsView(viewsets.ReadOnlyModelViewSet):
         return strain_query
 
 
-class LinesViewSet(CustomPermFilteringMixin, viewsets.ReadOnlyModelViewSet):
+class LinesViewSet(CustomFilteringMixin, viewsets.ReadOnlyModelViewSet):
     """
             API endpoint that allows to be searched, viewed, and edited.
         """
@@ -1671,19 +1563,13 @@ class LinesViewSet(CustomPermFilteringMixin, viewsets.ReadOnlyModelViewSet):
     serializer_class = LineSerializer
     lookup_url_kwarg = 'id'
 
+    @cached_request_queryset
     def get_queryset(self):
-        logger.debug('in %(class)s.%(method)s. kwargs=%(kwargs)s, query_params = '
-                     '%(query_params)s' % {
-                         'class': LinesViewSet.__name__,
-                         'method': self.get_queryset.__name__,
-                         'kwargs': self.kwargs,
-                         'query_params': self.request.query_params,
-                     })
         line_id = self.kwargs.get(self.lookup_url_kwarg, None)
         return build_lines_query(self.request, self.request.query_params, id_override=line_id)
 
 
-class StudyLinesView(CustomPermFilteringMixin, mixins.ListModelMixin, GenericViewSet):
+class StudyLinesView(CustomFilteringMixin, mixins.ListModelMixin, GenericViewSet):
     """
         API endpoint that allows lines within a study to be searched, viewed, and edited.
     """
@@ -1691,12 +1577,8 @@ class StudyLinesView(CustomPermFilteringMixin, mixins.ListModelMixin, GenericVie
     serializer_class = LineSerializer
     lookup_url_kwarg = 'id'
 
+    @cached_request_queryset
     def get_queryset(self):
-        logger.debug('in %(class)s.%(method)s. kwargs=%(kwargs)s' % {
-            'class': StudyLinesView.__name__,
-            'method': self.get_queryset.__name__,
-            'kwargs': self.kwargs
-        })
         line_id = self.kwargs.get(self.lookup_url_kwarg, None)
         study_id = self.kwargs.get(_STUDY_NESTED_ID_KWARG, None)
         return build_lines_query(self.request, self.request.query_params, study_id=study_id,
@@ -1801,26 +1683,6 @@ def build_lines_query(request, query_params, study_id=None, id_override=None):
         query = filter_for_study_permission(request, query, Line, 'study__')
 
     return query
-
-
-@api_view()
-def search_test_view(request):
-    msg = '%s %s Query params: %s ' % (request.method, request.path, request.query_params)
-    logger.debug(msg)
-    meta_comparisons = request.query_params.get(META_SEARCH_PARAM)
-
-    query = Line.objects.all()
-
-    if not meta_comparisons:  # TODO: security! merge in with existing lines search
-        return query
-
-    if isinstance(meta_comparisons, list):
-        comparison_count = len(meta_comparisons)
-        for index, comparison in enumerate(meta_comparisons):
-            query = _filter_for_metadata(query, comparison, index + 1, comparison_count)
-    else:
-        query = _filter_for_metadata(query, meta_comparisons, 1, 1)
-    return JsonResponse({'msg': msg})
 
 
 @api_view()

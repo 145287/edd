@@ -1,11 +1,11 @@
 """
-Defines serializers for EDD's nascent REST API, as supported by the django rest framework
+Defines serializers for EDD's nascent REST API, as supported by the Django Rest Framework
 (http://www.django-rest-framework.org/)
 """
 
 from rest_framework import serializers
 
-from main.models import (Assay, EDDObject, GeneIdentifier, Line, Measurement, MeasurementType,
+from main.models import (Assay, GeneIdentifier, Line, Measurement, MeasurementType,
                          MeasurementUnit, MeasurementValue, Metabolite, MetadataGroup,
                          MetadataType, Phosphor,
                          ProteinIdentifier, Protocol, Strain, Study, Update, User)
@@ -20,14 +20,9 @@ class UpdateSerializer(serializers.ModelSerializer):
         fields = ('mod_time', 'mod_by', 'path', 'origin')
         depth = 0
 ###################################################################################################
+
+
 _MEASUREMENT_TYPE_FIELDS = ('pk', 'uuid', 'type_name', 'type_group', 'type_source', 'alt_names')
-
-
-class EDDObjectSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = EDDObject
-        fields = ('pk', 'name', 'description', 'uuid', 'created', 'updated', 'meta_store',
-                  'active')
 
 
 class AssaySerializer(serializers.ModelSerializer):
@@ -77,10 +72,11 @@ class LineSerializer(serializers.ModelSerializer):
             return Line.objects.create(**validated_data)
 
 
-class UserSerializer(serializers.HyperlinkedModelSerializer):
+class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         depth = 0
+        fields = ('pk', 'username', 'first_name', 'last_name', 'email', 'is_active')
 
 
 class MetadataTypeSerializer(serializers.ModelSerializer):
@@ -142,9 +138,6 @@ class ProtocolSerializer(serializers.ModelSerializer):
         depth = 0
         fields = ('pk', 'uuid', 'name', 'description', 'owned_by', 'variant_of', 'default_units',
                   'categorization')
-
-
-
 
 
 class MetadataGroupSerializer(serializers.ModelSerializer):

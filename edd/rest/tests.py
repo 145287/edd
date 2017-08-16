@@ -27,7 +27,7 @@ from rest_framework.status import (HTTP_200_OK, HTTP_201_CREATED, HTTP_400_BAD_R
                                    HTTP_405_METHOD_NOT_ALLOWED)
 from rest_framework.test import APITestCase
 
-from edd.rest.views import (SEARCH_TYPE_PARAM, _KEY_LOOKUP_PATTERN, _NON_KEY_LOOKUP_PATTERN)
+from edd.rest.views import (_KEY_LOOKUP_PATTERN, _NON_KEY_LOOKUP_PATTERN)
 from jbei.rest.clients.edd.constants import (ACTIVE_STATUS_PARAM, ASSAYS_RESOURCE_NAME,
                                              CASE_SENSITIVE_PARAM, CREATED_AFTER_PARAM,
                                              CREATED_BEFORE_PARAM, DESCRIPTION_REGEX_PARAM,
@@ -606,9 +606,7 @@ class StrainResourceTests(EddApiTestCaseMixin, APITestCase):
                                                  post_data)
 
         # verify that unprivileged user can't create a strain
-        self._assert_authenticated_post_denied(_URL,
-                                               self.unprivileged_user,
-                                               post_data)
+        self._assert_authenticated_post_denied(_URL, self.unprivileged_user, post_data)
 
         # verify that staff permission alone isn't enough to create a strain
         self._assert_authenticated_post_denied(_URL, self.staff_user, post_data)
@@ -617,9 +615,7 @@ class StrainResourceTests(EddApiTestCaseMixin, APITestCase):
         self._assert_authenticated_post_denied(_URL, self.staff_strain_changer, post_data)
 
         # verify that an administrator can create a strain
-        self._assert_authenticated_post_allowed(_URL,
-                                                self.superuser,
-                                                post_data)
+        self._assert_authenticated_post_allowed(_URL, self.superuser, post_data)
 
         # verify that UUID input is ignored during strain creation
         post_data[STRAIN_REG_ID_KEY] = self.study_strain1.registry_id
@@ -635,9 +631,7 @@ class StrainResourceTests(EddApiTestCaseMixin, APITestCase):
             STRAIN_REG_ID_KEY:       None,
             STRAIN_REG_URL_KEY:      None,
         }
-        self._assert_authenticated_post_allowed(_URL,
-                                                self.staff_strain_creator,
-                                                post_data)
+        self._assert_authenticated_post_allowed(_URL, self.staff_strain_creator, post_data)
 
     def test_strain_change(self):
         print(SEPARATOR)
@@ -879,6 +873,7 @@ def to_paged_result_dict(expected_values, values_converter):
     }
 
 
+# TODO: resolve William's related comment
 def compare_paged_result_dict(testcase, expected, observed, order_agnostic=True,
                               partial_response=False):
     """
@@ -891,8 +886,6 @@ def compare_paged_result_dict(testcase, expected, observed, order_agnostic=True,
     definition of the object.  In this case, only the provided values will be compared.
     """
     # compare result count
-    logger.debug('Expected: %s' % expected)
-    logger.debug('Actual: %s' % observed)
     compare_dict_value(testcase, RESULT_COUNT_KEY, expected, observed)
 
     # compare next page link
@@ -1189,6 +1182,7 @@ def _create_user(username, email='staff.study@localhost',
     return user
 
 
+# TODO: consider StudyInternalsTestCase / delete some code here
 class StudiesTests(EddApiTestCaseMixin, APITestCase):
     """
     Tests access controls and HTTP return codes for queries to the base /rest/studies REST API
@@ -1663,10 +1657,10 @@ class StudiesTests(EddApiTestCaseMixin, APITestCase):
         print(SEPARATOR)
 
         # build up a list of all the valid URL's by which the study details can be accessed\
-        study_detail_urls = make_study_url_variants(self.study)
+        study_detail_urls = UriBuilder(self.study, [], [])
 
         # test that permissions are applied consistently across each URL used to access the study
-        for study_detail_url in study_detail_urls:
+        for study_detail_url in study_detail_urls.detail_uris:
             self._enforce_study_read_access(study_detail_url, False, expected_values=self.study)
 
         # create / configure studies and related strains to test strain access via
@@ -1679,8 +1673,8 @@ class StudiesTests(EddApiTestCaseMixin, APITestCase):
         EveryonePermission.objects.create(study=everyone_read_study,
                                           permission_type=StudyPermission.READ)
 
-        everyone_read_urls = make_study_url_variants(everyone_read_study)
-        for everyone_read_url in everyone_read_urls:
+        everyone_read_uris = UriBuilder(everyone_read_study, [], [])
+        for everyone_read_url in everyone_read_uris.detail_uris:
 
             # verify that an un-authenticated request gets a 404
             self._assert_unauthenticated_get_denied(everyone_read_url)
@@ -1695,8 +1689,8 @@ class StudiesTests(EddApiTestCaseMixin, APITestCase):
         EveryonePermission.objects.create(study=everyone_write_study,
                                           permission_type=StudyPermission.WRITE)
 
-        everyone_write_urls = make_study_url_variants(everyone_write_study)
-        for everyone_write_url in everyone_write_urls:
+        everyone_write_uris = UriBuilder(everyone_write_study, [], [])
+        for everyone_write_url in everyone_write_uris.detail_uris:
 
             # verify that an un-authenticated request gets a 404
             self._assert_unauthenticated_get_denied(everyone_write_url)
@@ -2914,9 +2908,7 @@ class SearchLinesResourceTest(EddApiTestCaseMixin, APITestCase):
         # test that the default search filter returns only active lines.
         # Note: we'll use the superuser account for all of these tests since it needs fewer
         # queries.  There's a separate method to test permissions enforcement.
-        search_params = {
-            SEARCH_TYPE_PARAM: 'lines'
-        }
+        search_params = {}
         expected_results = [self.line]
         self._assert_authenticated_search_allowed(search_url, self.superuser,
                                                   request_params=search_params,
@@ -3186,7 +3178,6 @@ class SearchLinesResourceTest(EddApiTestCaseMixin, APITestCase):
 
         # test single-bounded search where inclusive start boundary is set
         search_params = {
-            SEARCH_TYPE_PARAM: 'lines',
             CREATED_AFTER_PARAM: line1.created.mod_time,
         }
         expected_values = [line1, line2, line3]
@@ -3196,7 +3187,6 @@ class SearchLinesResourceTest(EddApiTestCaseMixin, APITestCase):
                                                   expected_values=expected_values)
 
         search_params = {
-            SEARCH_TYPE_PARAM: 'lines',
             UPDATED_AFTER_PARAM: line1.created.mod_time,
         }
         self._assert_authenticated_search_allowed(search_url,
@@ -3206,7 +3196,6 @@ class SearchLinesResourceTest(EddApiTestCaseMixin, APITestCase):
 
         # test single-bounded search where exclusive end boundary is set
         search_params = {
-            SEARCH_TYPE_PARAM: 'lines',
             CREATED_BEFORE_PARAM: line3.created.mod_time,
         }
         expected_values = [self.line, line1, line2, ]
@@ -3215,7 +3204,7 @@ class SearchLinesResourceTest(EddApiTestCaseMixin, APITestCase):
                                                   expected_values=expected_values)
 
         search_params = {
-            SEARCH_TYPE_PARAM: 'lines', UPDATED_BEFORE_PARAM: line3.updated.mod_time,
+            UPDATED_BEFORE_PARAM: line3.updated.mod_time,
         }
         expected_values = [self.line, line2, line2, ]
         self._assert_authenticated_search_allowed(search_url, self.superuser,
@@ -3224,7 +3213,6 @@ class SearchLinesResourceTest(EddApiTestCaseMixin, APITestCase):
 
         # for good measure, test searches bounded on both ends
         search_params = {
-            SEARCH_TYPE_PARAM: 'lines',
             CREATED_AFTER_PARAM: line1.created.mod_time,
             CREATED_BEFORE_PARAM: line2.created.mod_time,
         }
@@ -3233,7 +3221,6 @@ class SearchLinesResourceTest(EddApiTestCaseMixin, APITestCase):
                                                   expected_values=[line1])
 
         search_params = {
-            SEARCH_TYPE_PARAM: 'lines',
             UPDATED_AFTER_PARAM: line2.updated.mod_time,
             UPDATED_BEFORE_PARAM: line3.updated.mod_time,
         }
@@ -3254,38 +3241,6 @@ class SearchLinesResourceTest(EddApiTestCaseMixin, APITestCase):
                 expected_values=expected_values,
                 partial_response=partial_response,
                 request_params=request_params)
-
-
-# TODO: search for / remove usages
-def make_study_url_variants(study, nested_resource_url=None, nested_resource=None):
-    study_detail_pattern = '%(base_studies_url)s/%(id)s/'
-    pk_based_url = study_detail_pattern % {
-        'base_studies_url': STUDIES_RESOURCE_URI, 'id': str(study.pk),
-    }
-    uuid_based_url = study_detail_pattern % {
-        'base_studies_url': STUDIES_RESOURCE_URI, 'id': str(study.uuid),
-    }
-    slug_based_url = study_detail_pattern % {
-        'base_studies_url': STUDIES_RESOURCE_URI, 'id': str(study.slug),
-    }
-
-    study_urls = (pk_based_url, uuid_based_url, slug_based_url,)
-
-    if not nested_resource_url:
-        return study_urls
-
-    nested_resource_urls = []
-
-    for study_detail_url in study_urls:
-        if not nested_resource:
-            nested_list_url = study_detail_url + nested_resource_url + '/'
-            nested_resource_urls.append(nested_list_url)
-        else:
-            nested_detail_url = study_detail_url + nested_resource_url + '/%s/'
-            nested_resource_urls.append(nested_detail_url % nested_resource.pk)
-            nested_resource_urls.append(nested_detail_url % nested_resource.uuid)
-
-    return nested_resource_urls
 
 
 def make_url_variants(list_url, edd_obj):

@@ -5,17 +5,20 @@ from django.conf.urls import include, url
 
 from jbei.rest.clients.edd.constants import (ASSAYS_RESOURCE_NAME, LINES_RESOURCE_NAME,
                                              MEASUREMENTS_RESOURCE_NAME,
+                                             MEASUREMENT_TYPES_RESOURCE_NAME,
+                                             MEASUREMENT_UNITS_RESOURCE_NAME,
                                              METADATA_GROUPS_RESOURCE_NAME,
-                                             METADATA_TYPES_RESOURCE_NAME, STRAINS_RESOURCE_NAME,
-                                             STUDIES_RESOURCE_NAME,
+                                             METADATA_TYPES_RESOURCE_NAME,
+                                             PROTOCOLS_RESOURCE_NAME, STRAINS_RESOURCE_NAME,
+                                             STUDIES_RESOURCE_NAME, USERS_RESOURCE_NAME,
                                              VALUES_RESOURCE_NAME)
 from views import schema_view
 from .views import (AssaysViewSet, LinesViewSet, MeasurementTypesViewSet, MeasurementUnitViewSet,
                     MeasurementValuesViewSet, MeasurementsViewSet, MetadataGroupViewSet,
                     MetadataTypeViewSet,
-                    ProtocolViewSet, StrainStudiesView, StrainViewSet, StudyAssaysViewSet,
+                    ProtocolViewSet, StrainsViewSet, StudyAssaysViewSet,
                     StudyLinesView,
-                    StudyMeasurementsViewSet, StudyValuesViewSet, StudyViewSet,
+                    StudyMeasurementsViewSet, StudyValuesViewSet, StudyViewSet, UsersViewSet,
                     _STRAIN_NESTED_RESOURCE_PARENT_PREFIX)
 
 ###################################################################################################
@@ -27,12 +30,15 @@ base_rest_api_router.register(LINES_RESOURCE_NAME, LinesViewSet, 'lines')
 base_rest_api_router.register(MEASUREMENTS_RESOURCE_NAME, MeasurementsViewSet, 'measurements')
 base_rest_api_router.register(VALUES_RESOURCE_NAME, MeasurementValuesViewSet, 'values')
 base_rest_api_router.register(STUDIES_RESOURCE_NAME, StudyViewSet, STUDIES_RESOURCE_NAME)
-base_rest_api_router.register(STRAINS_RESOURCE_NAME, StrainViewSet, STRAINS_RESOURCE_NAME)
-base_rest_api_router.register(r'measurement_units', MeasurementUnitViewSet, 'measurement_units')
+base_rest_api_router.register(STRAINS_RESOURCE_NAME, StrainsViewSet, STRAINS_RESOURCE_NAME)
+base_rest_api_router.register(MEASUREMENT_UNITS_RESOURCE_NAME, MeasurementUnitViewSet,
+                              'measurement_units')
 base_rest_api_router.register(METADATA_TYPES_RESOURCE_NAME, MetadataTypeViewSet, 'metadata_type')
 base_rest_api_router.register(METADATA_GROUPS_RESOURCE_NAME, MetadataGroupViewSet)
-base_rest_api_router.register(r'protocols', ProtocolViewSet)
-base_rest_api_router.register(r'measurement_types', MeasurementTypesViewSet, 'measurement_types')
+base_rest_api_router.register(PROTOCOLS_RESOURCE_NAME, ProtocolViewSet)
+base_rest_api_router.register(MEASUREMENT_TYPES_RESOURCE_NAME, MeasurementTypesViewSet,
+                              'measurement_types')
+base_rest_api_router.register(USERS_RESOURCE_NAME, UsersViewSet, 'users')
 
 ###################################################################################################
 # /rest/studies nested resources
@@ -51,8 +57,8 @@ study_router.register(VALUES_RESOURCE_NAME, StudyValuesViewSet, base_name='study
 strain_nested_resources_router = (
     nested_routers.NestedSimpleRouter(base_rest_api_router, _STRAIN_NESTED_RESOURCE_PARENT_PREFIX,
                                       lookup='strains'))
-strain_nested_resources_router.register(STUDIES_RESOURCE_NAME, StrainStudiesView,
-                                        base_name='strain-studies')
+# strain_nested_resources_router.register(STUDIES_RESOURCE_NAME, StrainStudiesView,
+#                                        base_name='strain-studies')
 
 ###################################################################################################
 # Use routers & supporting frameworks to construct URL patterns

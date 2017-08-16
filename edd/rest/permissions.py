@@ -218,25 +218,24 @@ def user_has_admin_or_manage_perm(
     # if user has been explicitly granted any of the class-level django.contrib.auth permissions
     # that enable access
     enabling_perms = perms_getter(http_method, queryset.model)
-    # logger.debug('Enabling permissions for %(method)s %(url)s: %(perms)s' % {
-    #     'method': request.method, 'url': request.path, 'perms': ', '.join(enabling_perms)
-    # })
     for permission in enabling_perms:
         if user.has_perm(permission):
-            logger.debug('User %(username)s has class-level django.contrib.auth '
-                         'permission %(permission)s '
-                         'on resource %(method)s %(url)s' % {
-                             'username': user.username, 'permission': permission,
-                             'method':   request.method, 'url': request.path,
-                         })
+            if logger.level == 'DEBUG':
+                logger.debug('User %(username)s has class-level django.contrib.auth '
+                             'permission %(permission)s '
+                             'on resource %(method)s %(url)s' % {
+                                 'username': user.username, 'permission': permission,
+                                 'method':   request.method, 'url': request.path,
+                             })
             return True, False
 
-    logger.debug('User %(username)s has no superuser or class-level auth privileges for '
-                 '%(method)s %(url)s. Enabling permissions would be %(enabling_perms)s' % {
-                     'username': user.username,
-                     'method':   request.method,
-                     'url': request.path,
-                     'enabling_perms': ', '.join(enabling_perms)})
+    if logger.level == 'DEBUG':
+        logger.debug('User %(username)s has no superuser or class-level auth privileges for '
+                     '%(method)s %(url)s. Enabling permissions would be %(enabling_perms)s' % {
+                         'username': user.username,
+                         'method':   request.method,
+                         'url': request.path,
+                         'enabling_perms': ', '.join(enabling_perms)})
     return False
 
 

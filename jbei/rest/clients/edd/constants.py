@@ -11,12 +11,16 @@ maintainability of the API across data member renames in Django's model classes
 LINES_RESOURCE_NAME = r'lines'
 ASSAYS_RESOURCE_NAME = r'assays'
 MEASUREMENTS_RESOURCE_NAME = r'measurements'
+PROTOCOLS_RESOURCE_NAME = r'protocols'
 VALUES_RESOURCE_NAME = r'values'
 STUDIES_RESOURCE_NAME = r'studies'
 SEARCH_RESOURCE_NAME = r'search'
 STRAINS_RESOURCE_NAME = r'strains'
+MEASUREMENT_TYPES_RESOURCE_NAME = r'measurement_types'
+MEASUREMENT_UNITS_RESOURCE_NAME = r'measurement_units'
 METADATA_TYPES_RESOURCE_NAME = r'metadata_types'
 METADATA_GROUPS_RESOURCE_NAME = r'metadata_groups'
+USERS_RESOURCE_NAME = r'users'
 
 ###################################################################################################
 # General parameter names / values that apply to multiple REST resources. Consistency!! :-)
@@ -27,6 +31,7 @@ QUERY_ACTIVE_OBJECTS_ONLY = 'active'
 QUERY_INACTIVE_OBJECTS_ONLY = 'inactive'
 NAME_REGEX_PARAM = 'name_regex'
 DESCRIPTION_REGEX_PARAM = 'description'
+MEASUREMENT_TYPE_PARAM = 'measurement_type'
 META_SEARCH_PARAM = 'meta'
 META_KEY_PARAM = 'key'
 META_OPERATOR_PARAM = 'op'
@@ -34,11 +39,9 @@ META_VALUE_PARAM = 'test'
 ACTIVE_STATUS_DEFAULT = QUERY_ACTIVE_OBJECTS_ONLY
 ACTIVE_STATUS_OPTIONS = (QUERY_ANY_ACTIVE_STATUS, QUERY_ACTIVE_OBJECTS_ONLY,
                          QUERY_INACTIVE_OBJECTS_ONLY)
-
 UNKNOWN = 0
 INTRACELLULAR = 1
 EXTRACELLULAR = 2
-
 
 LOCALE_PARAM = 'locale'
 CASE_SENSITIVE_PARAM = 'case_sensitive'
@@ -52,6 +55,8 @@ UPDATED_AFTER_PARAM = 'updated_after'
 PAGE_SIZE_QUERY_PARAM = 'page_size'
 PAGE_NUMBER_QUERY_PARAM = 'page'
 RESULTS_OFFSET_QUERY_PARAM = 'offset'
+
+TYPE_GROUP_PARAM = 'type_group'
 
 ###################################################################################################
 # DRF page result key names
@@ -82,7 +87,6 @@ METADATA_CONTEXT_VALUES = (METADATA_CONTEXT_LINE, METADATA_CONTEXT_STUDY, METADA
 # Parameter names & values for /rest/measurement_units/
 ###################################################################################################
 UNIT_NAME_PARAM = 'unit_name'
-TYPE_GROUP_PARAM = 'type_group'
 ALT_NAMES_PARAM = 'alternate_names'
 
 ###################################################################################################
@@ -109,20 +113,6 @@ STUDY_LINE_NAME_REGEX = NAME_REGEX_PARAM
 
 
 ###################################################################################################
-# Parameter names & values for /rest/search/
-###################################################################################################
-SEARCH_TYPE_PARAM = 'type'
-
-SEARCH_TYPE_LINES = 'lines'
-SEARCH_TYPE_STUDIES = 'studies'
-SEARCH_TYPE_PROTOCOLS = 'protocols'
-SEARCH_TYPE_MEASUREMENT_UNITS = 'measurement_units'
-SEARCH_TYPE_METADATA_GROUPS = 'metadata_groups'
-SEARCH_TYPE_METADATA_TYPES = 'metadata_types'
-SEARCH_TYPE_STRAINS = 'strains'
-
-
-###################################################################################################
 # Others TODO: (need organization)
 ###################################################################################################
 
@@ -130,3 +120,4 @@ STRAIN_NAME_KEY = 'name'
 STRAIN_DESCRIPTION_KEY = 'description'
 STRAIN_REG_ID_KEY = 'registry_id'
 STRAIN_REG_URL_KEY = 'registry_url'
+
