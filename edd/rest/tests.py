@@ -47,6 +47,7 @@ from main.models import (Assay, EveryonePermission, GroupPermission, Line, Measu
                          MeasurementUnit, MeasurementValue, Metabolite, MetadataType,
                          ProteinIdentifier, Protocol,
                          Strain, Study, StudyPermission, Update, User, UserPermission, )
+from main.tests import factory
 
 logger = logging.getLogger(__name__)
 
@@ -700,7 +701,7 @@ class StrainResourceTests(EddApiTestCaseMixin, APITestCase):
         # results are returned.
 
         # everyone read
-        everyone_read_study = Study.objects.create(name='Readable by everyone')
+        everyone_read_study = factory.StudyFactory(name='Readable by everyone')
         EveryonePermission.objects.create(study=everyone_read_study,
                                           permission_type=StudyPermission.READ)
         everyone_read_strain = Strain.objects.create(name='Readable by everyone via study read',
@@ -714,7 +715,7 @@ class StrainResourceTests(EddApiTestCaseMixin, APITestCase):
                                                expected_values=[everyone_read_strain])
 
         # everyone write
-        everyone_write_study = Study.objects.create(name='Writable be everyone')
+        everyone_write_study = factory.StudyFactory(name='Writable be everyone')
         EveryonePermission.objects.create(study=everyone_write_study,
                                           permission_type=StudyPermission.WRITE)
         everyone_write_strain = Strain.objects.create(name='Readable by everyone via study write',
@@ -776,12 +777,11 @@ class StrainResourceTests(EddApiTestCaseMixin, APITestCase):
         # results are returned.
 
         # everyone read
-        everyone_read_study = Study.objects.create(name='Readable by everyone')
+        everyone_read_study = factory.StudyFactory(name='Readable by everyone')
         EveryonePermission.objects.create(study=everyone_read_study,
                                           permission_type=StudyPermission.READ)
-        everyone_read_strain = Strain.objects.create(name='Readable by everyone via study '
-                                                          'read',
-                                                     registry_id=uuid4())
+        everyone_read_strain = Strain.objects.create(name='Readable by everyone via study read',
+                                                    registry_id=uuid4())
         line1 = Line.objects.create(name='Everyone read line', study=everyone_read_study)
         line1.strains.add(everyone_read_strain)
         line1.save()
@@ -803,7 +803,7 @@ class StrainResourceTests(EddApiTestCaseMixin, APITestCase):
                                                    expected_values=everyone_read_strain)
 
         # everyone write
-        everyone_write_study = Study.objects.create(name='Writable be everyone')
+        everyone_write_study = factory.StudyFactory(name='Writable be everyone')
         EveryonePermission.objects.create(study=everyone_write_study,
                                           permission_type=StudyPermission.WRITE)
         everyone_write_strain = Strain.objects.create(name='Readable by everyone via study '
@@ -1289,7 +1289,7 @@ class StudiesTests(EddApiTestCaseMixin, APITestCase):
         """
 
         # create a study to be deleted
-        study = Study.objects.create(name='To be deleted')
+        study = factory.StudyFactory(name='To be deleted')
 
         study_detail_pattern = '%(base_study_url)s/%(pk)d/'
         url = study_detail_pattern % {
@@ -1334,6 +1334,7 @@ class StudiesTests(EddApiTestCaseMixin, APITestCase):
             STUDY_NAME_KEY:        'new study 1',
             STUDY_DESCRIPTION_KEY: 'strain 1 description goes here',
             STUDY_CONTACT_KEY: self.study_write_only_user.pk,
+            'contact_extra': '',
         }
 
         # verify that an un-authenticated request gets a 404
@@ -1508,7 +1509,7 @@ class StudiesTests(EddApiTestCaseMixin, APITestCase):
         # create a study everyone can read
         # wait before saving the study to guarantee a different creation/update timestamp
         sleep(0.05)
-        everyone_read_study = Study.objects.create(name='Readable by everyone')
+        everyone_read_study = factory.StudyFactory(name='Readable by everyone')
         EveryonePermission.objects.create(study=everyone_read_study,
                                           permission_type=StudyPermission.READ)
 
@@ -1520,7 +1521,7 @@ class StudiesTests(EddApiTestCaseMixin, APITestCase):
         # create a study everyone can write
         # wait before saving the study to guarantee a different creation/update timestamp
         sleep(0.05)
-        everyone_write_study = Study.objects.create(name='Writable be everyone')
+        everyone_write_study = factory.StudyFactory(name='Writable be everyone')
         EveryonePermission.objects.create(study=everyone_write_study,
                                           permission_type=StudyPermission.WRITE)
 
@@ -1626,7 +1627,7 @@ class StudiesTests(EddApiTestCaseMixin, APITestCase):
         # results are returned.
 
         # everyone read
-        everyone_read_study = Study.objects.create(name='Readable by everyone')
+        everyone_read_study = factory.StudyFactory(name='Readable by everyone')
         EveryonePermission.objects.create(study=everyone_read_study,
                                           permission_type=StudyPermission.READ)
 
@@ -1642,7 +1643,7 @@ class StudiesTests(EddApiTestCaseMixin, APITestCase):
                                                    partial_response=True)
 
         # everyone write
-        everyone_write_study = Study.objects.create(name='Writable be everyone')
+        everyone_write_study = factory.StudyFactory(name='Writable be everyone')
         EveryonePermission.objects.create(study=everyone_write_study,
                                           permission_type=StudyPermission.WRITE)
 
@@ -1671,10 +1672,7 @@ def create_study(test_class, create_auth_perms_and_users=False):
     _STUDY_WRITER_USERNAME = 'study.writer.user'
 
     # unprivileged user
-    test_class.unprivileged_user = User.objects.create_user(
-            username=_UNPRIVILEGED_USERNAME,
-            email='unprivileged@localhost',
-            password=_PLAINTEXT_TEMP_USER_PASSWORD)
+    test_class.unprivileged_user = factory.UserFactory(username=_UNPRIVILEGED_USERNAME)
 
     # superuser w/ no extra privileges
     test_class.superuser = _create_user(username=_ADMIN_USERNAME,
@@ -1725,7 +1723,7 @@ def create_study(test_class, create_auth_perms_and_users=False):
     test_class.study_default_read_group.save()
 
     # create the study
-    test_class.study = Study.objects.create(name='Test study')
+    test_class.study = factory.StudyFactory()
 
     # future-proof this test by removing any default permissions on the study that may have
     # been configured on this instance (e.g. by the EDD_DEFAULT_STUDY_READ_GROUPS setting).
@@ -1847,11 +1845,11 @@ def create_study_internals(test_class, study, deepest_model, name_prefix):
 
     # get / create measurement types, units, etc as needed for measurements. Some of these will
     # be needed in inactive/sibling_model_factory() methods rather than here
-    models.protein = ProteinIdentifier.objects.create(accession_id='1|2|3|4',
-                                                      length=255,
-                                                      mass=1,
-                                                      type_name='Test protein',
-                                                      short_name='test prot')
+    models.protein = ProteinIdentifier.objects.get_or_create(accession_id='1|2|3|4',
+                                                             length=255,
+                                                             mass=1,
+                                                             type_name='Test protein',
+                                                             short_name='test prot')[0]
     models.ethanol_metabolite = Metabolite.objects.get(type_name='Ethanol')
     models.oxygen_metabolite = Metabolite.objects.get(type_name='O2')
 
@@ -1891,11 +1889,11 @@ def create_everyone_studies(test_class, deepest_elt):
     ###############################################################################################
     # Create studies
     ###############################################################################################
-    everyone_read_study = Study.objects.create(name='Study')
+    everyone_read_study = factory.StudyFactory(name='Study')
     EveryonePermission.objects.create(study=everyone_read_study,
                                       permission_type=StudyPermission.READ)
 
-    everyone_write_study = Study.objects.create(name='Writable by everyone')
+    everyone_write_study = factory.StudyFactory(name='Writable by everyone')
     EveryonePermission.objects.create(study=everyone_write_study,
                                       permission_type=StudyPermission.WRITE)
 
