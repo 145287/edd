@@ -1834,6 +1834,9 @@ class MeasurementType(models.Model, EDDSerialize):
     def get_model_class(cls, type_group):
         return cls._GROUP_TO_MODEL_CLASS.get(type_group)
 
+    def export_name(self):
+        return self.type_name
+
     # TODO: replace use of this in tests, then remove
     @classmethod
     def create_protein(cls, type_name, short_name=None):
@@ -1877,6 +1880,13 @@ class Metabolite(MeasurementType):
         null=True,
         verbose_name=_('SMILES'),
     )
+    pubchem_cid = models.IntegerField(
+        blank=True,
+        help_text=_('Unique PubChem identifier'),
+        null=True,
+        unique=True,
+        verbose_name=_('PubChem CID'),
+    )
     id_map = ArrayField(
         VarCharField(),
         default=list,
@@ -1891,6 +1901,7 @@ class Metabolite(MeasurementType):
     )
 
     carbon_pattern = re.compile(r'C(\d*)')
+    pubchem_pattern = re.compile(r'cid:(\d+)')
 
     def __str__(self):
         return self.type_name
@@ -2024,6 +2035,11 @@ class ProteinIdentifier(MeasurementType):
         r'([OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9](?:[A-Z][A-Z0-9]{2}[0-9]){1,2})'  # the ID
         r'(?:\|(\w+))?'  # optional name
     )
+
+    def export_name(self):
+        if self.accession_id:
+            return self.accession_id
+        return self.type_name
 
     def to_solr_json(self):
         """ Convert the MeasurementType model to a dict structure formatted for Solr JSON. """
@@ -2411,7 +2427,7 @@ class Measurement(EDDMetadata, EDDSerialize):
     def export_columns(cls):
         return [
             table.ColumnChoice(
-                cls, 'type', _('Measurement Type'), lambda x: x.name),
+                cls, 'type', _('Measurement Type'), lambda x: x.measurement_type.export_name()),
             table.ColumnChoice(
                 cls, 'comp', _('Compartment'), lambda x: x.compartment_symbol),
             table.ColumnChoice(

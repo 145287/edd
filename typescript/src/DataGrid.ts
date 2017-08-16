@@ -967,9 +967,7 @@ class DataGrid {
     }
 
     private _basePayload():any {
-        var token:string = document.cookie.replace(
-            /(?:(?:^|.*;\s*)csrftoken\s*\=\s*([^;]*).*$)|^.*$/,
-            '$1');
+        var token:string = Utl.EDD.findCSRFToken();
         return { 'csrfmiddlewaretoken': token };
     }
 
@@ -1037,7 +1035,7 @@ class DataGrid {
     // Multiple calls to this using the same identifier will reschedule the event, removing the old timer.
     scheduleTimer(uid:string, func:() => any):DataGrid {
         if (this._timers[uid]) { clearTimeout ( this._timers[uid] ); }
-        this._timers[uid] = setTimeout( func, 10 );
+        this._timers[uid] = +setTimeout( func, 10 );
         return this;
     }
 
@@ -1844,7 +1842,7 @@ class DGSearchWidget extends DataGridHeaderWidget {
                 if (this.typingTimeout) {
                     clearTimeout(this.typingTimeout);
                 }
-                this.typingTimeout = setTimeout(this.typingDelayExpirationHandler, this.typingDelay);
+                this.typingTimeout = +setTimeout(this.typingDelayExpirationHandler, this.typingDelay);
                 break;
         }
     }
