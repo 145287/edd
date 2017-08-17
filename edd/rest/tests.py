@@ -46,7 +46,7 @@ from jbei.rest.clients.edd.constants import (ACTIVE_STATUS_PARAM, ASSAYS_RESOURC
 from main.models import (Assay, EveryonePermission, GroupPermission, Line, Measurement,
                          MeasurementUnit, MeasurementValue, Metabolite, MetadataType,
                          ProteinIdentifier, Protocol,
-                         Strain, Study, StudyPermission, Update, User, UserPermission, )
+                         Strain, StudyPermission, Update, User, UserPermission, )
 from main.tests import factory
 
 logger = logging.getLogger(__name__)
@@ -781,7 +781,7 @@ class StrainResourceTests(EddApiTestCaseMixin, APITestCase):
         EveryonePermission.objects.create(study=everyone_read_study,
                                           permission_type=StudyPermission.READ)
         everyone_read_strain = Strain.objects.create(name='Readable by everyone via study read',
-                                                    registry_id=uuid4())
+                                                     registry_id=uuid4())
         line1 = Line.objects.create(name='Everyone read line', study=everyone_read_study)
         line1.strains.add(everyone_read_strain)
         line1.save()
