@@ -13,7 +13,6 @@ from collections import defaultdict
 from django import forms
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.contrib.auth.models import AnonymousUser
 from django.contrib.postgres.fields import ArrayField, HStoreField
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -865,8 +864,6 @@ class Study(EDDObject):
     contact_extra = models.TextField(
         help_text=_('Additional field for contact information about this study (e.g. contact is '
                     'not a User of EDD).'),
-        blank=True,
-        null=True,
         verbose_name=_('Contact (extra)'),
     )
     metabolic_map = models.ForeignKey(
@@ -981,7 +978,7 @@ class Study(EDDObject):
         """
         Tests whether the user's role alone is sufficient to grant read access to this study.
         :param user: the user
-        :return: True if the userrole has read access, false otherwise
+        :return: True if the user role has read access, false otherwise
         """
         return user.is_superuser
 
@@ -1832,7 +1829,7 @@ class MeasurementType(models.Model, EDDSerialize):
 
     @classmethod
     def get_model_class(cls, type_group):
-        return cls._GROUP_TO_MODEL_CLASS.get(type_group)
+        return _GROUP_TO_MODEL_CLASS.get(type_group)
 
     def export_name(self):
         return self.type_name

@@ -17,13 +17,12 @@ from django.core.exceptions import PermissionDenied
 from django.db.models import Q
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
-from rest_framework import mixins, response, schemas, status, viewsets
+from rest_framework import mixins, response, schemas, viewsets
 from rest_framework.decorators import api_view, renderer_classes
 from rest_framework.exceptions import (APIException, NotAuthenticated, NotFound, ParseError,
                                        ValidationError)
 from rest_framework.permissions import DjangoModelPermissions, IsAuthenticated
 from rest_framework.relations import StringRelatedField
-from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 from rest_framework_swagger.renderers import OpenAPIRenderer, SwaggerUIRenderer
 from threadlocals.threadlocals import get_request_variable, set_request_variable
@@ -1120,15 +1119,11 @@ def filter_by_active_status(queryset, active_status=QUERY_ACTIVE_OBJECTS_ONLY, q
     return queryset.filter(active_criterion)
 
 
-class StudyViewSet(CustomFilteringMixin, mixins.CreateModelMixin,
-                   mixins.RetrieveModelMixin,
-                   mixins.UpdateModelMixin,
-                   # TODO: implement & test later as a low priority...study deletion via the
-                   # API should maybe only mark studies as "disabled" if they have data (or maybe
-                   # should require an override parameter to actually delete.
-                   # mixins.DestroyModelMixin,
-                   mixins.ListModelMixin,
-                   GenericViewSet):
+class StudiesViewSet(CustomFilteringMixin, mixins.CreateModelMixin,
+                     mixins.RetrieveModelMixin,
+                     mixins.UpdateModelMixin,
+                     mixins.ListModelMixin,
+                     GenericViewSet):
     """
     API endpoint that provides access to studies, subject to user/role read access
     controls. Note that some privileged 'manager' users may have access to the base study name,
@@ -1146,13 +1141,20 @@ class StudyViewSet(CustomFilteringMixin, mixins.CreateModelMixin,
         return build_study_query(self.request, params, identifier=study_id)
 
     def create(self, request, *args, **kwargs):
-        if not request.user.is_authenticated():
-            return Response(status=status.HTTP_404_NOT_FOUND)
+        self._autofill_contact_extra()
+        return super(StudiesViewSet, self).create(request, *args, **kwargs)
 
-        if not Study.user_can_create(request.user):
-            return Response(status=status.HTTP_403_FORBIDDEN)
+    def update(self, request, *args, **kwargs):
+        self._autofill_contact_extra()
+        return super(StudiesViewSet, self).update(request, *args, **kwargs)
 
-        return super(StudyViewSet, self).create(request, *args, **kwargs)
+    def _autofill_contact_extra(self):
+        # fill in required contact_extra field from contact pk, if provided
+        payload = self.request.data
+        if 'contact_extra' not in payload and 'contact' in payload:
+            contact = User.objects.get(pk=payload['contact'])
+            logger.debug('setting contact_extra = "%s"' % contact.get_full_name())
+            self.request.data['contact_extra'] = contact.get_full_name()
 
 
 def build_study_query(request, query_params, identifier=None, skip_study_auth_perms=False,

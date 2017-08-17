@@ -18,7 +18,7 @@ from .views import (AssaysViewSet, LinesViewSet, MeasurementTypesViewSet, Measur
                     MetadataTypeViewSet,
                     ProtocolViewSet, StrainsViewSet, StudyAssaysViewSet,
                     StudyLinesView,
-                    StudyMeasurementsViewSet, StudyValuesViewSet, StudyViewSet, UsersViewSet,
+                    StudyMeasurementsViewSet, StudyValuesViewSet, StudiesViewSet, UsersViewSet,
                     )
 
 ###################################################################################################
@@ -29,7 +29,7 @@ base_rest_api_router.register(ASSAYS_RESOURCE_NAME, AssaysViewSet, 'assays')
 base_rest_api_router.register(LINES_RESOURCE_NAME, LinesViewSet, 'lines')
 base_rest_api_router.register(MEASUREMENTS_RESOURCE_NAME, MeasurementsViewSet, 'measurements')
 base_rest_api_router.register(VALUES_RESOURCE_NAME, MeasurementValuesViewSet, 'values')
-base_rest_api_router.register(STUDIES_RESOURCE_NAME, StudyViewSet, STUDIES_RESOURCE_NAME)
+base_rest_api_router.register(STUDIES_RESOURCE_NAME, StudiesViewSet, STUDIES_RESOURCE_NAME)
 base_rest_api_router.register(STRAINS_RESOURCE_NAME, StrainsViewSet, STRAINS_RESOURCE_NAME)
 base_rest_api_router.register(MEASUREMENT_UNITS_RESOURCE_NAME, MeasurementUnitViewSet,
                               'measurement_units')

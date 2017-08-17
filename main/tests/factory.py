@@ -22,3 +22,5 @@ class UserFactory(factory.django.DjangoModelFactory):
     class Meta:
         model = models.User
     username = factory.Sequence(lambda n: 'user%03d' % n)  # username is unique
+    first_name = 'Firstname'
+    last_name = 'Lastname'

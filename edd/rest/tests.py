@@ -1123,9 +1123,9 @@ def _create_user(username, email='staff.study@localhost',
 
     # create and save the user so foreign key based permissions changes will succeed.
     # note: some password is required to allow successful login
-    user = User.objects.create_user(username=username,
-                                    email=email,
-                                    password=_PLAINTEXT_TEMP_USER_PASSWORD)
+    user = factory.UserFactory(username=username,
+                               email=email,
+                               password=_PLAINTEXT_TEMP_USER_PASSWORD)
 
     # return early if no updates to user or its foreign key relationships
     if not (is_staff or is_superuser):
@@ -1334,7 +1334,6 @@ class StudiesTests(EddApiTestCaseMixin, APITestCase):
             STUDY_NAME_KEY:        'new study 1',
             STUDY_DESCRIPTION_KEY: 'strain 1 description goes here',
             STUDY_CONTACT_KEY: self.study_write_only_user.pk,
-            'contact_extra': '',
         }
 
         # verify that an un-authenticated request gets a 404
@@ -1436,7 +1435,7 @@ class StudiesTests(EddApiTestCaseMixin, APITestCase):
         url = url_format % {'resource_url': STUDIES_RESOURCE_URI,
                             'id':           self.study.pk}
 
-        # define put data for changing every strain field
+        # define placeholder put data that shouldn't get applied
         put_data = {
             STUDY_NAME_KEY:        'Test study',
             STUDY_DESCRIPTION_KEY: 'Description goes here',
@@ -1680,31 +1679,31 @@ def create_study(test_class, create_auth_perms_and_users=False):
                                         is_superuser=True)
 
     # user with read only access to this study
-    test_class.study_read_only_user = User.objects.create_user(
+    test_class.study_read_only_user = factory.UserFactory(
             username=_STUDY_READER_USERNAME,
             email='study_read_only@localhost',
             password=_PLAINTEXT_TEMP_USER_PASSWORD)
 
     # user with write only access to this study
-    test_class.study_write_only_user = User.objects.create_user(
+    test_class.study_write_only_user = factory.UserFactory(
             username=_STUDY_WRITER_USERNAME,
             email='study.writer@localhost',
             password=_PLAINTEXT_TEMP_USER_PASSWORD)
 
     # user with read only access to the study via group membership
-    test_class.study_read_group_user = User.objects.create_user(
+    test_class.study_read_group_user = factory.UserFactory(
             username=_STUDY_READER_GROUP_USER,
             email='study.group_reader@localhost',
             password=_PLAINTEXT_TEMP_USER_PASSWORD)
 
     # user with write only access to the study via group membership
-    test_class.study_write_group_user = User.objects.create_user(
+    test_class.study_write_group_user = factory.UserFactory(
             username=_STUDY_WRITER_GROUP_USER,
             email='study.group_writer@localhost',
             password=_PLAINTEXT_TEMP_USER_PASSWORD)
 
     # user with access to the study via the default read permission
-    test_class.study_default_read_group_user = User.objects.create_user(
+    test_class.study_default_read_group_user = factory.UserFactory(
             username='Default read group user',
             email='study.default_read_group.user',
             password=_PLAINTEXT_TEMP_USER_PASSWORD, )
