@@ -3,7 +3,8 @@ Defines classes that enforce EDD object permissions in the context of Django Res
 """
 import copy
 import logging
-from rest_framework.permissions import DjangoModelPermissions, BasePermission
+
+from rest_framework.permissions import BasePermission
 
 from main.models import Study
 
