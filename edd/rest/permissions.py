@@ -10,27 +10,6 @@ from main.models import Study
 logger = logging.getLogger(__name__)
 
 
-class DjangoModelImplicitViewPermissions(DjangoModelPermissions):
-    # TODO allow superusers access
-    """
-    Extends DjangoModelPermissions to allow view access to only users who have the
-    add/change/delete permission on models of the specified class.
-    """
-    _ADD_PERMISSION = '%(app_label)s.add_%(model_name)s'
-    _CHANGE_PERMISSION = '%(app_label)s.change_%(model_name)s'
-    _DELETE_PERMISSION = '%(app_label)s.delete_%(model_name)s'
-    _IMPLICIT_VIEW_PERMISSION = [_CHANGE_PERMISSION, _DELETE_PERMISSION]
-    perms_map = {
-        'GET': _IMPLICIT_VIEW_PERMISSION,
-        'HEAD': _IMPLICIT_VIEW_PERMISSION,
-        'OPTIONS': [],  # only require user to be authenticated
-        'POST': [_ADD_PERMISSION],
-        'PUT': [_CHANGE_PERMISSION],
-        'PATCH': [_CHANGE_PERMISSION],
-        'DELETE': [_DELETE_PERMISSION],
-    }
-
-
 class ImpliedPermissions(BasePermission):
     """
     A custom permissions class similar DRF'S DjangoModelPermissions that allows permissions to a
