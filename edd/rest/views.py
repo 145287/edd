@@ -747,9 +747,7 @@ class ProtocolViewSet(CustomFilteringMixin, viewsets.ReadOnlyModelViewSet):
             require_role_or_auth_perm(request, Protocol)
 
         queryset = Protocol.objects.all()
-        identifier = self.kwargs.get(self.lookup_url_kwarg)
-        if identifier:
-            queryset = queryset.filter(build_id_q('', identifier))
+        queryset = optional_edd_object_filtering(request.query_params, queryset)
 
         i18n_placeholder = ''  # TODO: implement if I18N implemented for Protocol model
 
@@ -781,11 +779,6 @@ class ProtocolViewSet(CustomFilteringMixin, viewsets.ReadOnlyModelViewSet):
 
                 if sort == REVERSE_SORT_VALUE:
                     queryset = queryset.reverse()
-
-            queryset = _optional_regex_filter(params, queryset, self.NAME_PROPERTY,
-                                              self.NAME_QUERY_PARAM, i18n_placeholder)
-
-            queryset = _optional_timestamp_filter(queryset, self.request.query_params)
 
         return queryset
 
