@@ -3121,7 +3121,7 @@ class EddObjectTimestampSearchTest(EddApiTestCaseMixin, APITestCase):
         search_url = '%s/' % LINES_RESOURCE_URI
         print("Testing edd object timestamp search using %s" % search_url)
 
-        study = Study.objects.get(pk=20)
+        # get references to three lines with sequential timestamps
         line1 = Line.objects.get(pk=21)
         line2 = Line.objects.get(pk=22)
         line3 = Line.objects.get(pk=23)
