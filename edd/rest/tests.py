@@ -46,7 +46,7 @@ from jbei.rest.clients.edd.constants import (ACTIVE_STATUS_PARAM, ASSAYS_RESOURC
 from main.models import (Assay, EveryonePermission, GroupPermission, Line, Measurement,
                          MeasurementUnit, MeasurementValue, Metabolite, MetadataType,
                          ProteinIdentifier, Protocol,
-                         Strain, StudyPermission, Update, User, UserPermission, )
+                         Strain, Study, StudyPermission, User, UserPermission, )
 from main.tests import factory
 
 logger = logging.getLogger(__name__)
@@ -261,6 +261,10 @@ class EddApiTestCaseMixin(object):
         # compare expected response content, if provided
         if expected_values is not None:
             expected, is_paged = to_json_comparable(expected_values, self.values_converter)
+
+            # TODO: remove debug block
+            print("Expected: %s" % expected)
+            print('Observed: %s' % observed)
 
             if is_paged:
                 compare_paged_result_dict(self, expected, observed, order_agnostic=True,
@@ -3079,6 +3083,36 @@ class EddObjectSearchTest(EddApiTestCaseMixin, APITestCase):
                                                   request_params=search_params,
                                                   expected_values=expected_results)
 
+    def _assert_authenticated_search_allowed(self, url, user,
+                                             expected_values=None,
+                                             partial_response=True,
+                                             request_params=None):
+        """
+        Overrides default values from the parent class to avoid repetetively passing the same
+        values_converter and partial_response with repetitive calls
+        """
+        return super(EddObjectSearchTest, self)._assert_authenticated_search_allowed(
+                url, user,
+                expected_values=expected_values,
+                partial_response=partial_response,
+                request_params=request_params)
+
+
+class EddObjectTimestampSearchTest(EddApiTestCaseMixin, APITestCase):
+    """
+    A test class class that using a fixture instead of code to build test data for searching
+    EDDObject timestamps.
+    """
+    # Note: use a fixture to set explicit line timestamps assumed in this test. There's currently
+    # no way to use the ORM API to reliably do this.  Note that initial tests of several methods
+    # using the ORM worked, but only when the test method was run in isolation...not when run
+    # in the larger context of this file.
+    fixtures = ['main/rest_timestamp_search']
+
+    @property
+    def values_converter(self):
+        return line_to_json_dict
+
     def test_eddobject_timestamp_search(self):
         print(SEPARATOR)
         print('%s(): ' % self.test_eddobject_timestamp_search.__name__)
@@ -3087,22 +3121,11 @@ class EddObjectSearchTest(EddApiTestCaseMixin, APITestCase):
         search_url = '%s/' % LINES_RESOURCE_URI
         print("Testing edd object timestamp search using %s" % search_url)
 
-        # create some lines with a known minimum time gap between their creation times
-        line1 = Line.objects.create(name='Line 1', study_id=self.study.pk)
-        delta = timedelta(microseconds=1)
-
-        # explicitly set creation timestamps that are normally set by EddObject. Previous
-        # iterations of this test used short calls to sleep() to create the same effect, but for
-        # unknown reasons it only worked when this test was run in isolation (not when even the
-        # whole class was executed).
-        time2 = Update.objects.create(mod_time=line1.created.mod_time + delta)
-        time3 = Update.objects.create(mod_time=time2.mod_time + delta)
-        line2 = Line(name='Line 2', study_id=self.study.pk, created=time2, updated=time2)
-        line3 = Line(name='Line 3', study_id=self.study.pk, created=time3, updated=time3)
-
-        # explicitly override line update times...this is the only method that works of many tried
-        line2.save(update=time2)
-        line3.save(update=time3)
+        study = Study.objects.get(pk=20)
+        line1 = Line.objects.get(pk=21)
+        line2 = Line.objects.get(pk=22)
+        line3 = Line.objects.get(pk=23)
+        superuser = User.objects.get(pk=1)
 
         print('Line\tCreated\t\t\t\t\tUpdated')
         for l in (line1, line2, line3):
@@ -3114,7 +3137,7 @@ class EddObjectSearchTest(EddApiTestCaseMixin, APITestCase):
         }
         expected_values = [line1, line2, line3]
         self._assert_authenticated_search_allowed(search_url,
-                                                  self.superuser,
+                                                  superuser,
                                                   request_params=search_params,
                                                   expected_values=expected_values)
 
@@ -3122,7 +3145,7 @@ class EddObjectSearchTest(EddApiTestCaseMixin, APITestCase):
             UPDATED_AFTER_PARAM: line1.created.mod_time,
         }
         self._assert_authenticated_search_allowed(search_url,
-                                                  self.superuser,
+                                                  superuser,
                                                   request_params=search_params,
                                                   expected_values=expected_values)
 
@@ -3130,16 +3153,16 @@ class EddObjectSearchTest(EddApiTestCaseMixin, APITestCase):
         search_params = {
             CREATED_BEFORE_PARAM: line3.created.mod_time,
         }
-        expected_values = [self.line, line1, line2, ]
-        self._assert_authenticated_search_allowed(search_url, self.superuser,
+        expected_values = [line1, line2, ]
+        self._assert_authenticated_search_allowed(search_url, superuser,
                                                   request_params=search_params,
                                                   expected_values=expected_values)
 
         search_params = {
             UPDATED_BEFORE_PARAM: line3.updated.mod_time,
         }
-        expected_values = [self.line, line2, line2, ]
-        self._assert_authenticated_search_allowed(search_url, self.superuser,
+        expected_values = [line2, line2, ]
+        self._assert_authenticated_search_allowed(search_url, superuser,
                                                   request_params=search_params,
                                                   expected_values=expected_values)
 
@@ -3148,7 +3171,7 @@ class EddObjectSearchTest(EddApiTestCaseMixin, APITestCase):
             CREATED_AFTER_PARAM: line1.created.mod_time,
             CREATED_BEFORE_PARAM: line2.created.mod_time,
         }
-        self._assert_authenticated_search_allowed(search_url, self.superuser,
+        self._assert_authenticated_search_allowed(search_url, superuser,
                                                   request_params=search_params,
                                                   expected_values=[line1])
 
@@ -3156,7 +3179,7 @@ class EddObjectSearchTest(EddApiTestCaseMixin, APITestCase):
             UPDATED_AFTER_PARAM: line2.updated.mod_time,
             UPDATED_BEFORE_PARAM: line3.updated.mod_time,
         }
-        self._assert_authenticated_search_allowed(search_url, self.superuser,
+        self._assert_authenticated_search_allowed(search_url, superuser,
                                                   request_params=search_params,
                                                   expected_values=[line2])
 
@@ -3168,7 +3191,7 @@ class EddObjectSearchTest(EddApiTestCaseMixin, APITestCase):
         Overrides default values from the parent class to avoid repetetively passing the same
         values_converter and partial_response with repetitive calls
         """
-        return super(EddObjectSearchTest, self)._assert_authenticated_search_allowed(
+        return super(EddObjectTimestampSearchTest, self)._assert_authenticated_search_allowed(
                 url, user,
                 expected_values=expected_values,
                 partial_response=partial_response,

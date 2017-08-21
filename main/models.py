@@ -797,8 +797,7 @@ class EDDObject(EDDMetadata, EDDSerialize):
         self.name = name
 
     def save(self, *args, **kwargs):
-        update = kwargs.pop('update', None)
-        self.ensure_update(update=update)
+        self.ensure_update(kwargs.get('update', None))
         self.ensure_uuid()
         super(EDDObject, self).save(*args, **kwargs)
         # must ensure EDDObject is saved *before* attempting to add to updates
