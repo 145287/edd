@@ -746,8 +746,10 @@ class ProtocolViewSet(CustomFilteringMixin, viewsets.ReadOnlyModelViewSet):
         if request.method in HTTP_MUTATOR_METHODS:
             require_role_or_auth_perm(request, Protocol)
 
+        identifier = self.kwargs.get(self.lookup_url_kwarg)
         queryset = Protocol.objects.all()
-        queryset = optional_edd_object_filtering(request.query_params, queryset)
+        queryset = optional_edd_object_filtering(request.query_params, queryset,
+                                                 id_override=identifier)
 
         i18n_placeholder = ''  # TODO: implement if I18N implemented for Protocol model
 
