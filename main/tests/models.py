@@ -14,9 +14,10 @@ from ..forms import LineForm
 from ..importer import (
     TableImport, import_rna_seq, import_rnaseq_edgepro, interpret_raw_rna_seq_data,
 )
-from ..models import (Assay, CarbonSource, GeneIdentifier, GroupPermission, Line, MeasurementType,
-                      MeasurementUnit, Metabolite, MetadataGroup, MetadataType, Protocol, Strain,
-                      Study, Update, UserPermission, StudyPermission)
+from ..models import (
+    Assay, CarbonSource, GeneIdentifier, GroupPermission, Line, MeasurementType,
+    MeasurementUnit, Metabolite, MetadataGroup, MetadataType, Protocol, Strain, Study, Update,
+    UserPermission)
 from ..solr import StudySearch
 from ..utilities import (
     extract_id_list, extract_id_list_as_form_keys, get_selected_lines,
@@ -166,10 +167,10 @@ class StudyTests(TestCase):
         user4 = User.objects.get(username='test4')  # no group
         # Create permissions
         GroupPermission.objects.create(study=study,
-                                       permission_type=StudyPermission.WRITE,
+                                       permission_type=GroupPermission.WRITE,
                                        group=fuels)
         GroupPermission.objects.create(study=study,
-                                       permission_type=StudyPermission.READ,
+                                       permission_type=GroupPermission.READ,
                                        group=decon)
         # Asserts
         self.assertTrue(study.user_can_read(user1))
