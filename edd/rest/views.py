@@ -47,7 +47,7 @@ from main.models import (Assay, Line, Measurement, MeasurementType,
                          Strain, Study,
                          StudyPermission, User)
 from .permissions import (ImpliedPermissions, StudyResourcePermissions,
-                          user_has_admin_or_manage_perm)
+                          user_has_admin_or_manage_perm, get_requested_study_permission)
 from .serializers import (AssaySerializer, GeneIdSerializer, LineSerializer, MeasurementSerializer,
                           MeasurementTypeSerializer, MeasurementUnitSerializer,
                           MeasurementValueSerializer,
@@ -917,13 +917,9 @@ class StrainsViewSet(CustomFilteringMixin, mixins.CreateModelMixin,
 
         # if user is requesting to add / modify / delete strains, apply django.auth permissions
         # to determine access
-        user = self.request.user
         http_method = self.request.method
         if http_method in HTTP_MUTATOR_METHODS:
-            if not user.is_authenticated():
-                logger.debug('User is not authenticated. Returning zero results')
-                return Strain.objects.none()
-            if user_has_admin_or_manage_perm(self.request, query):
+            if user_has_admin_or_manage_perm(self.request, Strain):
                 logger.debug('User %s has manage permissions for ')
                 return query
             return Strain.objects.none()
@@ -1044,21 +1040,6 @@ class StrainsViewSet(CustomFilteringMixin, mixins.CreateModelMixin,
                    - code: 500
                      message: Internal server error
             """
-
-
-HTTP_TO_STUDY_PERMISSION_MAP = {
-    'POST': StudyPermission.WRITE,
-    'PUT': StudyPermission.WRITE,
-    'DELETE': StudyPermission.WRITE,
-    'PATCH': StudyPermission.WRITE,
-    'OPTIONS': StudyPermission.NONE,
-    'HEAD': StudyPermission.READ,
-    'GET': StudyPermission.READ,
-}
-
-
-def get_requested_study_permission(http_method):
-    return HTTP_TO_STUDY_PERMISSION_MAP.get(http_method.upper())
 
 
 def filter_by_active_status(queryset, active_status=QUERY_ACTIVE_OBJECTS_ONLY, query_prefix=''):
@@ -1317,9 +1298,7 @@ def filter_for_study_permission(request, query, result_model_class, study_keywor
         result_model_class class back to Study.
      """
 
-    has_class_level_access = require_role_or_auth_perm(request, result_model_class,
-                                                       suppress_perm_exception=True)
-    if has_class_level_access:
+    if user_has_admin_or_manage_perm(request, result_model_class):
         return query
 
     # if user has no class-level permissions that grant access to all results, filter
@@ -1338,80 +1317,13 @@ def filter_for_study_permission(request, query, result_model_class, study_keywor
     return query.filter(user_permission_q).distinct()
 
 
-def require_role_or_auth_perm(request, result_model_class,
-                              suppress_perm_exception=False,
-                              enabling_perms_override=USE_STANDARD_PERMISSIONS):
-    """
-    A helper method to enforce user role based or class-level django.contrib.auth permissions.
-    In the default configuration, if this method returns without raising an Exception, the user
-    has the permission to access all instances of model_class for operations dictated by
-    request.method.
-    : raise PermissionDenied if the user doesn't have role-based or django.contrib.auth permission
-    to access all instances of result_model_class. Not raised if suppress_perm_exception is True.
-    :returns: True if the user has the required permission on all instances of result_model_class,
-    False otherwise.  Note that unless suppress_perm_exception is True, this function will always
-    raise an Exception instead of returning False.
-    :raises NotAuthenticated: if the requesting user isn't authenticated.  This Exception cannot
-    be suppressed.
-    """
-    # never show anything to un-authenticated users
-    user = request.user
-    if (not user) or not user.is_authenticated():
-        logger.debug('User %s is not authenticated' % user)
-        raise NotAuthenticated()
-
-    requested_permission = get_requested_study_permission(request.method)
-
-    # if cached user role (e.g. admin) grants access to all Studies, we can expose all objects
-    # without additional queries
-    has_role_based_permission = (requested_permission == StudyPermission.READ and
-                                 Study.user_role_can_read(user))
-    if has_role_based_permission:
-        return True
-
-    # test whether potentially cached class-level django.contrib.auth permissions allow user to
-    # access all results without having to drill down into case-by-case study or nested
-    # relationships that would grant access to a subset of the data
-    if enabling_perms_override is USE_STANDARD_PERMISSIONS:
-        enabling_perms = (
-            ImpliedPermissions.get_standard_enabling_permissions(
-                request.method, result_model_class))
-    else:
-        enabling_perms = enabling_perms_override
-
-    user = request.user
-    requested_study_perm = get_requested_study_permission(request.method)
-    for auth_perm in enabling_perms:
-
-        if user.has_perm(auth_perm):
-            logger.debug('User %(user)s has %(method)s ("%(study_perm)s") permission for '
-                         'all %(model_class)s objects implied via the "%(auth_perm)s" '
-                         'auth permission' % {
-                             'user': user.username,
-                             'method': request.method,
-                             'model_class': result_model_class.__name__,
-                             'study_perm': requested_study_perm,
-                             'auth_perm': auth_perm,
-                         })
-            return True
-
-    logger.debug('User %(user)s has does NOT have %(method)s ("%(study_perm)s") permission '
-                 'for all %(model_class)s objects. Granting django.contrib.auth '
-                 'permissions would be the any of (%(auth_perm)s)' % {
-                     'user': user.username,
-                     'method': request.method,
-                     'model_class': result_model_class.__name__,
-                     'study_perm': requested_study_perm,
-                     'auth_perm': ', '.join(['"%s"' % perm for perm in enabling_perms])})
-
-    if suppress_perm_exception:
-        return False
-
-    raise PermissionDenied('User %(user)s does not have required permission to access '
-                           '%(method)s %(uri)s' % {
-                               'user': user,
-                               'method': request.method,
-                               'uri': request.path, })
+def require_role_or_auth_perm(request, result_model_class):
+    if not user_has_admin_or_manage_perm(request, result_model_class):
+        raise PermissionDenied('User %(user)s does not have required permission to access '
+                               '%(method)s %(uri)s' % {
+                                   'user': request.user,
+                                   'method': request.method,
+                                   'uri': request.path, })
 
 
 class LinesViewSet(CustomFilteringMixin, viewsets.ReadOnlyModelViewSet):

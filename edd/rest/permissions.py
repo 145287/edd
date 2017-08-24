@@ -6,7 +6,7 @@ import logging
 
 from rest_framework.permissions import BasePermission
 
-from main.models import Study
+from main.models import Study, StudyPermission
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +109,20 @@ class ImpliedPermissions(BasePermission):
         if getattr(view, '_ignore_model_permissions', False):
             return True
 
+        http_method = request.method
+        user = request.user
+
+        # unauthenticated users never have permission
+        if not (user and user.is_authenticated()):
+            logger.debug(
+                '%(class)s: User %(username)s is not authenticated. Denying access to '
+                '%(url)s' % {
+                    'class': ImpliedPermissions.__class__.__name__,
+                    'username': user.username,
+                    'url': request.path,
+                })
+            return False
+
         if request.method == 'OPTIONS':
             return True
 
@@ -124,23 +138,11 @@ class ImpliedPermissions(BasePermission):
                                           'view': view.__class__.__name__})
         #########################################################
 
-        http_method = request.method
-        user = request.user
-
-        # unauthenticated users never have permission
-        if not (user and user.is_authenticated()):
-            logger.debug('%(class)s: User %(username)s is not authenticated. Denying access to '
-                         '%(url)s' % {
-                             'class': ImpliedPermissions.__class__.__name__,
-                             'username': user.username,
-                             'url': request.path,
-                         })
-            return False
-
-        if user_has_admin_or_manage_perm(request, queryset, self.get_enabling_permissions):
+        if user_has_admin_or_manage_perm(request, queryset.model, self.get_enabling_permissions):
             return True
 
-        # if we can't infer permission and don't have any explicitly permission is DENIED
+        # if we can't infer permission and don't have any explicitly-defined permission,
+        # accesss is DENIED
         if not self.result_implied_permissions:
             logger.debug('%(class)s: User %(username)s has no explicitly-granted permissions on '
                          'resource %(url)s. Denying access since no inferred permissions are '
@@ -181,11 +183,45 @@ class ImpliedPermissions(BasePermission):
         return permission_implied_by_results
 
 
+HTTP_TO_STUDY_PERMISSION_MAP = {
+    'POST': StudyPermission.WRITE,
+    'PUT': StudyPermission.WRITE,
+    'DELETE': StudyPermission.WRITE,
+    'PATCH': StudyPermission.WRITE,
+    'OPTIONS': StudyPermission.NONE,
+    'HEAD': StudyPermission.READ,
+    'GET': StudyPermission.READ,
+}
+
+
+def get_requested_study_permission(http_method):
+    return HTTP_TO_STUDY_PERMISSION_MAP.get(http_method.upper())
+
+
 def user_has_admin_or_manage_perm(
-        request, queryset,
+        request, result_model_class,
         perms_getter=ImpliedPermissions.get_standard_enabling_permissions):
+    """
+        A helper method to enforce user role based or class-level django.contrib.auth permissions.
+        In the default configuration, if this method returns without raising an Exception, the user
+        has the permission to access all instances of model_class for operations dictated by
+        request.method.
+        : raise PermissionDenied if the user doesn't have role-based or django.contrib.auth
+        permission
+        to access all instances of result_model_class. Not raised if suppress_perm_exception is
+        True.
+        :returns: True if the user has the required permission on all instances of
+        result_model_class,
+        False otherwise.  Note that unless suppress_perm_exception is True, this function will
+        always
+        raise an Exception instead of returning False.
+        :raises NotAuthenticated: if the requesting user isn't authenticated.  This Exception
+        cannot
+        be suppressed.
+        """
     user = request.user
     http_method = request.method
+    requested_perm = get_requested_study_permission(request.method)
 
     # superusers users always have permission
     if user.is_superuser:
@@ -197,25 +233,29 @@ def user_has_admin_or_manage_perm(
 
     # if user has been explicitly granted any of the class-level django.contrib.auth permissions
     # that enable access
-    enabling_perms = perms_getter(http_method, queryset.model)
-    for permission in enabling_perms:
-        if user.has_perm(permission):
-            if logger.level == 'DEBUG':
-                logger.debug('User %(username)s has class-level django.contrib.auth '
-                             'permission %(permission)s '
-                             'on resource %(method)s %(url)s' % {
-                                 'username': user.username, 'permission': permission,
-                                 'method':   request.method, 'url': request.path,
-                             })
-            return True, False
+    enabling_perms = perms_getter(http_method, result_model_class)
+    for auth_perm in enabling_perms:
+        if user.has_perm(auth_perm):
+            logger.debug('User %(user)s has %(method)s ("%(perm)s") permission for '
+                         'all %(model_class)s objects implied via the "%(auth_perm)s" '
+                         'auth permission' % {
+                             'user': user.username,
+                             'method': request.method,
+                             'model_class': result_model_class.__name__,
+                             'perm': requested_perm,
+                             'auth_perm': auth_perm,
+                         })
+            return True
 
     if logger.level == 'DEBUG':
-        logger.debug('User %(username)s has no superuser or class-level auth privileges for '
-                     '%(method)s %(url)s. Enabling permissions would be %(enabling_perms)s' % {
-                         'username': user.username,
-                         'method':   request.method,
-                         'url': request.path,
-                         'enabling_perms': ', '.join(enabling_perms)})
+        logger.debug('User %(user)s has does NOT have %(method)s ("%(study_perm)s") permission '
+                     'for all %(model_class)s objects. Granting django.contrib.auth '
+                     'permissions would be the any of (%(auth_perm)s)' % {
+                         'user': user.username,
+                         'method': request.method,
+                         'model_class': result_model_class.__name__,
+                         'study_perm': requested_perm,
+                         'auth_perm': ', '.join(['"%s"' % perm for perm in enabling_perms])})
     return False
 
 

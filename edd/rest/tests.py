@@ -107,7 +107,7 @@ class EddApiTestCaseMixin(object):
     def _assert_unauthenticated_get_denied(self, uri):
         self.client.logout()
         response = self.client.get(uri)
-        self.assertTrue(response.status_code in DRF_UNAUTHENTICATED_PERMISSION_DENIED_CODES,
+        self.assertTrue(response.status_code == HTTP_403_FORBIDDEN,
                         'Expected unauthenticated request to GET %(uri)s be denied (HTTP '
                         '%(expected)s), but got an HTTP %(code)d.  Response: %(response)s' % {
                             'uri': uri,
@@ -520,7 +520,7 @@ class StrainResourceTests(EddApiTestCaseMixin, APITestCase):
             'uuid': 'None',
         }
 
-        self._assert_unauthenticated_client_error(url)
+        self._assert_unauthenticated_get_denied(url)
         self._assert_authenticated_get_client_error(url, self.unprivileged_user)
 
     def test_strain_delete(self):
@@ -1284,7 +1284,7 @@ class StudiesTests(EddApiTestCaseMixin, APITestCase):
             'uuid': 'None',
         }
 
-        self._assert_unauthenticated_client_error(url)
+        self._assert_unauthenticated_get_denied(url)
         self._assert_authenticated_get_client_error(url, self.unprivileged_user)
 
     def test_study_delete(self):
