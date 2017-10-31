@@ -39,10 +39,10 @@ openpyxl==2.4.8
 psycopg2==2.7.3.1
 pyasn1==0.3.6
 pycparser==2.18
+pyldap==2.4.37
 pyOpenSSL==17.3.0
 pysmb==1.1.22
 python-dateutil==2.6.1
-python-ldap==2.4.44
 python-libsbml==5.15.0
 python-openid==2.2.5
 pytz==2017.2
