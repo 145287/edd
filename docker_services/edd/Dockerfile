@@ -18,7 +18,7 @@ FROM buildpack-deps:stretch
 
 LABEL maintainer="William Morrell <WCMorrell@lbl.gov>"
 WORKDIR /code
-ENV PYTHONUNBUFFERED=1 LANG=C.UTF-8
+ENV PYTHONUNBUFFERED=1 LANG=C.UTF-8 EDD_VERSION=${EDD_VERSION}
 
 # include Debian packages required to build pip packages
 RUN apt-get clean && apt-get update \
@@ -37,16 +37,16 @@ RUN apt-get clean && apt-get update \
         libyaml-dev \
         netcat \
         postgresql-client \
-        python-all \
-        python-all-dev \
-        python-pip \
-        python-sklearn \
+        python3-all-dev \
+        python3-pip \
+        python3-setuptools \
+        python3-wheel \
+        python3-sklearn \
     && apt-get autoremove -y \
+    && ln -s /usr/bin/python3 /usr/local/bin/python \
+    && ln -s /usr/bin/pip3 /usr/local/bin/pip \
+    && pip install --no-cache-dir virtualenv \
     && rm -rf /var/lib/apt/lists/*
-
-# Putting this in its own RUN to avoid needing to re-install numpy/scipy every time
-# (since pip will update)
-RUN pip install --upgrade pip setuptools wheel && pip install --no-cache-dir virtualenv
 
 # COPY adds a new layer IFF requirements.txt hash has changed
 COPY requirements.txt /tmp/
@@ -56,7 +56,7 @@ RUN pip install -r /tmp/requirements.txt
 
 # Add Tini
 # Keep for now to maintain backward-compatibility; better to launch with docker run --init
-ENV TINI_VERSION v0.13.2
+ENV TINI_VERSION v0.16.1
 ADD https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini /tini
 RUN chmod +x /tini
 
