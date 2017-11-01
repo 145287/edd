@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import unicode_literals
 
+import math
 import warnings
 
 from builtins import str
@@ -448,9 +449,12 @@ class AssayDataTests(TestCase):
             measurement_type__type_group=MeasurementType.Group.GENEID
         )[0]
         y_interp = meas1.interpolate_at(21)
-        self.assertTrue('%s' % y_interp == "1.2")
+        if hasattr(math, 'isclose'):
+            self.assertTrue(math.isclose(y_interp, 1.2))
+        else:
+            self.assertEqual('%s' % y_interp, "1.2")
         y_interp2 = meas1.interpolate_at(25)
-        self.assertTrue(y_interp2 is None)
+        self.assertIsNone(y_interp2)
         try:
             meas2.interpolate_at(20)
         except ValueError:
