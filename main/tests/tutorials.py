@@ -5,12 +5,12 @@ from __future__ import absolute_import, unicode_literals
 Tests used to validate the tutorial screencast functionality.
 """
 
+import codecs
 import json
 
 from django.contrib.auth import get_user_model
 from django.core.urlresolvers import reverse
 from django.http import QueryDict
-from django.test import tag
 from io import BytesIO
 from mock import MagicMock, patch
 from requests import codes
@@ -72,11 +72,10 @@ class ExperimentDescriptionTests(TestCase):
         self.assertEqual(response.status_code, codes.ok)
         self.assertEqual(self.target_study.line_set.count(), 2)
 
-    @tag('known-broken')
     def test_missing_strain(self):
         name = 'ExperimentDescription_missing_strain.xlsx'
         response = self._run_upload(name)
-        self.assertEqual(response.status_code, codes.server_error)
+        self.assertEqual(response.status_code, codes.bad_request)
         self.assertEqual(self.target_study.line_set.count(), 0)
         messages = response.json()
         self.assertIn('errors', messages)
@@ -116,7 +115,7 @@ class ExperimentDescriptionTests(TestCase):
         self.assertIn('errors', messages)
         self.assertIn('warnings', messages)
         self.assertEqual(len(messages['errors']), 2)
-        self.assertItemsEqual(
+        self.assertEqual(
             {'Incorrect file', 'Invalid values'},
             {err['category'] for err in messages['errors']}
         )
@@ -179,7 +178,8 @@ class ImportDataTestsMixin(object):
         )
         self.assertEqual(response.status_code, codes.ok)
         with factory.load_test_file(filename + '.json') as fp:
-            target = json.load(fp)
+            reader = codecs.getreader('utf-8')
+            target = json.load(reader(fp))
         # check that objects are the same when re-serialized with sorted keys
         self.assertEqual(
             json.dumps(target, sort_keys=True),

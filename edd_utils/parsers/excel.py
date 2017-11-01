@@ -14,11 +14,6 @@ from openpyxl import load_workbook
 from openpyxl import Workbook
 from six import string_types
 
-try:
-    MAX_INT = sys.maxint
-except AttributeError:
-    MAX_INT = sys.maxsize
-
 
 def export_to_xlsx(table, headers=None, title="Exported table", file_name=None):
     """
@@ -132,7 +127,7 @@ def _find_table_of_values(
         column_search_text=None,
         expect_numeric_data=False,
         minimum_number_of_data_rows=2,
-        maximum_number_of_tables=MAX_INT,
+        maximum_number_of_tables=sys.maxsize,
         enforce_non_blank_cells=False):
     """
     Scan a worksheet for a block of cells resembling a regular table structure,
@@ -361,10 +356,11 @@ def assert_is_two_dimensional_list(table, allow_tuple_values=False):
     for row in table:
         assert (isinstance(row, list) or isinstance(row, tuple)), row
         for cell in row:
+            valid_cell = isinstance(cell, string_types) or not hasattr(cell, '__iter__')
             if (allow_tuple_values):
-                assert (isinstance(cell, tuple) or (not hasattr(cell, "__iter__"))), cell
+                assert isinstance(cell, tuple) or valid_cell, cell
             else:
-                assert (not hasattr(cell, "__iter__")), cell
+                assert valid_cell, cell
 
 
 def number_of_numerical_cells(row):
