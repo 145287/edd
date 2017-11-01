@@ -5,17 +5,16 @@ import logging
 import os.path
 
 from builtins import str
-from cStringIO import StringIO
-from edd_utils.parsers.excel import (
-    export_to_xlsx, import_xlsx_table, import_xlsx_tables,
-)
-from edd_utils.form_utils import (
-    extract_floats_from_form, extract_integers_from_form, extract_non_blank_string_from_form,
-)
-from edd_utils.parsers import gc_ms
-from edd_utils.parsers import skyline
-from edd_utils.parsers import biolector
 from django.test import TestCase
+from io import StringIO
+
+from .parsers.excel import export_to_xlsx, import_xlsx_table, import_xlsx_tables
+from .form_utils import (
+    extract_floats_from_form,
+    extract_integers_from_form,
+    extract_non_blank_string_from_form,
+)
+from .parsers import biolector, gc_ms, skyline
 
 test_dir = os.path.join(os.path.dirname(__file__), "fixtures", "misc_data")
 logger = logging.getLogger(__name__)

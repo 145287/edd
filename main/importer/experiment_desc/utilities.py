@@ -8,6 +8,7 @@ from collections import defaultdict, OrderedDict, Sequence
 from arrow import utcnow
 from builtins import str
 from django.db.models import Q
+from future.utils import viewitems, viewvalues
 from six import string_types
 
 from main.models import Strain, MetadataType, Line, Assay
@@ -124,7 +125,7 @@ class LineAndAssayCreationVisitor(NewLineAndAssayVisitor):
 
         hstore_compliant_dict = {
             str(pk): str(value)
-            for pk, value in line_metadata_dict.iteritems() if value
+            for pk, value in viewitems(line_metadata_dict) if value
         }
         if isinstance(strain_ids, Sequence) and not isinstance(strain_ids, string_types):
             strains = [self.strains_by_pk[pk] for pk in strain_ids if pk in self.strains_by_pk]
@@ -155,7 +156,7 @@ class LineAndAssayCreationVisitor(NewLineAndAssayVisitor):
         # make sure everything gets cast to str to comply with Postgres' hstore field
         hstore_compliant_dict = {
             str(pk): str(value)
-            for pk, value in assay_metadata_dict.items() if value
+            for pk, value in viewitems(assay_metadata_dict) if value
         }
 
         assay = Assay.objects.create(
@@ -235,7 +236,7 @@ class AutomatedNamingStrategy(NamingStrategy):
         self.assay_time_metadata_type_pk = assay_time_metadata_type_pk
 
         valid_items = [STRAIN_NAME_ELT, REPLICATE_ELT, ]
-        valid_items.extend(pk for pk in self.line_metadata_types_by_pk.iterkeys())
+        valid_items.extend(pk for pk in self.line_metadata_types_by_pk)
         self._valid_items = valid_items
 
     def names_contain_strains(self):
@@ -259,7 +260,7 @@ class AutomatedNamingStrategy(NamingStrategy):
                 importer.add_error(INTERNAL_EDD_ERROR_CATEGORY, INVALID_AUTO_NAMING_INPUT, value)
 
         if self.abbreviations:
-            for abbreviated_element, replacements_dict in self.abbreviations.items():
+            for abbreviated_element, replacements_dict in viewitems(self.abbreviations):
                 if abbreviated_element not in self.valid_items:
                     importer.add_error(INTERNAL_EDD_ERROR_CATEGORY, INVALID_AUTO_NAMING_INPUT,
                                        abbreviated_element, '')
@@ -400,8 +401,8 @@ class CombinatorialDescriptionInput(object):
         ###########################################################################################
         # protocol-specific metadata
         ###########################################################################################
-        self.unique_protocols = set(protocol_to_assay_metadata.keys())
-        self.unique_protocols.update(protocol_to_combinatorial_metadata.keys())
+        self.unique_protocols = set(protocol_to_assay_metadata)
+        self.unique_protocols.update(protocol_to_combinatorial_metadata)
 
         # optional. maps protocol pk -> { MetadataType.pk -> [values] }
         self.protocol_to_assay_metadata = defaultdict(lambda: defaultdict(list))
@@ -459,10 +460,10 @@ class CombinatorialDescriptionInput(object):
 
     def get_unique_strain_ids(self, unique_strain_ids=()):
         """
-        Gets a list of unique strain identifiers for this CombinatorialDescriptionInput, 
+        Gets a list of unique strain identifiers for this CombinatorialDescriptionInput,
         adding in any unique values in the parameter. Note that the type of identifier in use (
         e.g. pk, part id, uuid) depends on client code.
-        :param unique_strain_ids: a list of input identifiers that will be merged with unique 
+        :param unique_strain_ids: a list of input identifiers that will be merged with unique
         identifiers from this CominatorialDescriptionInput
 
         :return: a new iterable of unique strain identifiers
@@ -557,7 +558,7 @@ class CombinatorialDescriptionInput(object):
             INVALID_PROTOCOL_META_PK,
         )
 
-        for protocol_pk, input_assay_metadata_dict in self.protocol_to_assay_metadata.iteritems():
+        for protocol_pk, input_assay_metadata_dict in viewitems(self.protocol_to_assay_metadata):
             self._verify_pk_keys(
                 input_assay_metadata_dict,
                 assay_metadata_types_by_pk,
@@ -575,7 +576,7 @@ class CombinatorialDescriptionInput(object):
             INVALID_PROTOCOL_META_PK,
         )
 
-        for protocol_pk, metadata_dict in self.protocol_to_combinatorial_metadata_dict.iteritems():
+        for protocol_pk, metadata_dict in viewitems(self.protocol_to_combinatorial_metadata_dict):
             self._verify_pk_keys(
                 metadata_dict,
                 assay_metadata_types_by_pk,
@@ -688,12 +689,12 @@ class CombinatorialDescriptionInput(object):
             visited_pks = set()
             line_metadata = copy.copy(self.common_line_metadata)
             # outer loop for combinatorial
-            for metadata_pk, values in self.combinatorial_line_metadata.items():
+            for metadata_pk, values in viewitems(self.combinatorial_line_metadata):
                 visited_pks.add(metadata_pk)
                 for value1 in values:
                     line_metadata[metadata_pk] = value1
                     # inner loop for combinatorial
-                    for k, v in self.combinatorial_line_metadata.items():
+                    for k, v in viewitems(self.combinatorial_line_metadata):
                         # skip current metadata if already set in outer loop
                         if k in visited_pks:
                             continue
@@ -752,12 +753,12 @@ class CombinatorialDescriptionInput(object):
                     combo = self.protocol_to_combinatorial_metadata_dict[protocol_pk]
                     visited_pks = set()
                     # outer loop for combinatorial
-                    for metadata_pk, values in combo.iteritems():
+                    for metadata_pk, values in viewitems(combo):
                         visited_pks.add(metadata_pk)
                         for value in values:
                             assay_metadata[metadata_pk] = value
                             # inner loop for combinatorial
-                            for k, v in combo.iteritems():
+                            for k, v in viewitems(combo):
                                 if k in visited_pks:
                                     continue
                                 for value in v:
@@ -906,7 +907,7 @@ def find_existing_strains(ice_parts_by_number, importer):
     existing = OrderedDict()
     not_found = []
 
-    for ice_entry in ice_parts_by_number.itervalues():
+    for ice_entry in viewvalues(ice_parts_by_number):
         # search for the strain by registry ID. Note we use search instead of .get() until the
         # database consistently contains/requires ICE UUID's and enforces uniqueness
         # constraints for them (EDD-158).

@@ -30,11 +30,12 @@ from logging.config import dictConfig
 import imp
 from os import path
 from requests import HTTPError, codes
+from six.moves.urllib.parse import urlparse
 
 from jbei.rest.auth import EddSessionAuth, IceSessionAuth
 from jbei.rest.clients import EddApi, IceApi
 from jbei.rest.clients.ice import Strain as IceStrain
-from jbei.rest.clients.ice.utils import build_entry_ui_url, extract_id_from_ui_url
+from jbei.rest.clients.ice.utils import build_entry_ui_url
 from jbei.utils import session_login, UserInputTimer
 from . import settings
 
@@ -149,6 +150,24 @@ class SearchParameters:
             logger.info('Units: %s' % self.unit_name_regexes)
 
         logger.indent_level -= 1
+
+
+def extract_id_from_ui_url(ice_part_ui_url):
+    """
+    Extracts an ICE identifier for a part from a valid ICE user interface URL.  Note that ICE's
+    user interface accepts multiple different identifiers, so prior knowledge is needed to
+    distinguish between the identifiers accepted.
+    :param ice_part_ui_url:
+    :return: the identifier
+    """
+    url_parts = urlparse(ice_part_ui_url)
+    url_path = url_parts.path
+    elts = url_path.split('/')
+    if elts[-1]:
+        return elts[-1]
+    elif len(elts) > 1:
+        return elts[-2]
+    return None
 
 
 class ContextCache:

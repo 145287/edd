@@ -258,7 +258,7 @@ class Migration(migrations.Migration):
             options={
                 'db_table': 'carbon_source',
             },
-            bases=('main.eddobject', main.models.core.LineProperty),
+            bases=('main.eddobject',),
         ),
         migrations.CreateModel(
             name='GeneIdentifier',
@@ -367,7 +367,7 @@ class Migration(migrations.Migration):
             options={
                 'db_table': 'strain',
             },
-            bases=('main.eddobject', main.models.core.LineProperty),
+            bases=('main.eddobject',),
         ),
         migrations.CreateModel(
             name='Study',

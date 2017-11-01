@@ -3,12 +3,12 @@ from __future__ import absolute_import, unicode_literals
 
 import logging
 import re
-import urlparse
 
 from django.core import mail
 from django.views import debug
 from itertools import chain
 from six import string_types
+from six.moves.urllib.parse import urlparse, urlunparse
 from textwrap import TextWrapper
 
 from .celery import app as celery_app
@@ -26,13 +26,13 @@ def cleanse_setting(key, value):  # noqa
         try:
             parsed = None
             if isinstance(value, string_types):
-                parsed = urlparse.urlparse(value)
+                parsed = urlparse(value)
             if parsed and parsed.password:
                 # urlparse returns a read-only tuple, use a list to rewrite parts
                 parsed_list = list(parsed)
                 parsed_list[1] = parsed.netloc.replace(':%s' % parsed.password, ':**********', 1)
                 # put Humpty Dumpty back together again
-                cleansed = urlparse.urlunparse(parsed_list)
+                cleansed = urlunparse(parsed_list)
         except:
             logger.exception('Exception cleansing URLs for error reporting')
     return cleansed

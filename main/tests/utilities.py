@@ -9,6 +9,7 @@ from collections import defaultdict
 from django.contrib.auth import get_user_model
 from django.contrib.staticfiles.storage import staticfiles_storage
 from django.test import tag, TestCase
+from future.utils import viewitems
 from openpyxl import load_workbook
 
 from main.importer.experiment_desc import CombinatorialCreationImporter
@@ -201,7 +202,7 @@ class CombinatorialCreationTests(TestCase):
         for line_name in expected_line_names:
             protocol_to_assay_to_meta = {}
             expected_assay_metadata[line_name] = protocol_to_assay_to_meta
-            for protocol_pk, assay_meta in assay_metadata.iteritems():
+            for protocol_pk, assay_meta in viewitems(assay_metadata):
                 assay_to_meta = {}
                 protocol_to_assay_to_meta[protocol_pk] = assay_to_meta
                 for meta in assay_meta:
@@ -294,7 +295,7 @@ class CombinatorialCreationTests(TestCase):
         )
 
         for line_name in expected_line_names:
-            for protocol_pk, exp_suffixes in expected_protocols_to_assay_suffixes.iteritems():
+            for protocol_pk, exp_suffixes in viewitems(expected_protocols_to_assay_suffixes):
                 self._test_assay_names(
                     line_name,
                     naming_results,
@@ -352,7 +353,7 @@ class CombinatorialCreationTests(TestCase):
                     'found': found_protocol_count
                 })
 
-            for protocol_pk, assays_list in protocol_to_assays_list.iteritems():
+            for protocol_pk, assays_list in viewitems(protocol_to_assays_list):
                 planned_assay_names = protocol_to_planned_assay_names.get(protocol_pk)
                 self.assertEquals(
                     len(assays_list),
@@ -372,9 +373,9 @@ class CombinatorialCreationTests(TestCase):
                     self.assertEqual(expected_metadata, line.meta_store)
 
             if expected_assay_metadata:
-                line_items = creation_results.line_to_protocols_to_assays_list.iteritems()
+                line_items = viewitems(creation_results.line_to_protocols_to_assays_list)
                 for line_name, protocol_to_assay in line_items:
-                    for protocol, assays_list in protocol_to_assay.iteritems():
+                    for protocol, assays_list in viewitems(protocol_to_assay):
                         for assay in assays_list:
                             expected_metadata = expected_assay_metadata[line_name][protocol][
                                 assay.name]
@@ -568,7 +569,7 @@ class CombinatorialCreationTests(TestCase):
         }
 
         expected_line_metadata = {
-            line_name: {str(media_meta.pk): u'LB'}
+            line_name: {str(media_meta.pk): 'LB'}
             for line_name in expected_line_names
         }
 
