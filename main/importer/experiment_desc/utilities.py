@@ -10,18 +10,27 @@ from collections import defaultdict, OrderedDict, Sequence
 from arrow import utcnow
 from builtins import str
 from django.db.models import Q
-from django.core.exceptions import FieldDoesNotExist
-from django.apps import AppConfig
+from future.utils import viewitems, viewvalues
 from six import string_types
 
 from main.importer.experiment_desc.validators import SCHEMA as JSON_SCHEMA
 from main.models import  Assay, Line, MetadataType, Protocol, Strain
-from .constants import (INVALID_ASSAY_META_PK, INVALID_AUTO_NAMING_INPUT, INVALID_LINE_META_PK,
-                        INVALID_PROTOCOL_META_PK, NON_UNIQUE_STRAIN_UUIDS, SUSPECTED_MATCH_STRAINS,
-                        UNMATCHED_PART_NUMBER, INTERNAL_EDD_ERROR_CATEGORY,
-                        ILLEGAL_RELATED_FIELD_REFERENCE, INVALID_RELATED_FIELD_REFERENCE,
-                        ZERO_REPLICATES, BAD_GENERIC_INPUT_CATEGORY, NAME_ELT_STRAIN_NAME,
-                        NAME_ELT_REPLICATE_NUM)
+from .constants import (
+    BAD_GENERIC_INPUT_CATEGORY,
+    ILLEGAL_RELATED_FIELD_REFERENCE,
+    INTERNAL_EDD_ERROR_CATEGORY,
+    INVALID_ASSAY_META_PK,
+    INVALID_AUTO_NAMING_INPUT,
+    INVALID_LINE_META_PK,
+    INVALID_PROTOCOL_META_PK,
+    INVALID_RELATED_FIELD_REFERENCE,
+    NAME_ELT_REPLICATE_NUM,
+    NAME_ELT_STRAIN_NAME,
+    NON_UNIQUE_STRAIN_UUIDS,
+    SUSPECTED_MATCH_STRAINS,
+    UNMATCHED_PART_NUMBER,
+    ZERO_REPLICATES,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -176,9 +185,12 @@ class LineAndAssayCreationVisitor(NewLineAndAssayVisitor):
     """
     def __init__(self, study_pk, cache, replicate_count, omit_all_strains=False,
                  omit_missing_strains=False):
-        super(LineAndAssayCreationVisitor, self).__init__(study_pk, replicate_count,
-                                                          omit_missing_strains=omit_missing_strains,
-                                                          omit_all_strains=omit_missing_strains)
+        super(LineAndAssayCreationVisitor, self).__init__(
+            study_pk,
+            replicate_count,
+            omit_missing_strains=omit_missing_strains,
+            omit_all_strains=omit_missing_strains
+        )
         self.lines_created = []
         self.require_strains = True
         self.cache = cache
@@ -195,8 +207,9 @@ class LineAndAssayCreationVisitor(NewLineAndAssayVisitor):
         # 1-to-M or M2M relations, which can't be set until after a Line pk is
         # defined
         hstore_compliant_dict = {
-            str(pk): cache.line_meta_types.get(pk).encode_value(value) for pk, value in
-            line_metadata_dict.iteritems() if value and pk not in self.cache.related_objects
+            str(pk): cache.line_meta_types.get(pk).encode_value(value)
+            for pk, value in viewitems(line_metadata_dict)
+            if value and pk not in cache.related_objects
         }
 
         line_attrs = {
@@ -266,7 +279,7 @@ class LineAndAssayCreationVisitor(NewLineAndAssayVisitor):
         # make sure everything gets cast to str to comply with Postgres' hstore field
         hstore_compliant_dict = {
             str(pk): str(value)
-            for pk, value in assay_metadata_dict.items() if value
+            for pk, value in viewitems(assay_metadata_dict) if value
         }
 
         assay = Assay.objects.create(
@@ -378,8 +391,8 @@ class ExperimentDescriptionContext(object):
             for_context=MetadataType.LINE).get(type_name='Carbon Source(s)')
         ##################################################
 
-        self.assay_time_mtype = MetadataType.objects.filter(for_context=MetadataType.ASSAY).get(
-                                                            type_name='Time')
+        self.assay_time_mtype = MetadataType.objects.filter(
+            for_context=MetadataType.ASSAY).get(type_name='Time')
 
         # get related MetadataTypes that describe related object fields
         relation_mtypes = self.query_related_object_types(
@@ -504,10 +517,8 @@ class AutomatedNamingStrategy(NamingStrategy):
 
         related_obj_meta_pks = set()
         for element in self.elements:
-
             if not isinstance(element, basestring):
                 continue
-
             tokens = element.split(_RELATED_OBJ_SEPARATOR)
             if len(tokens) == 2:
                 line_meta_pk, related_obj_attr_name = tokens
@@ -680,8 +691,8 @@ class CombinatorialDescriptionInput(object):
         ###########################################################################################
         # protocol-specific metadata
         ###########################################################################################
-        self.unique_protocols = set(protocol_to_assay_metadata.keys())
-        self.unique_protocols.update(protocol_to_combinatorial_metadata.keys())
+        self.unique_protocols = set(protocol_to_assay_metadata)
+        self.unique_protocols.update(protocol_to_combinatorial_metadata)
 
         # optional. maps protocol pk -> { MetadataType.pk -> [values] }
         self.protocol_to_assay_metadata = defaultdict(lambda: defaultdict(list))
@@ -748,20 +759,16 @@ class CombinatorialDescriptionInput(object):
         references for future use by this instance on the assumption that they are not going
         to change.
         """
-        logger.info('Pre-replacement combinatorial metadata: %s' %
-                    self.combinatorial_line_metadata)
+        logger.info(f'Pre-replacement combinatorial metadata: {self.combinatorial_line_metadata}')
         self._replace_ice_ids_with_edd_pks(self.combinatorial_line_metadata, strains_mtype_pk,
                                            edd_strains_by_ice_id, ice_parts_by_id,
                                            is_combinatorial=True)
-        logger.info('Post-replacement combinatorial metadata: %s' %
-                    self.combinatorial_line_metadata)
+        logger.info(f'Post-replacement combinatorial metadata: {self.combinatorial_line_metadata}')
 
-        logger.info('Pre-replacement common metadata: %s' %
-                    self.common_line_metadata)
+        logger.info(f'Pre-replacement common metadata: {self.common_line_metadata}')
         self._replace_ice_ids_with_edd_pks(self.common_line_metadata, strains_mtype_pk,
                                            edd_strains_by_ice_id, ice_parts_by_id)
-        logger.info('Post-replacement common metadata: %s' %
-                    self.common_line_metadata)
+        logger.info(f'Post-replacement common metadata: {self.common_line_metadata}')
 
     def _replace_ice_ids_with_edd_pks(self, line_metadata_src, strains_mtype_pk,
                                       edd_strains_by_ice_id, ice_parts_by_id,
@@ -896,7 +903,7 @@ class CombinatorialDescriptionInput(object):
             INVALID_PROTOCOL_META_PK,
         )
 
-        for protocol_pk, input_assay_metadata_dict in self.protocol_to_assay_metadata.iteritems():
+        for protocol_pk, input_assay_metadata_dict in viewitems(self.protocol_to_assay_metadata):
             self._verify_pk_keys(
                 input_assay_metadata_dict,
                 assay_metadata_types_by_pk,
@@ -914,7 +921,7 @@ class CombinatorialDescriptionInput(object):
             INVALID_PROTOCOL_META_PK,
         )
 
-        for protocol_pk, metadata_dict in self.protocol_to_combinatorial_metadata_dict.iteritems():
+        for protocol_pk, metadata_dict in viewitems(self.protocol_to_combinatorial_metadata_dict):
             self._verify_pk_keys(
                 metadata_dict,
                 assay_metadata_types_by_pk,
@@ -980,7 +987,7 @@ class CombinatorialDescriptionInput(object):
 
     def _visit_new_lines(self, visitor):
             line_metadata = copy.copy(self.common_line_metadata)
-            unvisited_meta_pks = set(self.combinatorial_line_metadata.iterkeys())
+            unvisited_meta_pks = set(self.combinatorial_line_metadata.keys())
             self._visit_new_lines_helper(line_metadata, unvisited_meta_pks, visitor)
 
     def _visit_new_lines_helper(self, line_metadata, unvisited_meta_pks, visitor):
@@ -1005,7 +1012,6 @@ class CombinatorialDescriptionInput(object):
             self.importer.add_error(BAD_GENERIC_INPUT_CATEGORY, ZERO_REPLICATES)
 
         for replicate_num in range(1, self.replicate_count + 1):
-
             line_name = self.naming_strategy.get_line_name(line_metadata_dict, replicate_num)
             line = visitor.visit_line(
                 line_name,
@@ -1024,12 +1030,12 @@ class CombinatorialDescriptionInput(object):
                 combo = self.protocol_to_combinatorial_metadata_dict[protocol_pk]
                 visited_pks = set()
                 # outer loop for combinatorial
-                for metadata_pk, values in combo.iteritems():
+                for metadata_pk, values in viewitems(combo):
                     visited_pks.add(metadata_pk)
                     for value in values:
                         assay_metadata[metadata_pk] = value
                         # inner loop for combinatorial
-                        for k, v in combo.iteritems():
+                        for k, v in viewitems(combo):
                             if k in visited_pks:
                                 continue
                             for value in v:
@@ -1175,9 +1181,9 @@ def find_existing_strains(parts_by_ice_id, importer):
     not_found = []
 
     if parts_by_ice_id:
-        logger.info('Searching EDD for %d strains...' % len(parts_by_ice_id))
+        logger.info(f'Searching EDD for {len(parts_by_ice_id)} strains...')
 
-    for ice_entry in parts_by_ice_id.itervalues():
+    for ice_entry in viewvalues(parts_by_ice_id):
         # search for the strain by registry ID. Note we use search instead of .get() until the
         # database consistently contains/requires ICE UUID's and enforces uniqueness
         # constraints for them (EDD-158).

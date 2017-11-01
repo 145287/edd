@@ -814,25 +814,22 @@ class DrfPagedResult(PagedResult):
         if not json_dict:
             return None
 
-        # pull out the 'results' subsection *if* the data is paged
-        _RESULTS_KEY = u'results'
-
         count = None
         next_page = None
         prev_page = None
         results_obj_list = []
 
         # IF response is paged, pull out paging context
-        if _RESULTS_KEY in json_dict:
-            next_page = json_dict.pop(u'next', None)
-            prev_page = json_dict.pop(u'previous', None)
-            count = json_dict.pop(u'count', None)
+        if 'results' in json_dict:
+            next_page = json_dict.get('next', None)
+            prev_page = json_dict.get('previous', None)
+            count = json_dict.get('count', None)
 
             if count == 0:
                 return None
 
             # iterate through the returned data, deserializing each object found
-            response_content = json_dict.get(_RESULTS_KEY)
+            response_content = json_dict.get('results', {})
             for object_dict in response_content:
                 # using parallel object hierarchy to Django model objects. Note that input isn't
                 # validated, but that shouldn't really be an issue on the client side,

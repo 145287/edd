@@ -10,6 +10,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.staticfiles.storage import staticfiles_storage
 from django.db import transaction
 from django.test import tag, TestCase
+from future.utils import viewitems
 from jsonschema import Draft4Validator
 from openpyxl import load_workbook
 
@@ -219,7 +220,7 @@ class CombinatorialCreationTests(TestCase):
         for line_name in expected_line_names:
             protocol_to_assay_to_meta = {}
             expected_assay_metadata[line_name] = protocol_to_assay_to_meta
-            for protocol_pk, assay_meta in assay_metadata.iteritems():
+            for protocol_pk, assay_meta in viewitems(assay_metadata):
                 assay_to_meta = {}
                 protocol_to_assay_to_meta[protocol_pk] = assay_to_meta
                 for meta in assay_meta:
@@ -295,16 +296,15 @@ class CombinatorialCreationTests(TestCase):
         )
 
         for line_name in expected_line_names:
-            if expected_protocols_to_assay_suffixes:
-                for protocol_pk, exp_suffixes in expected_protocols_to_assay_suffixes.iteritems():
-                    self._test_assay_names(
-                        line_name,
-                        naming_results,
-                        protocol_pk,
-                        exp_suffixes,
-                        cache.protocols
-                    )
-            else:
+            for protocol_pk, exp_suffixes in viewitems(expected_protocols_to_assay_suffixes):
+                self._test_assay_names(
+                    line_name,
+                    naming_results,
+                    protocol_pk,
+                    exp_suffixes,
+                    protocols_by_pk
+                )
+            if not expected_protocols_to_assay_suffixes:
                 self.assertFalse(
                     naming_results.line_to_protocols_to_assays_list.get(line_name, False),
                 )
@@ -348,7 +348,7 @@ class CombinatorialCreationTests(TestCase):
                     'found': found_protocol_count
                 })
 
-            for protocol_pk, assays_list in protocol_to_assays_list.iteritems():
+            for protocol_pk, assays_list in viewitems(protocol_to_assays_list):
                 planned_assay_names = protocol_to_planned_assay_names.get(protocol_pk)
                 self.assertEquals(
                     len(assays_list),
@@ -362,36 +362,19 @@ class CombinatorialCreationTests(TestCase):
             # above tests verify the naming only, which is generally a result of the metadata,
             # but best to directly verify the metadata as well. However, the metadata can be a lot
             # of information to encode, so likely that not all tests will include it.
-            if exp_meta_by_line:
-                # Note: we purposefully DON'T compare the size of exp_meta_by_line and
-                # creation_results.lines_created...possible that only a subset of lines will
-                # have metadata defined
+            if expected_line_metadata:
+                for line in creation_results.lines_created:
+                    expected_metadata = expected_line_metadata.get(line.name)
+                    self.assertEqual(expected_metadata, line.meta_store)
 
-                related_object_mtypes = cache.related_object_mtypes  # includes many_related
-                many_related_obj_mtypes = cache.many_related_mtypes
-
-                # TODO: remove debug block
-                print('Related object mtypes: %s' % related_object_mtypes)
-                print('Many related mtypes: %s' % many_related_obj_mtypes)
-
-                exp_metadata = exp_meta_by_line.get(created_line.name)
-                self._test_line_metadata(created_line, exp_metadata, cache,
-                                         related_object_mtypes,
-                                         many_related_obj_mtypes)
-
-        if exp_assay_metadata:
-            # TODO: add future-proofing test code here similar to line above to enforce
-            # related object relationships...not immediately necessary since current Assay
-            # metadata types do not define any that reference related object fields
-            # TODO: reorganize this test to be driven by expected results rather than actual..
-            # also add size checks for intermediate storage levels and move it back under
-            # the larger line-based loop above
-            line_items = creation_results.line_to_protocols_to_assays_list.iteritems()
-            for line_name, protocol_to_assay in line_items:
-                for protocol, assays_list in protocol_to_assay.iteritems():
-                    for assay in assays_list:
-                            expected_metadata = exp_assay_metadata[line_name][protocol][
-                                assay.name]
+            if expected_assay_metadata:
+                line_items = viewitems(creation_results.line_to_protocols_to_assays_list)
+                for line_name, protocol_to_assay in line_items:
+                    metadata_from_line = expected_assay_metadata[line_name]
+                    for protocol, assays_list in viewitems(protocol_to_assay):
+                        metadata_from_protocol = metadata_from_line[protocol]
+                        for assay in assays_list:
+                            expected_metadata = metadata_from_protocol[assay.name]
                             self.assertEqual(expected_metadata, assay.meta_store)
 
         # for future tests that may want access to creation results, (e.g. to spot check large
@@ -734,7 +717,7 @@ class CombinatorialCreationTests(TestCase):
         }
 
         expected_line_metadata = {
-            line_name: {str(media_meta.pk): u'LB'}
+            line_name: {str(media_meta.pk): 'LB'}
             for line_name in expected_line_names
         }
 

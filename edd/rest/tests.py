@@ -77,7 +77,7 @@ class EddApiTestCaseMixin(object):
         self.unauthenticated_client = Client()
 
     def _check_status(self, response, expected_code):
-        self.assertEquals(
+        self.assertEqual(
             response.status_code,
             expected_code,
             'Wrong response status code (%(code)s instead of %(expected)s) %(method)s %(url)s '

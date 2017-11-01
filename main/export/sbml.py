@@ -23,6 +23,7 @@ from django.template.defaulttags import register
 from django.utils.safestring import mark_safe
 from django.utils.translation import ugettext as _
 from functools import partial, reduce
+from future.utils import viewitems, viewvalues
 from itertools import chain
 from six import string_types
 from threadlocals.threadlocals import get_current_request
@@ -170,7 +171,7 @@ class SbmlExport(object):
         # if payload does not have keys for some fields, make sure form uses default initial
         replace_data = QueryDict(mutable=True)
         # loop the fields
-        for key, field in self._match_fields.iteritems():
+        for key, field in self._match_fields.items():
             base_name = match.add_prefix(key)
             # then loop the values in the field
             for i0, value in enumerate(field.initial):
@@ -220,7 +221,7 @@ class SbmlExport(object):
                 **kwargs
             ),
         }
-        for m_form in m_forms.itervalues():
+        for m_form in m_forms.values():
             if self._from_study_page:
                 m_form.update_bound_data_with_defaults()
             if m_form.is_valid() and self._sbml_template:
@@ -240,7 +241,7 @@ class SbmlExport(object):
             :param payload: the QueryDict from POST attribute of a request
             :param kwargs: any additional kwargs to pass to ALL forms; see Django Forms
                 documentation. """
-        if all(map(lambda f: f.is_valid(), self._forms.itervalues())):
+        if all(map(lambda f: f.is_valid(), self._forms.values())):
             match_form = self.create_match_form(payload, prefix='match', **kwargs)
             time_form = self.create_time_select_form(payload, prefix='time', **kwargs)
             self._forms.update({
@@ -308,7 +309,7 @@ class SbmlExport(object):
         # map species / reaction IDs to measurement IDs
         our_species = {}
         our_reactions = {}
-        for mtype, match in matches.iteritems():
+        for mtype, match in matches.items():
             if match:  # when not None, match[0] == species and match[1] == reaction
                 if match[0] and match[0] not in our_species:
                     our_species[match[0]] = mtype
@@ -328,8 +329,8 @@ class SbmlExport(object):
             :param context: the view context object, for passing information to templates
             :return: an updated context """
         # collect all the warnings together for counting
-        forms = [f for f in self._forms.itervalues() if isinstance(f, SbmlForm)]
-        sbml_warnings = chain(*map(lambda f: f.sbml_warnings if f else [], forms))
+        forms = [f for f in self._forms.values() if isinstance(f, SbmlForm)]
+        sbml_warnings = chain(*[f.sbml_warnings if f else [] for f in forms])
         context.update(self._forms)
         context.update(sbml_warnings=list(sbml_warnings))
         return context
@@ -439,12 +440,10 @@ class SbmlExport(object):
 
     def _update_carbon_ratio(self, builder, time):
         notes = defaultdict(list)
-        for mlist in self._measures.itervalues():
+        for mlist in viewvalues(self._measures):
             for m in mlist:
                 if m.is_carbon_ratio():
-                    points = models.MeasurementValue.objects.filter(
-                        measurement=m, x__0=time,
-                    )
+                    points = models.MeasurementValue.objects.filter(measurement=m, x__0=time)
                     if points.exists():
                         # only get first value object, unwrap values_list tuple to get y-array
                         magnitudes = points.values_list('y')[0][0]
@@ -501,9 +500,9 @@ class SbmlExport(object):
             max_t=Max('measurementvalue__x'), min_t=Min('measurementvalue__x'),
         )
         if trange['max_t']:
-            self._max = min(trange['max_t'][0], self._max or sys.maxint)
+            self._max = min(trange['max_t'][0], self._max or sys.maxsize)
         if trange['min_t']:
-            self._min = max(trange['min_t'][0], self._min or -sys.maxint)
+            self._min = max(trange['min_t'][0], self._min or -sys.maxsize)
         # iff no interpolation, capture intersection of t values bounded by max & min
         m_inter = measurement_qs.exclude(assay__protocol__in=interpolate).prefetch_related(
             Prefetch('measurementvalue_set', queryset=values_qs, to_attr='values'),
@@ -527,7 +526,7 @@ class SbmlExport(object):
 
     def _update_reaction(self, builder, our_reactions, time):
         # loop over all template reactions, if in our_reactions set bounds, notes, etc
-        for reaction_sid, mtype in our_reactions.iteritems():
+        for reaction_sid, mtype in viewitems(our_reactions):
             type_key = '%s' % mtype
             reaction = self._sbml_model.getReaction(reaction_sid.encode('utf-8'))
             if reaction is None:
@@ -585,7 +584,7 @@ class SbmlExport(object):
     def _update_species(self, builder, our_species, time):
         # loop over all template species, if in our_species set the notes section
         # TODO: keep MeasurementType in match_form, remove need to re-query Metabolite
-        for species_sid, mtype in our_species.iteritems():
+        for species_sid, mtype in viewitems(our_species):
             type_key = '%s' % mtype
             metabolite = None
             try:
@@ -877,7 +876,7 @@ class SbmlExportOdForm(SbmlExportMeasurementsForm):
     def _clean_check_for_curve(self, data):
         """ Ensures that each unique selected line has at least two points to calculate a
             growth curve. """
-        for line in self._clean_collect_data_lines(data).itervalues():
+        for line in viewvalues(self._clean_collect_data_lines(data)):
             count = 0
             for m in self._measures_by_line[line.pk]:
                 count += len(m.measurementvalue_set.all())
@@ -894,7 +893,7 @@ class SbmlExportOdForm(SbmlExportMeasurementsForm):
     def _clean_check_for_gcdw(self, data, gcdw_default, conversion_meta):
         """ Ensures that each unique selected line has a gCDW/L/OD factor. """
         # warn for any lines missing the selected metadata type
-        for line in self._clean_collect_data_lines(data).itervalues():
+        for line in viewvalues(self._clean_collect_data_lines(data)):
             factor = line.metadata_get(conversion_meta)
             # TODO: also check that the factor in metadata is a valid value
             if factor is None:
@@ -1114,7 +1113,7 @@ class SbmlBuilder(object):
         notes = self.parse_note_body(body)
         notes.update(**kwargs)
         body.removeChildren()
-        for key, value in notes.iteritems():
+        for key, value in viewitems(notes):
             if isinstance(value, string_types):
                 self._add_p_tag(body, '%s: %s' % (key, value))
             else:

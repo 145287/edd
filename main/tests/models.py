@@ -310,16 +310,12 @@ class LineTests(TestCase):  # XXX also Strain, CarbonSource
         self.assertTrue(self.line1.control)
 
     def test_strain(self):
-        self.assertEqual(self.strain1.n_lines, 3)
-        self.assertEqual(self.strain1.n_studies, 2)
-        self.assertEqual(self.strain2.n_lines, 1)
-        self.assertEqual(self.strain2.n_studies, 1)
+        self.assertEqual(self.strain1.line_set.count(), 3)
+        self.assertEqual(self.strain2.line_set.count(), 1)
 
     def test_carbon_source(self):
-        self.assertEqual(self.cs1.n_lines, 2)
-        self.assertEqual(self.cs1.n_studies, 2)
-        self.assertEqual(self.cs2.n_lines, 1)
-        self.assertEqual(self.cs2.n_studies, 1)
+        self.assertEqual(self.cs1.line_set.count(), 2)
+        self.assertEqual(self.cs2.line_set.count(), 1)
 
 
 # XXX because there's so much overlap in functionality and the necessary setup
@@ -681,16 +677,16 @@ class IceTests(TestCase):
         # test matching against ICE URI's with a numeric ID
         uri = 'https://registry-test.jbei.org/entry/49194/'
         match = ICE_ENTRY_URL_PATTERN.match(uri)
-        self.assertEquals('https', match.group(1))
-        self.assertEquals('registry-test.jbei.org', match.group(2))
-        self.assertEquals('49194', match.group(3))
+        self.assertEqual('https', match.group(1))
+        self.assertEqual('registry-test.jbei.org', match.group(2))
+        self.assertEqual('49194', match.group(3))
 
         # test matching against ICE URI's with a UUID
         uri = 'https://registry-test.jbei.org/entry/761ec36a-cd17-41b8-a348-45d7552d4f4f'
         match = ICE_ENTRY_URL_PATTERN.match(uri)
-        self.assertEquals('https', match.group(1))
-        self.assertEquals('registry-test.jbei.org', match.group(2))
-        self.assertEquals('761ec36a-cd17-41b8-a348-45d7552d4f4f', match.group(3))
+        self.assertEqual('https', match.group(1))
+        self.assertEqual('registry-test.jbei.org', match.group(2))
+        self.assertEqual('761ec36a-cd17-41b8-a348-45d7552d4f4f', match.group(3))
 
         # verify non-match against invalid URLs
         uri = 'ftp://registry.jbei.org/entry/12345'

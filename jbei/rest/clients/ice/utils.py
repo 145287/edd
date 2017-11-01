@@ -1,7 +1,6 @@
 # coding: utf-8
-from __future__ import unicode_literals
 
-import urlparse
+from __future__ import unicode_literals
 
 
 def build_entry_ui_url(ice_base_url, entry_id):
@@ -23,17 +22,3 @@ def build_entry_ui_url(ice_base_url, entry_id):
             'id': entry_id,
         }
     )
-
-
-def extract_id_from_ui_url(ice_part_ui_url):
-    """
-    Extracts an ICE identifier for a part from a valid ICE user interface URL.  Note that ICE's
-    user interface accepts multiple different identifiers, so prior knowledge is needed to
-    distinguish between the identifiers accepted.
-    :param ice_part_ui_url:
-    :return: the identifier
-    """
-    url_parts = urlparse.urlparse(ice_part_ui_url)
-    url_path = url_parts.path
-    elts = url_path.split('/')
-    return elts[-1] if elts[-1] else elts[-2]
