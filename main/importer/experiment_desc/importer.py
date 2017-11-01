@@ -14,6 +14,7 @@ from django.core.mail import mail_admins
 from django.core.urlresolvers import reverse
 from django.db import transaction
 from django.utils.translation import ugettext as _
+from future.utils import viewitems
 from io import BytesIO
 from openpyxl import load_workbook
 from pprint import pformat
@@ -108,7 +109,7 @@ def _build_prioritized_issue_list(src_dict, priority_reference):
     unprioritized_src = copy.deepcopy(src_dict)
 
     # loop over defined priority order, including issues in the defined order
-    for category, title_priority_order in priority_reference.iteritems():
+    for category, title_priority_order in viewitems(priority_reference):
         title_to_summaries = unprioritized_src.get(category, None)
 
         if not title_to_summaries:
@@ -125,8 +126,8 @@ def _build_prioritized_issue_list(src_dict, priority_reference):
 
     # review any items that didn't were missing from the defined order (likely due to code
     # maintenance. Add them at the top to attract attention, then print a warning log message
-    for category, unprioritized_titles in unprioritized_src.iteritems():
-        for title, err_summary in unprioritized_titles.iteritems():
+    for category, unprioritized_titles in viewitems(unprioritized_src):
+        for title, err_summary in viewitems(unprioritized_titles):
             result.insert(0, err_summary.to_json_dict())
             logger.warning('Including un-prioritized issue (category="%(category)s", '
                            'title="%(title)s") at the top of the list. This issue '
@@ -225,14 +226,14 @@ class CombinatorialCreationImporter(object):
         self._append_summary(self.warnings, category_title, subtitle, occurrence_detail)
 
     def has_error(self, subtitle):
-        for category_title, errors_by_subtitle in self.errors.iteritems():
+        for category_title, errors_by_subtitle in viewitems(self.errors):
             if subtitle in errors_by_subtitle:
                 return True
 
         return False
 
     def has_warning(self, subtitle):
-        for category_title, warnings_by_subtitle in self.warnings.iteritems():
+        for category_title, warnings_by_subtitle in viewitems(self.warnings):
             if subtitle in warnings_by_subtitle:
                 return True
 
@@ -408,7 +409,7 @@ class CombinatorialCreationImporter(object):
         # or referenced again soon.
         ###########################################################################################
         self.create_missing_strains(non_existent_edd_strains, edd_strains_by_part_number)
-        strains_by_pk = {strain.pk: strain for strain in edd_strains_by_part_number.itervalues()}
+        strains_by_pk = {strain.pk: strain for strain in edd_strains_by_part_number.values()}
         performance.end_edd_strain_creation(len(non_existent_edd_strains))
 
         ###########################################################################################
@@ -466,9 +467,9 @@ class CombinatorialCreationImporter(object):
                 strains_by_pk=strains_by_pk
             )
             created_lines_list.extend(creation_visitor.lines_created)
-            items = creation_visitor.line_to_protocols_to_assays_list.iteritems()
+            items = viewitems(creation_visitor.line_to_protocols_to_assays_list)
             for line_pk, protocol_to_assays_list in items:
-                for protocol, assays_list in protocol_to_assays_list.iteritems():
+                for protocol, assays_list in viewitems(protocol_to_assays_list):
                     total_assay_count += len(assays_list)
 
         ###########################################################################################
@@ -556,7 +557,7 @@ class CombinatorialCreationImporter(object):
                 # defaultdict, so side effect is assignment
                 all_protocol_to_assay_names = all_planned_names[line_name]
 
-                for protocol_pk, assay_names in protocol_to_assay_names.iteritems():
+                for protocol_pk, assay_names in viewitems(protocol_to_assay_names):
                     all_planned_assay_names = all_protocol_to_assay_names[protocol_pk]
 
                     for assay_name in assay_names:
@@ -568,7 +569,7 @@ class CombinatorialCreationImporter(object):
 
                         unique_assay_names = protocol_to_unique_input_assay_names[protocol_pk]
 
-                        if assay_name in unique_assay_names.keys():
+                        if assay_name in unique_assay_names:
                             duplicate_names = protocol_to_duplicate_new_assay_names[protocol_pk]
                             duplicate_names.append(assay_name)
                         else:
@@ -587,8 +588,7 @@ class CombinatorialCreationImporter(object):
             # e.g. this is an Experiment Description file build a bettor error message
             if int_row_nums and int_row_nums is not None:
                 # TODO: consider extracting column number too
-                sorted_rows = list(int_row_nums)
-                sorted_rows.sort()
+                sorted_rows = sorted(int_row_nums)
                 str_row_nums = [str(row_num) for row_num in sorted_rows]
                 if str_row_nums:
                     message = '%(line_name)s (row %(rows_list)s)' % {
@@ -602,7 +602,7 @@ class CombinatorialCreationImporter(object):
         # intermediate data in two ways: one for convenient display in the current UI, the other
         # for eventual JSON generation for the following one...see comments in EDD-626.
         duplicate_input_assay_to_cells = defaultdict(set)
-        for protocol_pk, duplicates in protocol_to_duplicate_new_assay_names.iteritems():
+        for protocol_pk, duplicates in viewitems(protocol_to_duplicate_new_assay_names):
             for duplicate_name in duplicates:
                 message = duplicate_name
                 row_nums = [str(row_num) for row_num in
@@ -610,9 +610,8 @@ class CombinatorialCreationImporter(object):
                 if row_nums:
                     duplicate_input_assay_to_cells[duplicate_name].update(row_nums)  # TODO: cells!
 
-        for assay_name, cells in duplicate_input_assay_to_cells.iteritems():
-            sorted_cells = list(cells)
-            sorted_cells.sort()
+        for assay_name, cells in viewitems(duplicate_input_assay_to_cells):
+            sorted_cells = sorted(cells)
             message = '%(assay_name)s (%(cells_list)s)' % {
                 'assay_name': assay_name,
                 'cells_list': ', '.join(sorted_cells),
@@ -635,7 +634,7 @@ class CombinatorialCreationImporter(object):
         # TODO: we can do some additional work to provide better (e.g. cell-number based) feedback,
         # but this should be a good stopgap.
         duplicate_existing_assay_names = set()
-        for protocol_pk, assay_names_list in protocol_to_unique_input_assay_names.iteritems():
+        for protocol_pk, assay_names_list in viewitems(protocol_to_unique_input_assay_names):
             existing_assays = Assay.objects.filter(
                 name__in=assay_names_list,
                 line__study__pk=study.pk,

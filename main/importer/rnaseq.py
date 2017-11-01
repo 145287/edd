@@ -192,7 +192,7 @@ class import_rna_seq(object):
             Measurement.objects.filter(id__in=update_measurements).update(update_ref=update)
         meas_dict = get_measurements_dict()
         new_meas_data = []
-        for gene_id in genes.keys():
+        for gene_id in genes:
             meas_type = genes[gene_id]
             for ytype in ["counts", "fpkm"]:
                 if (len(values_by_gene[ytype]) > 0):

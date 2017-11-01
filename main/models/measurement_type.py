@@ -270,7 +270,7 @@ class Metabolite(MeasurementType):
             response = requests.post(url, data={'cid': pubchem_cid})
             record = response.json()['PC_Compounds'][0]
             properties = {
-                item['urn']['label']: item['value'].values()[0]
+                item['urn']['label']: list(item['value'].values())[0]
                 for item in record['props']
             }
             datasource = Datasource.objects.create(name='PubChem', url=url)
@@ -279,7 +279,7 @@ class Metabolite(MeasurementType):
                 short_name=pubchem_cid,
                 type_source=datasource,
                 charge=record.get('charge', 0),
-                carbon_count=len(filter(lambda a: a == 6, record['atoms']['element'])),
+                carbon_count=len([a for a in record['atoms']['element'] if a == 6]),
                 molar_mass=properties['Molecular Weight'],
                 molecular_formula=properties['Molecular Formula'],
                 smiles=properties['SMILES'],

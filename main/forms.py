@@ -19,6 +19,7 @@ from django.db.models.manager import BaseManager
 from django.utils.safestring import mark_safe
 from django.utils.translation import ugettext_lazy as _
 from functools import partial
+from future.utils import viewitems
 
 from jbei.rest.auth import HmacAuth
 from jbei.rest.clients.ice import IceApi
@@ -75,7 +76,7 @@ class MultiAutocompleteWidget(AutocompleteWidget):
             # delegate decompress for individual items
             values = map(super(MultiAutocompleteWidget, self).decompress, value.all())
             # zip together into array of two value-arrays
-            values = zip(*values)
+            values = list(zip(*values))
             if len(values):
                 # join by the separator string
                 return [
@@ -89,17 +90,17 @@ class MultiAutocompleteWidget(AutocompleteWidget):
 
     def render(self, name, value, attrs=None):
         joined = []
-        _range = range(len(self.widgets))
-        for index in _range:
+        widget_count = len(self.widgets)
+        for index in range(widget_count):
             joined.append([])
         if value is None:
             value = []
         for item in value:
             if not isinstance(item, list):
                 item = self.decompress(item)
-            for index in _range:
+            for index in range(widget_count):
                 joined[index].append(item[index] if len(item) > index else '')
-        for index in _range:
+        for index in range(widget_count):
             joined[index] = self._separator.join(map(str, joined[index]))
         return super(MultiAutocompleteWidget, self).render(name, joined, attrs)
 
@@ -556,7 +557,7 @@ class LineForm(forms.ModelForm):
         super(LineForm, self).__init__(*args, **kwargs)
         # alter all fields to include a "bulk-edit" checkbox in label
         # initially hidden via "off" class
-        for fieldname, field in self.fields.items():
+        for fieldname, field in viewitems(self.fields):
             field.label = mark_safe(
                 '<input type="checkbox" class="off bulk" name="%s" checked="checked" '
                 'value/>%s' % (self.add_prefix('_bulk_%s' % fieldname), field.label)
@@ -616,7 +617,7 @@ class LineForm(forms.ModelForm):
         # go through and delete any keys with None values
         meta = self.cleaned_data['meta_store']
         none_keys = []
-        for key, value in meta.items():
+        for key, value in viewitems(meta):
             if value is None:
                 none_keys.append(key)
         for key in none_keys:
@@ -692,8 +693,8 @@ class AssayForm(forms.ModelForm):
             return clone
         all_assays = map(link_assay, self._lines)
         if commit:
-            [a.save() for a in all_assays]
-        return all_assays
+            map(lambda a: a.save, all_assays)
+        return list(all_assays)
 
 
 class MeasurementForm(forms.ModelForm):
@@ -735,8 +736,8 @@ class MeasurementForm(forms.ModelForm):
             return clone
         all_measures = map(link_measure, self._assays)
         if commit:
-            [m.save() for m in all_measures]
-        return all_measures
+            map(lambda m: m.save(), all_measures)
+        return list(all_measures)
 
 
 class MeasurementValueForm(forms.ModelForm):

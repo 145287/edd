@@ -1,10 +1,11 @@
+# coding: utf-8
+from __future__ import division, unicode_literals
 
 """
 Convenience methods wrapping openpyxl module for handling .xlsx file I/O.
 (Despite the module name, this doesn't actually do any parsing of the file
 format, but it attempts to intelligently interpret the content.)
 """
-from __future__ import division
 
 import sys
 
@@ -12,6 +13,11 @@ from openpyxl.writer.excel import save_virtual_workbook
 from openpyxl import load_workbook
 from openpyxl import Workbook
 from six import string_types
+
+try:
+    MAX_INT = sys.maxint
+except AttributeError:
+    MAX_INT = sys.maxsize
 
 
 def export_to_xlsx(table, headers=None, title="Exported table", file_name=None):
@@ -126,7 +132,7 @@ def _find_table_of_values(
         column_search_text=None,
         expect_numeric_data=False,
         minimum_number_of_data_rows=2,
-        maximum_number_of_tables=sys.maxint,
+        maximum_number_of_tables=MAX_INT,
         enforce_non_blank_cells=False):
     """
     Scan a worksheet for a block of cells resembling a regular table structure,
@@ -145,7 +151,7 @@ def _find_table_of_values(
     if (column_search_text is not None):
         column_search_text = column_search_text.lower()
     if (column_labels is not None):
-        column_labels = set([cl.lower() for cl in column_labels])
+        column_labels = {cl.lower() for cl in column_labels}
     possible_tables = []
 
     row_index = 0
