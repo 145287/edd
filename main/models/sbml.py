@@ -7,6 +7,7 @@ Models for SBML mapping.
 
 import logging
 
+from builtins import str
 from django.db import models
 from django.utils.encoding import python_2_unicode_compatible
 from django.utils.translation import ugettext_lazy as _
@@ -74,7 +75,7 @@ class SBMLTemplate(EDDObject):
             # self.sbml_file = ForeignKey
             # self.sbml_file.file = FileField on Attachment
             # self.sbml_file.file.file = File object on FileField
-            contents = self.sbml_file.file.file.read()
+            contents = str(self.sbml_file.file.file.read())
             import libsbml
             self._sbml_document = libsbml.readSBMLFromString(contents)
         return self._sbml_document

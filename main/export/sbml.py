@@ -431,8 +431,8 @@ class SbmlExport(object):
             flux = math.log(y_next / y_0) / time_delta
             kinetic_law = reaction.getKineticLaw()
             # NOTE: libsbml calls require use of 'bytes' CStrings
-            upper_bound = kinetic_law.getParameter(b"UPPER_BOUND")
-            lower_bound = kinetic_law.getParameter(b"LOWER_BOUND")
+            upper_bound = kinetic_law.getParameter("UPPER_BOUND")
+            lower_bound = kinetic_law.getParameter("LOWER_BOUND")
             upper_bound.setValue(flux)
             lower_bound.setValue(flux)
         except Exception as e:
@@ -574,8 +574,8 @@ class SbmlExport(object):
                     flux_end = (y_delta / time_delta) / density
                 kinetic_law = reaction.getKineticLaw()
                 # NOTE: libsbml calls require use of 'bytes' CStrings
-                upper_bound = kinetic_law.getParameter(b"UPPER_BOUND")
-                lower_bound = kinetic_law.getParameter(b"LOWER_BOUND")
+                upper_bound = kinetic_law.getParameter("UPPER_BOUND")
+                lower_bound = kinetic_law.getParameter("LOWER_BOUND")
                 upper_bound.setValue(max(flux_start, flux_end))
                 lower_bound.setValue(min(flux_start, flux_end))
             except Exception as e:
@@ -1049,10 +1049,10 @@ class SbmlBuilder(object):
 
             :return: an empty notes XMLNode """
         notes_node = libsbml.XMLNode()
-        body_tag = libsbml.XMLTriple(b"body", b"", b"")
+        body_tag = libsbml.XMLTriple("body", "", "")
         attributes = libsbml.XMLAttributes()
         namespace = libsbml.XMLNamespaces()
-        namespace.add(b"http://www.w3.org/1999/xhtml", b"")
+        namespace.add("http://www.w3.org/1999/xhtml", "")
         body_token = libsbml.XMLToken(body_tag, attributes, namespace)
         body_node = libsbml.XMLNode(body_token)
         notes_node.addChild(body_node)
@@ -1067,7 +1067,7 @@ class SbmlBuilder(object):
         if node is None:
             return notes
         note_body = node
-        if note_body.hasChild(b'body'):
+        if note_body.hasChild('body'):
             note_body = note_body.getChild(0)
         # API not very pythonic, cannot just iterate over children
         for index in range(note_body.getNumChildren()):
@@ -1108,7 +1108,7 @@ class SbmlBuilder(object):
             :return: the notes element passed in """
         # ensure adding to the <body> node
         body = _note_node
-        if _note_node.hasChild(b'body'):
+        if _note_node.hasChild('body'):
             body = _note_node.getChild(0)
         notes = self.parse_note_body(body)
         notes.update(**kwargs)
@@ -1137,9 +1137,9 @@ class SbmlBuilder(object):
     def _add_p_tag(self, body, text):
         attributes = libsbml.XMLAttributes()
         namespace = libsbml.XMLNamespaces()
-        p_tag = libsbml.XMLTriple(b"p", b"", b"")
+        p_tag = libsbml.XMLTriple("p", "", "")
         p_token = libsbml.XMLToken(p_tag, attributes, namespace)
-        text_token = libsbml.XMLToken(text.encode('utf-8'))
+        text_token = libsbml.XMLToken(text)
         text_node = libsbml.XMLNode(text_token)
         p_node = libsbml.XMLNode(p_token)
         p_node.addChild(text_node)
