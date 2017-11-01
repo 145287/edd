@@ -19,9 +19,9 @@ import re
 import requests
 
 from builtins import object, str
-from requests.compat import urlparse
-from urllib import urlencode
-from urlparse import urlunparse, ParseResult, parse_qs
+from future.utils import viewitems
+from requests.compat import urlparse, urlencode, urlunparse
+from six.moves.urllib.parse import ParseResult, parse_qs
 
 from jbei.rest.api import RestApiClient
 from jbei.rest.sessions import PagedResult, PagedSession, Session
@@ -254,7 +254,7 @@ class Entry(object):
             'parameters'
         ]
 
-        for json_keyword, json_value in json_dict.iteritems():
+        for json_keyword, json_value in viewitems(json_dict):
             # skip data that translate to custom Python objects rather than builtin data types
             if json_keyword in nontrivial_conversion_keywords:
                 continue
@@ -295,7 +295,7 @@ class Entry(object):
         json_dict = self.__dict__.copy()
 
         # reverse the json -> python keyword changes performed during deserialization
-        for json_keyword, python_keyword in PART_KEYWORD_CHANGES.iteritems():
+        for json_keyword, python_keyword in viewitems(PART_KEYWORD_CHANGES):
             value = json_dict.pop(python_keyword)
             if value:
                 json_dict[json_keyword] = value
@@ -412,7 +412,7 @@ class Sample(object):
         }
 
         translated_dict = {}
-        for java_keyword, value in json_dict.items():
+        for java_keyword, value in viewitems(json_dict):
             python_keyword = json_to_python_keyword_changes.get(java_keyword, java_keyword)
             translated_dict[python_keyword] = value
 
@@ -433,7 +433,7 @@ def _construct_part(python_object_params, part_type, class_data_keyword, convers
 
     class_data = python_object_params.pop(class_data_keyword, None)
     if class_data:
-        for keyword, value in class_data.items():
+        for keyword, value in viewitems(class_data):
             python_keyword = keyword
             if keyword in conversion_dict:
                 python_keyword = conversion_dict[keyword]
@@ -509,7 +509,7 @@ class User(object):
         }
 
         translated_dict = {}
-        for java_keyword, value in json_dict.items():
+        for java_keyword, value in viewitems(json_dict):
             python_keyword = json_to_python_keyword_changes.get(java_keyword, java_keyword)
             translated_dict[python_keyword] = value
 
@@ -543,7 +543,7 @@ class EntrySearchResult(object):
         }
 
         translated_dict = {}
-        for java_keyword, value in json_dict.iteritems():
+        for java_keyword, value in viewitems(json_dict):
             python_keyword = keyword_dict.get(java_keyword, java_keyword)
 
             # read the part into a Part object

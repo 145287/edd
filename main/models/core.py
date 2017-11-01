@@ -639,20 +639,8 @@ class Protocol(EDDObject):
         return super(Protocol, self).save(*args, **kwargs)
 
 
-class LineProperty(object):
-    """ Base class for EDDObject instances tied to a Line. """
-    @property
-    def n_lines(self):
-        return self.line_set.count()
-
-    @property
-    def n_studies(self):
-        lines = self.line_set.all()
-        return len(set([l.study_id for l in lines]))
-
-
 @python_2_unicode_compatible
-class Strain(EDDObject, LineProperty):
+class Strain(EDDObject):
     """ A link to a strain/part in the JBEI ICE Registry. """
     class Meta:
         db_table = 'strain'
@@ -699,7 +687,7 @@ class Strain(EDDObject, LineProperty):
 
 
 @python_2_unicode_compatible
-class CarbonSource(EDDObject, LineProperty):
+class CarbonSource(EDDObject):
     """ Information about carbon sources, isotope labeling. """
     class Meta:
         db_table = 'carbon_source'
@@ -1111,7 +1099,7 @@ class Measurement(EDDMetadata, EDDSerialize):
         if defined_only:
             qs = qs.exclude(Q(y=None) | Q(y__len=0))
         # first index unpacks single value from tuple; second index unpacks first value from X
-        return map(lambda x: x[0][0], qs.values_list('x'))
+        return [x[0][0] for x in qs.values_list('x')]
 
     # this shouldn't need to handle vectors
     def interpolate_at(self, x):

@@ -1,3 +1,6 @@
+# -*- coding: utf-8 -*-
+from __future__ import unicode_literals
+
 """
 A collection of utility methods for interacting with REST frameworks
 """
@@ -7,8 +10,8 @@ import tempfile
 import webbrowser
 
 from six import string_types
+from six.moves.urllib.parse import urlparse
 from threading import Timer
-from urlparse import urlparse
 
 from jbei.utils import DOCKER_HOST_ENV_VARIABLE
 

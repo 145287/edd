@@ -42,7 +42,6 @@ pyasn1==0.3.6
 pycparser==2.18
 pyldap==2.4.37
 pyOpenSSL==17.3.0
-pysmb==1.1.22
 python-dateutil==2.6.1
 python-libsbml==5.15.0
 python-openid==2.2.5

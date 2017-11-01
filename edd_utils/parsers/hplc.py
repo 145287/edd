@@ -1,16 +1,17 @@
 # -*- coding: utf-8 -*-
+from __future__ import unicode_literals
+
 """
 This is for parsing the output of HPLC machines.
 """
-from __future__ import unicode_literals
 
 import chardet
 import logging
 import re
 
+from builtins import map
 from collections import defaultdict, OrderedDict, namedtuple
 from decimal import Decimal
-from itertools import imap
 
 from .util import RawImportRecord
 
@@ -210,7 +211,7 @@ class HPLC_Parser(object):
         # { compound: [ compound_record_for_assay1, ... ], ... }
         compound_record_dict = defaultdict(list)
 
-        for (name, sample) in self.samples.iteritems():
+        for (name, sample) in self.samples.items():
             # Collects the DB names from the name.
             line = time = assay = None
             match_result = self.sample_name_regex.match(name)

@@ -1,3 +1,6 @@
+# coding: utf-8
+from __future__ import unicode_literals
+
 import json
 
 from django.contrib.auth import get_user_model
@@ -16,7 +19,7 @@ def profile(request, username):
     User = get_user_model()
     try:
         user = User.objects.get(username=username)
-    except User.DoesNotExist, e:
+    except User.DoesNotExist as e:
         raise Http404("User does not exist")
     return profile_for_user(request, user)
 
@@ -39,7 +42,7 @@ def settings(request):
                 user.userprofile.prefs = json.loads(request.POST['data'])
                 user.userprofile.save()
                 return HttpResponse(status=204)
-            except Exception, e:
+            except Exception as e:
                 # TODO: logging
                 return HttpResponse(status=500)
         elif request.method == 'DELETE':
@@ -47,7 +50,7 @@ def settings(request):
                 user.userprofile.prefs = {}
                 user.userprofile.save()
                 return HttpResponse(status=204)
-            except Exception, e:
+            except Exception as e:
                 # TODO: logging
                 return HttpResponse(status=500)
         else:
@@ -68,7 +71,7 @@ def settings_key(request, key):
                 prefs.update({ key: request.POST['data'], })
                 user.userprofile.save()
                 return HttpResponse(status=204)
-            except Exception, e:
+            except Exception as e:
                 # TODO: logging
                 return HttpResponse(status=500)
         elif request.method == 'DELETE':
@@ -76,7 +79,7 @@ def settings_key(request, key):
                 del prefs[key]
                 user.userprofile.save()
                 return HttpResponse(status=204)
-            except Exception, e:
+            except Exception as e:
                 # TODO: logging
                 return HttpResponse(status=500)
         else:

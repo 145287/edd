@@ -42,12 +42,12 @@ def flatten_json(source):
     # convert lists/tuples to a dict
     if not isinstance(source, dict) and isinstance(source, Iterable):
         source = dict(enumerate(source))
-    for key, value in source.iteritems():
+    for key, value in viewitems(source):
         key = str(key)
         if isinstance(value, string_types):
             output[key] = value
         elif isinstance(value, (dict, Iterable)):
-            for sub, item in flatten_json(value).iteritems():
+            for sub, item in viewitems(flatten_json(value)):
                 output['.'.join((key, sub, ))] = item
         else:
             output[key] = value

@@ -21,6 +21,7 @@ from django.utils.safestring import mark_safe
 from django.utils.translation import ugettext as _
 from django.views import generic
 from django.views.decorators.csrf import ensure_csrf_cookie
+from future.utils import viewvalues
 from messages_extends import constants as msg_constants
 from requests import codes
 from rest_framework.exceptions import MethodNotAllowed
@@ -186,7 +187,7 @@ class StudyIndexView(generic.edit.CreateView):
         # and a mapping of lvs to retain order
         latest = map(lambda pk: latest_by_pk.get(pk, None), lvs)
         # filter out the Nones
-        context['latest_viewed_studies'] = filter(bool, latest)
+        context['latest_viewed_studies'] = list(filter(bool, latest))
         context['can_create'] = Study.user_can_create(self.request.user)
         return context
 
@@ -319,7 +320,7 @@ class StudyDetailBaseView(StudyObjectMixin, generic.DetailView):
         action_lookup = self.get_actions(can_write=can_write)
         action_fn = action_lookup[action]
         view_or_valid = action_fn(request, context, *args, **kwargs)
-        if type(view_or_valid) == bool:
+        if isinstance(view_or_valid, bool):
             # boolean means a response to same page, with flag noting whether form was valid
             return self.post_response(request, context, view_or_valid)
         elif isinstance(view_or_valid, HttpResponse):
@@ -648,7 +649,7 @@ class StudyLinesView(StudyDetailBaseView):
                     form.save()
                     saved += 1
                 else:
-                    for error in form.errors.values():
+                    for error in viewvalues(form.errors):
                         messages.warning(request, error)
         messages.success(
             request,
@@ -1195,7 +1196,7 @@ def study_assay_measurements(request, pk=None, slug=None, protocol=None, assay=N
             x['assay_id']: x.get('count', 0) for x in total_measures if 'assay_id' in x
         },
         'types': {t.pk: t.to_json() for t in measure_types},
-        'measures': map(lambda m: m.to_json(), measure_list),
+        'measures': [m.to_json() for m in measure_list],
         'data': value_dict,
     }
     return JsonResponse(payload, encoder=utilities.JSONEncoder)

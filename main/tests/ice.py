@@ -75,8 +75,8 @@ class IceIntegrationTests(TestCase):
             ice_url('/collections/available/entries?sort=created&asc=false')
         )
         entries = response.json()['data'][:10]
-        cls.part_ids = map(lambda p: p['partId'], reversed(entries))
-        cls.db_ids = map(lambda p: p['id'], reversed(entries))
+        cls.part_ids = [p['partId'] for p in reversed(entries)]
+        cls.db_ids = [p['id'] for p in reversed(entries)]
         # set read permissions on some of the created strains
         response = ice.session.get(ice_url('/users?filter=reader@example.org'))
         reader_id = response.json()['users'][0]['id']
@@ -105,18 +105,21 @@ class IceIntegrationTests(TestCase):
         entries_url = ice_url('/collections/available/entries?sort=created&asc=false')
         ice = IceApi(admin_auth)
         response = ice.session.get(entries_url)
-        entries = set(map(lambda p: p['partId'], response.json()['data']))
+        payload = response.json()['data']
+        entries = {p['partId'] for p in payload}
         self.assertTrue(entries.issuperset(self.part_ids))
         # verify that reader user finds the five parts with permissions set
         ice = IceApi(reader_auth)
         response = ice.session.get(entries_url)
-        entries = set(map(lambda p: p['partId'], response.json()['data']))
+        payload = response.json()['data']
+        entries = {p['partId'] for p in payload}
         self.assertTrue(entries.issuperset(self.part_ids[:5]))
         self.assertEqual(len(entries.intersection(self.part_ids[5:])), 0)
         # verify that user with no permissions finds no parts
         ice = IceApi(none_auth)
         response = ice.session.get(entries_url)
-        entries = set(map(lambda p: p['partId'], response.json()['data']))
+        payload = response.json()['data']
+        entries = {p['partId'] for p in payload}
         self.assertEqual(len(entries.intersection(self.part_ids)), 0)
 
     def test_upload_links_admin(self):
