@@ -93,7 +93,7 @@ class HmacAuth(AuthBase):
             self._sort_parameters(url.query),
             request.body or '',
         ))
-        return msg
+        return msg.encode('utf-8')
 
     def _build_signature(self, request):
         """
