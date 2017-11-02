@@ -91,7 +91,7 @@ class HmacAuth(AuthBase):
             url.netloc,
             url.path,
             self._sort_parameters(url.query),
-            request.body or '',
+            str(request.body or ''),
         ))
         return msg.encode('utf-8')
 

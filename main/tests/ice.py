@@ -50,45 +50,49 @@ class IceIntegrationTests(TestCase):
         ice = IceApi(auth)
         # make sure ICE has users matching EDD users
         user_url = ice_url('/users?sendEmail=false')
-        ice.session.post(user_url, json=user_to_ice_json(cls.admin_ice_user))
-        ice.session.post(user_url, json=user_to_ice_json(cls.read_ice_user))
-        ice.session.post(user_url, json=user_to_ice_json(cls.none_ice_user))
-        # set the admin account type on admin_ice_user
-        response = ice.session.get(ice_url('/users?filter=admin@example.org'))
-        admin_id = response.json()['users'][0]['id']
-        acct = user_to_ice_json(cls.admin_ice_user)
-        acct.update(accountType='ADMIN')
-        ice.session.put(ice_url('/users/%d' % admin_id), json=acct)
-        # populate ICE with some strains
-        with factory.load_test_file('ice_entries.csv') as entries:
-            response = ice.session.post(ice_url('/uploads/file'), files={
-                'type': 'strain',
-                'file': entries,
-            })
-        upload_id = response.json()['uploadInfo']['id']
-        response = ice.session.put(ice_url('/uploads/%d/status' % upload_id), json={
-            'id': upload_id,
-            'status': 'APPROVED',
-        })
-        # fetch the part IDs
-        response = ice.session.get(
-            ice_url('/collections/available/entries?sort=created&asc=false')
-        )
-        entries = response.json()['data'][:10]
-        cls.part_ids = [p['partId'] for p in reversed(entries)]
-        cls.db_ids = [p['id'] for p in reversed(entries)]
-        # set read permissions on some of the created strains
-        response = ice.session.get(ice_url('/users?filter=reader@example.org'))
-        reader_id = response.json()['users'][0]['id']
-        for idx in range(5):
-            response = ice.session.post(
-                ice_url('/parts/%s/permissions' % cls.part_ids[idx]),
-                json={
-                    'article': 'ACCOUNT',
-                    'articleId': reader_id,
-                    'type': 'READ_ENTRY',
-                    'typeId': cls.db_ids[idx],
+        try:
+            ice.session.post(user_url, json=user_to_ice_json(cls.admin_ice_user))
+            ice.session.post(user_url, json=user_to_ice_json(cls.read_ice_user))
+            ice.session.post(user_url, json=user_to_ice_json(cls.none_ice_user))
+            # set the admin account type on admin_ice_user
+            response = ice.session.get(ice_url('/users?filter=admin@example.org'))
+            admin_id = response.json()['users'][0]['id']
+            acct = user_to_ice_json(cls.admin_ice_user)
+            acct.update(accountType='ADMIN')
+            ice.session.put(ice_url('/users/%d' % admin_id), json=acct)
+            # populate ICE with some strains
+            with factory.load_test_file('ice_entries.csv') as entries:
+                response = ice.session.post(ice_url('/uploads/file'), files={
+                    'type': 'strain',
+                    'file': entries,
                 })
+            upload_id = response.json()['uploadInfo']['id']
+            response = ice.session.put(ice_url('/uploads/%d/status' % upload_id), json={
+                'id': upload_id,
+                'status': 'APPROVED',
+            })
+            # fetch the part IDs
+            response = ice.session.get(
+                ice_url('/collections/available/entries?sort=created&asc=false')
+            )
+            entries = response.json()['data'][:10]
+            cls.part_ids = [p['partId'] for p in reversed(entries)]
+            cls.db_ids = [p['id'] for p in reversed(entries)]
+            # set read permissions on some of the created strains
+            response = ice.session.get(ice_url('/users?filter=reader@example.org'))
+            reader_id = response.json()['users'][0]['id']
+            for idx in range(5):
+                response = ice.session.post(
+                    ice_url('/parts/%s/permissions' % cls.part_ids[idx]),
+                    json={
+                        'article': 'ACCOUNT',
+                        'articleId': reader_id,
+                        'type': 'READ_ENTRY',
+                        'typeId': cls.db_ids[idx],
+                    })
+        except Exception as e:
+            cls.tearDownClass()
+            raise e
 
     @classmethod
     def setUpTestData(cls):

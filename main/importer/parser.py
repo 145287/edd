@@ -1,6 +1,7 @@
 # coding: utf-8
 from __future__ import division, unicode_literals
 
+import codecs
 
 from builtins import str
 from collections import namedtuple
@@ -45,9 +46,10 @@ parser_registry[(ImportModeFlags.BIOLECTOR, ImportFileTypeFlags.XML)] = biolecto
 
 
 def csv_parser(request):
+    reader = codecs.getreader('utf-8')
     return ParsedInput(
         ImportFileTypeFlags.CSV,
-        request.read()
+        reader(request).read()
     )
 parser_registry[(ImportModeFlags.STANDARD, ImportFileTypeFlags.CSV)] = csv_parser
 parser_registry[(ImportModeFlags.TRANSCRIPTOMICS, ImportFileTypeFlags.CSV)] = csv_parser
