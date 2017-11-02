@@ -323,20 +323,10 @@ def _find_table_of_values(
             "identified in this worksheet."
         )
     else:
-        tables = []
-        for tmp in possible_tables:
-            headers = None
-
-            if number_of_numerical_cells(tmp[0]) == 0:
-                headers = tmp[0]
-                table = tmp[1:]
-            else:
-                table = tmp
-            tables.append({
-                "headers": headers,
-                "values": table,
-            })
-        return tables
+        return [
+            {"headers": tmp[0], "values": tmp[1:]}
+            for tmp in possible_tables
+        ]
 
 
 def worksheet_as_list_of_lists(ws):
