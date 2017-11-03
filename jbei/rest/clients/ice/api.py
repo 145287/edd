@@ -809,7 +809,7 @@ class IceApi(RestApiClient):
         try:
             response = self.session.get(url=rest_url)
             response.raise_for_status()
-            json_dict = json.loads(response.content)
+            json_dict = json.loads(response.text)
             if json_dict:
                 return Entry.of(json_dict, False)
         except requests.exceptions.Timeout as e:
@@ -916,7 +916,7 @@ class IceApi(RestApiClient):
         query_json = json.dumps({'queryString': search_terms})
         response = self.session.post(url, data=query_json, headers=_JSON_CONTENT_TYPE_HEADER)
         response.raise_for_status()
-        results = json.loads(response.content)
+        results = json.loads(response.text)
         return [record['entryInfo'] for record in results['results']]
 
     # TODO: doesn't support field filters yet, though ICE's API does

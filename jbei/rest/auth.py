@@ -85,13 +85,16 @@ class HmacAuth(AuthBase):
         #   * SORTED query string, keyed by natural UTF8 byte-ordering of names
         #   * Request Body
         delimiter = '\n'
+        body = ''
+        if request.body:
+            body = request.body.decode('utf-8')
         msg = delimiter.join((
             self._USERNAME or '',
             request.method,
             url.netloc,
             url.path,
             self._sort_parameters(url.query),
-            str(request.body or ''),
+            body,
         ))
         return msg.encode('utf-8')
 
