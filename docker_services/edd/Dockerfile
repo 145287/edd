@@ -15,7 +15,7 @@ RUN apk add --no-cache git \
 
 # ---
 
-FROM buildpack-deps:stretch
+FROM buildpack-deps:buster
 
 LABEL maintainer="William Morrell <WCMorrell@lbl.gov>"
 WORKDIR /code
@@ -23,12 +23,13 @@ ARG EDD_VERSION=2.2.0
 ENV PYTHONUNBUFFERED=1 LANG=C.UTF-8 EDD_VERSION=${EDD_VERSION}
 
 # include Debian packages required to build pip packages
-RUN apt-get clean && apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y -q \
+RUN apt-get clean \
+    && apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
         build-essential \
         g++ \
         gfortran \
-        libatlas-dev \
+        libatlas-base-dev \
         libbz2-dev \
         libffi-dev \
         liblapack-dev \
@@ -43,7 +44,6 @@ RUN apt-get clean && apt-get update \
         python3-pip \
         python3-setuptools \
         python3-wheel \
-        python3-sklearn \
     && apt-get autoremove -y \
     && ln -s /usr/bin/python3 /usr/local/bin/python \
     && ln -s /usr/bin/pip3 /usr/local/bin/pip \
