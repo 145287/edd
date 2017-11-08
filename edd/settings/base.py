@@ -129,6 +129,7 @@ INSTALLED_APPS = (
     'allauth.account',
     'allauth.socialaccount',
     'django.contrib.flatpages',
+    'channels',  # channels in pip
 
     # EDD apps
     'main',
@@ -261,6 +262,26 @@ SWAGGER_SETTINGS = {
         'title': 'EDD REST API',
     },
 
+}
+
+
+###################################################################################################
+# WebSockets / Channels
+###################################################################################################
+
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'asgi_redis.RedisChannelLayer',
+        'ROUTING': 'main.routing.channel_routing',
+        'CONFIG': {
+            'hosts': [
+                'redis://redis:6379/2',
+            ],
+            'symmetric_encryption_keys': [
+                SECRET_KEY,
+            ],
+        }
+    }
 }
 
 
