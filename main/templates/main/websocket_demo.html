@@ -1,0 +1,93 @@
+{% extends "edd_base.html" %}
+{% load staticfiles %}
+
+{% block js_css %}
+  {{ block.super }}
+  <style type="text/css">
+  #websocket_box {
+    background-color: #CCC;
+    border: 2px solid black;
+    position: relative;
+    height: 600px;
+    width: 100%;
+  }
+  .pointer_icon {
+    background-image: url('/static/main/images/award_star_gold_3.png');
+    background-position: center left;
+    background-repeat: no-repeat;
+    padding-left: 20px;
+    position: absolute;
+    height: 20px;
+    width: 100px;
+  }
+  </style>
+  <script type="text/javascript">
+    $(function () {
+      var socket = new WebSocket('ws://' + window.location.host + '/demo/');
+      var icon;
+      var timerId;
+      var moveTimer = null;
+      var position = {x: null, y: null};
+      function sendPosition() {
+        console.log('Sending ' + position.x + ', ' + position.y);
+        socket.send(JSON.stringify(position));
+        // sending at-most 20Hz
+        setTimeout(function () { moveTimer = null; }, 50);
+      };
+      socket.onopen = function (e) {
+        var box = $('#websocket_box');
+        icon = $('<div class="pointer_icon"></div>').insertAfter(box);
+        timerId = setInterval(function () {
+          socket.send('{}');
+        }, 5000);
+        box.on('mousemove', function (me) {
+          // some browsers will generate these events much closer together
+          // rather than overwhelm the server, batch them up and send at a reasonable rate
+          if (moveTimer === null) {
+            moveTimer = setTimeout(sendPosition, 0);
+          }
+          position.x = me.offsetX;
+          position.y = me.offsetY;
+        });
+      };
+      socket.onclose = function (e) {
+        console.log("!!! CLOSING !!! " + e.code + " " + e.reason + " --" + e.wasClean);
+        clearInterval(timerId);
+        icon.remove();
+      };
+      socket.onmessage = function (e) {
+        var msg, box_offset;
+        console.log(e);
+        msg = JSON.parse(e.data);
+        box_offset = $('#websocket_box').offset();
+        if (msg && Number.isFinite(msg.x) && Number.isFinite(msg.y)) {
+          console.log((msg.x + box_offset.left) + ', ' + (msg.y + box_offset.top));
+          icon.offset({
+            left: msg.x + box_offset.left,
+            top: msg.y + box_offset.top
+          }).text(msg.user || '');
+        }
+      };
+    });
+  </script>
+{% endblock js_css %}
+
+{% block head_title %}
+  EDD WebSockets Demo
+{% endblock head_title %}
+
+{% block body_title %}
+  EDD WebSockets Demo
+{% endblock body_title %}
+
+{% block content %}
+
+  <p>This page is a small demonstration of WebSocket capability in EDD. Moving your mouse pointer
+    in the box below will move a small icon around. These motions are sent to the EDD server, and
+    forwarded to every other browser with the page open. To see it in action, open two browser
+    windows on this page, and see the icons moving around in both windows based on what happens in
+    each window.</p>
+
+  <div id="websocket_box"></div>
+
+{% endblock content %}
