@@ -23,51 +23,72 @@
   </style>
   <script type="text/javascript">
     $(function () {
-      var socket = new WebSocket('ws://' + window.location.host + '/demo/');
-      var icon;
-      var timerId;
-      var moveTimer = null;
-      var position = {x: null, y: null};
-      function sendPosition() {
-        console.log('Sending ' + position.x + ', ' + position.y);
-        socket.send(JSON.stringify(position));
-        // sending at-most 20Hz
-        setTimeout(function () { moveTimer = null; }, 50);
+      var demoPage = {
+        'box': $('websocket_box'),
+        'icon': null,
+        'moveTimer': null,
+        'position': {x: 0, y: 0},
+        'retries': 0,  // TODO
+        'socket': null
       };
-      socket.onopen = function (e) {
+      function createSocket() {
+        var socket = new WebSocket('ws://' + window.location.host + '/demo/');
+        socket.onopen = openHandler;
+        socket.onclose = closeHandler;
+        socket.onmessage = messageHandler;
+        return socket;
+      }
+      function openHandler(event) {
         var box = $('#websocket_box');
-        icon = $('<div class="pointer_icon"></div>').insertAfter(box);
-        timerId = setInterval(function () {
-          socket.send('{}');
-        }, 5000);
-        box.on('mousemove', function (me) {
-          // some browsers will generate these events much closer together
-          // rather than overwhelm the server, batch them up and send at a reasonable rate
-          if (moveTimer === null) {
-            moveTimer = setTimeout(sendPosition, 0);
-          }
-          position.x = me.offsetX;
-          position.y = me.offsetY;
-        });
-      };
-      socket.onclose = function (e) {
-        console.log("!!! CLOSING !!! " + e.code + " " + e.reason + " --" + e.wasClean);
-        clearInterval(timerId);
-        icon.remove();
-      };
-      socket.onmessage = function (e) {
-        var msg, box_offset;
-        console.log(e);
-        msg = JSON.parse(e.data);
-        box_offset = $('#websocket_box').offset();
+        demoPage.icon = $('<div class="pointer_icon"></div>').insertAfter(demoPage.box);
+        demoPage.box.on('mousemove', mouseMoveHandler);
+        demoPage.retries = 0;
+      }
+      function closeHandler(event) {
+        demoPage.icon.remove();
+        // TODO: re-open connection
+      }
+      function messageHandler(event) {
+        var msg = JSON.parse(e.data), box_offset = demoPage.box.offset();
         if (msg && Number.isFinite(msg.x) && Number.isFinite(msg.y)) {
-          console.log((msg.x + box_offset.left) + ', ' + (msg.y + box_offset.top));
-          icon.offset({
+          demoPage.icon.offset({
             left: msg.x + box_offset.left,
             top: msg.y + box_offset.top
           }).text(msg.user || '');
         }
-      };
+      }
+      function mouseMoveHandler(event) {
+        // some browsers will generate these events much closer together
+        // rather than overwhelm the server, batch them up and send at a reasonable rate
+        if (demoPage.moveTimer === null) {
+          demoPage.moveTimer = setTimeout(sendPosition, 0);
+        }
+        demoPage.position.x = event.offsetX;
+        demoPage.position.y = event.offsetY;
+      }
+      function sendPosition() {
+        if (demoPage.socket.readyState === WebSocket.OPEN) {
+          demoPage.socket.send(JSON.stringify(demoPage.position));
+        } else {
+          console.log('Socket is closed');
+        }
+        // sending at-most 20Hz
+        setTimeout(resetMoveTimer, 50);
+      }
+      function resetMoveTimer() {
+        demoPage.moveTimer = null;
+      }
+      function initDemoPage() {
+        try {
+          demoPage.socket = createSocket();
+        } catch (e) {
+          console.log(e);
+        }
+        if (demoPage.moveTimer) {
+          clearTimeout(demoPage.moveTimer);
+          demoPage.moveTimer = null;
+        }
+      }
     });
   </script>
 {% endblock js_css %}
