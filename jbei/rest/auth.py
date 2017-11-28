@@ -321,10 +321,13 @@ class EddSessionAuth(AuthBase):
         # return the session if it's successfully logged in, or print error messages/raise
         # exceptions as appropriate
         if response.status_code == requests.codes.ok:
-            DJANGO_LOGIN_FAILURE_CONTENT = 'Login failed'
-            DJANGO_REST_API_FAILURE_CONTENT = 'This field is required'
-            if (DJANGO_LOGIN_FAILURE_CONTENT in response.content or
-                    DJANGO_REST_API_FAILURE_CONTENT in response.content):
+            _DJANGO_LOGIN_FAILURE_CONTENT = 'Login failed'
+            _DJANGO_REST_API_FAILURE_CONTENT = 'This field is required'
+
+            # while EDD server-side code is transitioning from Python 2 to 3, convert response
+            # to unicode so client can tolerate either bytestring or unicode content
+            if (_DJANGO_LOGIN_FAILURE_CONTENT in response.text or
+                    _DJANGO_REST_API_FAILURE_CONTENT in response.text):
                 logger.warning('Login failed. Please try again.')
                 logger.info(response.headers)
                 if debug:
