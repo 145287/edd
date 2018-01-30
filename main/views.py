@@ -1703,8 +1703,3 @@ def model_search(request, model_name):
         return autocomplete.search_metadata(request, match.group(1))
     else:
         return autocomplete.search_generic(request, model_name)
-
-
-# /demo/
-def websocket_demo(request):
-    return render(request, 'main/websocket_demo.html')

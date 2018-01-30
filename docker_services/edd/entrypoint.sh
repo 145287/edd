@@ -378,14 +378,6 @@ case "$COMMAND" in
         banner "Starting Celery worker"
         exec celery -A edd worker -l info
         ;;
-    daphne)
-        banner "Starting daphne"
-        exec daphne -b 0.0.0.0 -p 8000 edd.asgi:channel_layer
-        ;;
-    websocket)
-        banner "Starting WebSocket worker"
-        exec python manage.py runworker --threads 6
-        ;;
     *)
         output "Unrecognized command: $COMMAND"
         exit 1
