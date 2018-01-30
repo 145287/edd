@@ -4,11 +4,9 @@
 amqp==2.2.2
 anyjson==0.3.3
 arrow==0.10.0
-asgi_redis==1.4.3
 billiard==3.5.0.3
 celery==4.1.0
 cffi==1.11.0
-channels==1.1.8
 chardet==3.0.4
 cryptography==2.0.3
 Django==1.11.7
@@ -55,7 +53,6 @@ requests==2.18.4
 requests-oauthlib==0.8.0
 scikit-learn==0.19.1
 scipy==0.18.1
-service_identity==17.0.0
 six==1.11.0
 SQLAlchemy==1.1.14
 sqlparse==0.2.4

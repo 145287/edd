@@ -33,8 +33,8 @@ from requests import HTTPError, codes
 from six.moves.urllib.parse import urlparse
 
 from jbei.rest.auth import EddSessionAuth, IceSessionAuth
-from jbei.rest.clients.edd import EddApi
-from jbei.rest.clients.ice import IceApi, Strain as IceStrain
+from jbei.rest.clients import EddApi, IceApi
+from jbei.rest.clients.ice import Strain as IceStrain
 from jbei.rest.clients.ice.utils import build_entry_ui_url
 from jbei.utils import session_login, UserInputTimer
 from . import settings
@@ -471,7 +471,7 @@ def main():
         result = user_input.user_input('Output file already exists at %s. Overwrite? (Y/n):' %
                                        path.abspath(output_file)).upper()
         if result not in ('Y', 'YES'):
-            logger.info('Aborting REST query process.')
+            print('Aborting REST query process.')
             return 0
         overwrite_output_file = True
 
@@ -527,18 +527,13 @@ def parse_search_settings(args):
     settings_file = getattr(args, 'settings', None)
     if settings_file:
         if not path.isfile(settings_file):
-            logger.error("""Settings file "%s" doesn't not exist or isn't a file.""" %
-                         settings_file)
+            print("""Settings file "%s" doesn't not exist or isn't a file.""" % settings_file)
             return None
     else:
         default_file = './sample_query_settings.py'
         if path.isfile(default_file):
-            logger.info('Found a settings file at the default path %s' % path.abspath(
-                default_file))
+            print('Found a settings file at the default path %s' % path.abspath(settings_file))
             settings_file = default_file
-        else:
-            logger.info('No settings file found at the default path %s' % path.abspath(
-                default_file))
 
     global_search_params = SearchParameters()
     if settings_file:
@@ -551,7 +546,7 @@ def parse_search_settings(args):
             search_settings, 'MEASUREMENT_NAME_REGEXES', [])
         global_search_params.ice_part_ids = getattr(search_settings, _ICE_PARTS_CONFIG, [])
         global_search_params.protocol_name_regexes = getattr(search_settings,
-                                                             'PROTOCOL_NAME_REGEXES', [])
+                                                             'PROTOCOL_NAME_REGEXES',[])
         global_search_params.measurement_type_name_regexes = getattr(
             search_settings, 'MEASUREMENT_TYPE_NAME_REGEXES', [])
         global_search_params.unit_name_regexes = getattr(search_settings, 'UNIT_NAME_REGEXES', [])
@@ -577,9 +572,8 @@ def parse_search_settings(args):
         global_search_params.unit_name_regexes = getattr(args, _UNITS_ARG, [])
 
     if not global_search_params.has_filters():
-        logger.warning('No search-narrowing parameters were configured via settings or command '
-                       'line parameters. At least one filter must be applied to limit the expense '
-                       'of querying EDD.')
+        print('No search-narrowing parameters were found in the settings file. At least '
+              'one filter must be applied to limit the expense of querying EDD')
         return None
 
     return global_search_params
@@ -1088,6 +1082,7 @@ class SampleQuery:
             logger.warning('No lines found matching search criteria')
             return
 
+        # TODO: remove!
         logger.debug('line pks = %s' % line_pks)
 
         ###########################################################################################
@@ -1106,7 +1101,7 @@ class SampleQuery:
 
             if len(protocols_by_pk) <= 10:
                 log_suffix = ': %s ' % (', '.join([str(protocol_pk) for protocol_pk in
-                                        cache.protocols_by_pk.keys()]))
+                                        cache.protocols_by_pk.iterkeys()]))
             else:
                 log_suffix = '.'
 
@@ -1117,7 +1112,7 @@ class SampleQuery:
                             'count': len(protocols_by_pk),
                             'suffix': log_suffix})
             assay_search_params['protocols'] = [protocol_pk for protocol_pk in
-                                                protocols_by_pk.keys()]
+                                                protocols_by_pk.iterkeys()]
         else:
             logger.info('Searching for all assays in study %(study_id)s%(lines)s...' % {
                 'study_id': study.pk, 'lines': lines_filter_msg})
@@ -1181,7 +1176,7 @@ class SampleQuery:
                         'strains of interest...' % {
                             'study_id': study_pk,
                             'strain_count': len(global_search_params.ice_part_ids)})
-            strain_uuids = [strain.uuid for strain in cache.ice_entries_by_url.values()]
+            strain_uuids = [strain.uuid for strain in cache.ice_entries_by_url.itervalues()]
             line_search_params['strains'] = strain_uuids
         else:
             logger.info('Searching for all lines in study %s...' % study_pk)
@@ -1242,8 +1237,8 @@ class SampleQuery:
 
     def query_and_process_measurements(self, study_pk, assay_pks=[]):
         """
-        Queries EDD for measurements within the specified assay, subject to result filtering
-        already applied.
+        Queries EDD for measurements within the specified assay, subject to result filtering already
+        applied.
         """
         meas_search_params = {'active': True, 'assays': assay_pks}
         if assay_pks:
@@ -1264,7 +1259,7 @@ class SampleQuery:
 
             # configure pks of measurement types to filter for.  If global search params dictated
             # only searching for a subset of measurement types, they should already be cached
-            type_pks = [pk for pk in cache.meas_types_by_pk.keys()]
+            type_pks = [pk for pk in cache.meas_types_by_pk.iterkeys()]
             meas_search_params['measurement_types'] = type_pks
             prefix = ('%(prefix)s (of %(count)d MeasurementTypes)' % {
                             'prefix': prefix,
@@ -1386,7 +1381,7 @@ class SampleQuery:
         if path.exists(file_path) and not overwrite_output_file:
             raise RuntimeError('Output file already exists at %s' % path.abspath(file_path))
 
-        study_pk = next(iter(self.result_cache.studies_by_pk.keys()))
+        study_pk = self.result_cache.studies_by_pk.iterkeys().next()
 
         DEFAULT_COLUMN_HEADERS = ['Line Name', 'Strain', 'Protocol Name', 'Measurement Type',
                                   'Time (h)', 'Value', 'Units']
@@ -1404,7 +1399,7 @@ class SampleQuery:
 
             writer.writerow(col_headers)
 
-            for study_pk, study in self.result_cache.studies_by_pk.items():
+            for study_pk, study in self.result_cache.studies_by_pk.iteritems():
 
                 if not hasattr(study, 'lines'):
                     continue
