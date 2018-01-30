@@ -12,7 +12,7 @@ from openpyxl.workbook import Workbook
 from requests import codes
 
 from jbei.rest.auth import HmacAuth
-from jbei.rest.clients.ice import IceApi
+from jbei.rest.clients.ice.api import IceApi
 
 from .. import models
 from . import factory, TestCase

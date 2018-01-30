@@ -20,7 +20,7 @@ from .importer.table import TableImport
 from .redis import ScratchStorage
 from .utilities import get_absolute_url
 from jbei.rest.auth import HmacAuth
-from jbei.rest.clients.ice import IceApi
+from jbei.rest.clients.ice.api import IceApi
 
 
 logger = get_task_logger(__name__)

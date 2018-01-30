@@ -14,7 +14,7 @@ from functools import reduce
 from rest_framework.exceptions import ValidationError
 
 from jbei.rest.auth import HmacAuth
-from jbei.rest.clients.ice import IceApi
+from jbei.rest.clients.ice.api import IceApi
 from main.models import Line, Study, StudyPermission
 from . import models as edd_models, solr
 

@@ -27,7 +27,7 @@ import argparse
 import logging
 import requests
 
-from jbei.rest.clients.edd import EddApi
+from jbei.rest.clients.edd.api import EddApi
 from jbei.rest.auth import EddSessionAuth
 from logging.config import dictConfig
 from requests.packages.urllib3.exceptions import InsecureRequestWarning

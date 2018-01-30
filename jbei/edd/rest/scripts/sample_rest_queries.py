@@ -33,8 +33,9 @@ from requests import HTTPError, codes
 from six.moves.urllib.parse import urlparse
 
 from jbei.rest.auth import EddSessionAuth, IceSessionAuth
-from jbei.rest.clients import EddApi, IceApi
-from jbei.rest.clients.ice import Strain as IceStrain
+from jbei.rest.clients.edd.api import EddApi
+from jbei.rest.clients.ice.api import IceApi
+from jbei.rest.clients.ice.api import Strain as IceStrain
 from jbei.rest.clients.ice.utils import build_entry_ui_url
 from jbei.utils import session_login, UserInputTimer
 from . import settings

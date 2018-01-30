@@ -6,7 +6,7 @@ from django.core.management import BaseCommand
 from django.core.management.base import CommandError
 
 from jbei.rest.auth import HmacAuth
-from jbei.rest.clients.ice import IceApi
+from jbei.rest.clients.ice.api import IceApi
 
 
 class Command(BaseCommand):
