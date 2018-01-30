@@ -37,7 +37,7 @@ from jbei.rest.clients.edd.api import EddApi
 from jbei.rest.clients.ice.api import IceApi
 from jbei.rest.clients.ice.api import Strain as IceStrain
 from jbei.rest.clients.ice.utils import build_entry_ui_url
-from jbei.utils import session_login, UserInputTimer
+# from jbei.utils import session_login, UserInputTimer
 from . import settings
 
 dictConfig(settings.LOGGING)
@@ -533,7 +533,7 @@ def parse_search_settings(args):
     else:
         default_file = './sample_query_settings.py'
         if path.isfile(default_file):
-            print('Found a settings file at the default path %s' % path.abspath(settings_file))
+            print('Found a settings file at the default path %s' % path.abspath(default_file))
             settings_file = default_file
 
     global_search_params = SearchParameters()
