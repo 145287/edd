@@ -1,4 +1,3 @@
-from __future__ import unicode_literals
 """
 A sample Python 2 script that demonstrates several anticipated read-only uses of EDD's REST
 API. The general process followed by this script is:
@@ -524,6 +523,11 @@ def main():
 
 
 def parse_search_settings(args):
+    """
+    Loads search parameters for this script from a custom settings file.  If the path is
+    provided via the command line, settings are read from that path.  Otherwise a default path
+    is inspected.
+    """
 
     settings_file = getattr(args, 'settings', None)
     if settings_file:
@@ -1382,7 +1386,7 @@ class SampleQuery:
         if path.exists(file_path) and not overwrite_output_file:
             raise RuntimeError('Output file already exists at %s' % path.abspath(file_path))
 
-        study_pk = self.result_cache.studies_by_pk.iterkeys().next()
+        study_pk = next(iter(self.result_cache.studies_by_pk.keys()))
 
         DEFAULT_COLUMN_HEADERS = ['Line Name', 'Strain', 'Protocol Name', 'Measurement Type',
                                   'Time (h)', 'Value', 'Units']
@@ -1395,12 +1399,12 @@ class SampleQuery:
         if len(self.result_cache.studies_by_pk) > 1:
             logger.info('Arbitrarily picking study %s to output to file' % study_pk)
 
-        with open(file_path, 'wb') as csvfile:
+        with open(file_path, 'w') as csvfile:
             writer = csv.writer(csvfile)
 
             writer.writerow(col_headers)
 
-            for study_pk, study in self.result_cache.studies_by_pk.iteritems():
+            for study_pk, study in self.result_cache.studies_by_pk.items():
 
                 if not hasattr(study, 'lines'):
                     continue
