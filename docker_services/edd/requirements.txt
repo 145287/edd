@@ -3,7 +3,7 @@
 
 amqp==2.2.2
 anyjson==0.3.3
-arrow==0.10.0
+arrow==0.12.1
 billiard==3.5.0.3
 celery==4.1.0
 cffi==1.11.0
