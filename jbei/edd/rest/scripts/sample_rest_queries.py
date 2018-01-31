@@ -55,7 +55,8 @@ _OUTPUT_FILE_ARG = 'output_file'
 _OVERWRITE_ARG = 'overwrite'
 _ALLOW_CO_CULTURE_ARG = 'allow_co_culture'
 _TARGET_ICE_INSTANCE_ARG = 'target_ice_url'
-_STUDY_ARG = 'study'
+_STUDY_SLUG_ARG = 'study_slug'
+_STUDY_ID_ARG = 'study_id'
 _ICE_PARTS_ARG = 'ice_parts'
 _PROTOCOLS_ARG = 'protocols'
 _MTYPES_ARG = 'mtypes'
@@ -92,7 +93,9 @@ class SearchParameters:
     performance / earlier detection of some common errors.
     """
     def __init__(self):
-        self.study_id = None  # used to specify a single study of interest
+        self.study_slug = None  # URL portion that uniquely identifies the study of interest
+
+        self.study_id = None  # UUID or integer pk used to specify a single study of interest
 
         # if no study is specified, used to search & process only studies updated after the
         # specified date. Note that at the time of writing, EDD's stored study modification date
@@ -112,7 +115,7 @@ class SearchParameters:
         self.unit_name_regexes = []
 
     def filter_by_studies(self):
-        return self.study_id
+        return self.study_slug or self.study_id or self.studies_modified_since
 
     def filter_by_strains(self):
         return bool(self.ice_part_ids)
@@ -134,7 +137,9 @@ class SearchParameters:
     def print_summary(self):
         logger.info('Search parameters:')
         logger.indent_level += 1
-        if self.study_id:
+        if self.study_slug:
+            logger.info('Study slug:\t%s' % self.study_slug)
+        elif self.study_id:
             logger.info('Study id:\t%s' % self.study_id)
         elif self.studies_modified_since:
             logger.info('Studies mod after:\t%s' % self.studies_modified_since)
@@ -411,7 +416,11 @@ def main():
                              'named "sample_query_settings.py" in the current working directory.'
                              'Note that this is distinct from the more general "local.py" used '
                              'to configure general settings shared by multiple scripts.')
-    parser.add_argument('--%s' % _STUDY_ARG, '-S',
+    parser.add_argument('--%s' % _STUDY_SLUG_ARG,
+                        help='The URL portion, or "slug" that uniquely identifies this study '
+                             'within the EDD deployment. Overrides "%s" if both are present'
+                             % _STUDY_ID_ARG)
+    parser.add_argument('--%s' % _STUDY_ID_ARG, '-S',
                         help='The integer primary key or UUID of the study whose data should be '
                              'queried.')
     parser.add_argument('--%s' % _ICE_PARTS_ARG, '-i', nargs='*',
@@ -431,7 +440,7 @@ def main():
                              'e.g. "2017-10-26:04:54:00:US/Pacific".  If provided, '
                              'this sample script will search for all studies modified on or after '
                              'the provided timestamp.  This parameter is ignored if the %s '
-                             'parameter is provided.' % _STUDY_ARG)
+                             'parameter is provided.' % _STUDY_ID_ARG)
     parser.add_argument(('--%s' % _OUTPUT_FILE_ARG), '-o',
                         help="The optional path to an output file where search results will be "
                              "written using a CSV format similar to EDD's export files")
@@ -550,7 +559,21 @@ def parse_search_settings(args):
     if settings_file:
         search_settings = imp.load_source('jbei.edd.rest.scripts.sample_query_settings',
                                           settings_file)
-        global_search_params.study_id = getattr(search_settings, 'STUDY_ID', None)
+
+        _STUDY_SLUG_SETTING = 'STUDY_SLUG'
+        _STUDY_ID_SETTING = 'STUDY_ID'
+
+        global_search_params.study_slug = getattr(search_settings, 'STUDY_SLUG', None)
+
+        if global_search_params.study_slug:
+            if hasattr(search_settings, _STUDY_ID_SETTING):
+                logger.warning('Ignored %(id)s settings, which was overridden by %(slug)s' % {
+                    'id': _STUDY_ID_SETTING,
+                    'slug': _STUDY_SLUG_SETTING
+                })
+        else:
+            global_search_params.study_id = getattr(search_settings, _STUDY_ID_SETTING, None)
+
         global_search_params.studies_modified_since = getattr(
             search_settings, 'STUDIES_MODIFIED_SINCE', None)
         global_search_params.measurement_type_name_regexes = getattr(
@@ -563,7 +586,15 @@ def parse_search_settings(args):
         global_search_params.unit_name_regexes = getattr(search_settings, 'UNIT_NAME_REGEXES', [])
 
     # read command line args, overriding any in script-specific config file (if present)
-    if getattr(args, _STUDY_ARG):
+    if hasattr(args, _STUDY_SLUG_ARG):
+        global_search_params.study_slug = args.study_slug
+
+        if args.study_slug and hasattr(args, _STUDY_ID_ARG):
+            logger.warning('Ignoring %(id)s argument, which is overridden by %(slug)s' % {
+                                'id': _STUDY_ID_ARG,
+                                'slug': _STUDY_SLUG_ARG, })
+
+    elif hasattr(args, _STUDY_ID_ARG):
         global_search_params.study_id = args.study
 
     if getattr(args, _MOD_SINCE_ARG):
@@ -583,7 +614,7 @@ def parse_search_settings(args):
         global_search_params.unit_name_regexes = getattr(args, _UNITS_ARG, [])
 
     if not global_search_params.has_filters():
-        print('No search-narrowing parameters were found in the settings file. At least '
+        logger.info('No search-narrowing parameters were found in the settings file. At least '
               'one filter must be applied to limit the expense of querying EDD')
         return None
 
@@ -1035,7 +1066,21 @@ class SampleQuery:
         # limited use at JBEI, and will only grow over time.
         edd = self.edd
         search_params = self.global_search_params
+        study_slug = search_params.study_slug
         study_id = search_params.study_id
+
+        if study_slug:
+            logger.info('Searching EDD studies for a study with slug "%s"' % study_slug)
+            studies_page = edd.search_studies(slug=study_slug)
+            if not studies_page:
+                logger.info('No studies were found with slug "%s"' % study_slug)
+                return False
+            if studies_page.current_result_count != 1:
+                logger.info('Expected 1 study with slug "%(slug)s", but found %(count)d' % {
+                                'slug': study_slug,
+                                'count': studies_page.current_result_count, })
+                return False
+            study_id = studies_page.results[0].pk
 
         if study_id:
             logger.info('Querying EDD for data in study %s' % study_id)

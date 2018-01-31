@@ -619,6 +619,9 @@ class EddApi(RestApiClient):
         :param query_url: the URL to query, including all desired search parameters (e.g. as
             returned in the "next" result from a results page).  If provided, all other
             parameters will be ignored.
+        :param slug: the slug (URL portion) that uniquely identifies the study within this
+                     EDD instance.  This is the URL portion visible in the web browser when
+                     accessing a study.
         :param name_regex: a regular expression for the name (case-insensitive).
         :param description_regex: a regular expression for the description (case-insensitive)
         :param created_after: a datetime used to filter objects by creation date (inclusive)
@@ -642,6 +645,7 @@ class EddApi(RestApiClient):
             search_params = {}
             _set_if_value_valid(search_params, PAGE_NUMBER_URL_PARAM,
                                 kwargs.pop('page_number', None))
+            _set_if_value_valid(search_params, 'slug', kwargs.pop('slug', None))
             unprocessed_kwargs = self._add_eddobject_search_params(search_params, **kwargs)
             self._enforce_valid_kwargs(unprocessed_kwargs)
 
