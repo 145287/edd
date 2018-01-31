@@ -46,6 +46,8 @@ logger = logging.getLogger(__name__)
 _PAGE_RECEIVED_MSG = ('Received page %(page)d with %(count)d %(class)s (total %(total)d '
                       'found)')
 
+_EDD_URL_ARG = 'edd_url'
+_ICE_URL_ARG = 'ice_url'
 _USERNAME_ARG = 'username'
 _PASSWORD_ARG = 'password'
 _IGNORE_ICE_ERRORS_ARG = 'ignore_ice_errors'
@@ -393,6 +395,8 @@ def main():
     parser = argparse.ArgumentParser(description='A sample script that demonstrates anticipated '
                                                  'use of EDD REST API to simplify integration '
                                                  'work for client applications.')
+    parser.add_argument(('--%s' % _EDD_URL_ARG), help='the URL to use in accessing EDD'),
+    parser.add_argument(('--%s' % _ICE_URL_ARG), help='the URL to use in accessing ICE'),
     parser.add_argument(('--%s' % _USERNAME_ARG), '-u',
                         help='The username used to authenticate with both EDD & ICE '
                              'APIs. If provided, overrides username in the '
@@ -403,8 +407,10 @@ def main():
                              'If not provided, a user prompt will appear.')
     parser.add_argument('--settings', '-s',
                         help='The path to a search-specific Python file containing settings for '
-                             'this search. If not provided, the script will search for a file '
-                             'named "sample_query_settings.py" in the current working directory.')
+                             'this script. If not provided, the script will search for a file '
+                             'named "sample_query_settings.py" in the current working directory.'
+                             'Note that this is distinct from the more general "local.py" used '
+                             'to configure general settings shared by multiple scripts.')
     parser.add_argument('--%s' % _STUDY_ARG, '-S',
                         help='The integer primary key or UUID of the study whose data should be '
                              'queried.')
@@ -556,7 +562,7 @@ def parse_search_settings(args):
             search_settings, 'MEASUREMENT_TYPE_NAME_REGEXES', [])
         global_search_params.unit_name_regexes = getattr(search_settings, 'UNIT_NAME_REGEXES', [])
 
-    # read command line args, overriding any in config file (if present)
+    # read command line args, overriding any in script-specific config file (if present)
     if getattr(args, _STUDY_ARG):
         global_search_params.study_id = args.study
 
@@ -588,8 +594,17 @@ _IGNORE_ICE_ERRORS_DEFAULT = False
 
 
 def authenticate_with_apis(args, user_input):
-    # if not overridden by command line arguments, look in settings for EDD/ICE credentials.
-    # Note assumption that they're the same, which holds true for JBEI/ABF, but maybe not others
+    # if not overridden by command line arguments, look in settings for EDD/ICE config
+    # and credentials. Only a limit number of settings from file are supported for override via
+    # the command line.
+    # Note assumption that credentials are the same for both EDD & ICE, which holds true for
+    # JBEI/ABF, but maybe not others
+    edd_url = getattr(args, _EDD_URL_ARG, None)
+    if (not edd_url) and hasattr(settings, 'EDD_URL'):
+        edd_url = settings.EDD_URL
+    ice_url = getattr(args, _ICE_URL_ARG, None)
+    if (not ice_url) and hasattr(settings, 'ICE_URL'):
+        ice_url = settings.ICE_URL
     password = getattr(args, _PASSWORD_ARG, None)
     if (not password) and hasattr(settings, 'EDD_PASSWORD'):
         password = settings.EDD_PASSWORD

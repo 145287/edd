@@ -44,10 +44,17 @@ You have two options for setting up a Python environment to run this code.
        docker run -it --entrypoint /bin/bash jbei/rest-client:latest
        
    At this point, you'll get a terminal prompt for the running Docker container, and you can 
-   execute the sample scripts (see sample commands below). For repeated EDD sample script runs, 
-   you'll also want to create a [docker-compose][4] file to mount a volume at 
-   `/code/jbei/edd/rest/scripts/settings` for storing commonly-used parameters in lieu of providing
-    hem as command line arguments.
+   execute the sample scripts (see sample commands below). 
+   
+   For repeated EDD sample script runs, you'll likely want to create a `local.py` file under 
+   `/code/jbei/edd/rest/scripts/settings` to store commonly-used parameters in lieu of 
+   providing them as command line arguments.  You can use Docker's `--mount` option to make a 
+   file from your computer visible inside the Docker container, e.g.
+       
+       docker run -it --entrypoint /bin/bash  \
+           --mount type=bind,src=/your/local/path/local.py,
+           dst=/code/jbei/edd/rest/scripts/settings/local.py \
+           jbei/rest-client:latest
    
 2. __Configure your own custom Python environment__
    

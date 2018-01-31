@@ -1,6 +1,6 @@
 """
 This sample file shows a simplistic example use of EDD's client-side REST API access. For a more
-robust and realistic example, see sample_rest_queries.py. To run this script
+robust and realistic example, see sample_rest_queries.py.
 
 To provide the most basic example, this script makes several simplifying assumptions that
 aren't likely to hold true in real-world examples:
