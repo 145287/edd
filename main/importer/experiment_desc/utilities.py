@@ -15,12 +15,22 @@ from six import string_types
 
 from main.importer.experiment_desc.validators import SCHEMA as JSON_SCHEMA
 from main.models import  Assay, Line, MetadataType, Protocol, Strain
-from .constants import (INVALID_ASSAY_META_PK, INVALID_AUTO_NAMING_INPUT, INVALID_LINE_META_PK,
-                        INVALID_PROTOCOL_META_PK, NON_UNIQUE_STRAIN_UUIDS, SUSPECTED_MATCH_STRAINS,
-                        UNMATCHED_PART_NUMBER, INTERNAL_EDD_ERROR_CATEGORY,
-                        ILLEGAL_RELATED_FIELD_REFERENCE, INVALID_RELATED_FIELD_REFERENCE,
-                        ZERO_REPLICATES, BAD_GENERIC_INPUT_CATEGORY, NAME_ELT_STRAIN_NAME,
-                        NAME_ELT_REPLICATE_NUM)
+from .constants import (
+    BAD_GENERIC_INPUT_CATEGORY,
+    ILLEGAL_RELATED_FIELD_REFERENCE,
+    INTERNAL_EDD_ERROR_CATEGORY,
+    INVALID_ASSAY_META_PK,
+    INVALID_AUTO_NAMING_INPUT,
+    INVALID_LINE_META_PK,
+    INVALID_PROTOCOL_META_PK,
+    INVALID_RELATED_FIELD_REFERENCE,
+    NAME_ELT_REPLICATE_NUM,
+    NAME_ELT_STRAIN_NAME,
+    NON_UNIQUE_STRAIN_UUIDS,
+    SUSPECTED_MATCH_STRAINS,
+    UNMATCHED_PART_NUMBER,
+    ZERO_REPLICATES,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -175,9 +185,12 @@ class LineAndAssayCreationVisitor(NewLineAndAssayVisitor):
     """
     def __init__(self, study_pk, cache, replicate_count, omit_all_strains=False,
                  omit_missing_strains=False):
-        super(LineAndAssayCreationVisitor, self).__init__(study_pk, replicate_count,
-                                                          omit_missing_strains=omit_missing_strains,
-                                                          omit_all_strains=omit_missing_strains)
+        super(LineAndAssayCreationVisitor, self).__init__(
+            study_pk,
+            replicate_count,
+            omit_missing_strains=omit_missing_strains,
+            omit_all_strains=omit_missing_strains
+        )
         self.lines_created = []
         self.require_strains = True
         self.cache = cache
@@ -378,8 +391,8 @@ class ExperimentDescriptionContext(object):
             for_context=MetadataType.LINE).get(type_name='Carbon Source(s)')
         ##################################################
 
-        self.assay_time_mtype = MetadataType.objects.filter(for_context=MetadataType.ASSAY).get(
-                                                            type_name='Time')
+        self.assay_time_mtype = MetadataType.objects.filter(
+            for_context=MetadataType.ASSAY).get(type_name='Time')
 
         # get related MetadataTypes that describe related object fields
         relation_mtypes = self.query_related_object_types(

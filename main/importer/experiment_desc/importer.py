@@ -10,11 +10,9 @@ import traceback
 from builtins import str
 from collections import defaultdict, OrderedDict
 from django.conf import settings
-from django.contrib.auth import get_user_model
 from django.core.mail import mail_admins
 from django.core.urlresolvers import reverse
 from django.db import transaction
-from django.db.models import Q
 from django.utils.translation import ugettext as _
 from future.utils import viewitems
 from io import BytesIO
@@ -24,26 +22,49 @@ from requests import codes
 
 from jbei.rest.clients.ice.api import Strain as IceStrain
 from jbei.rest.clients.ice.utils import build_entry_ui_url
-from main.models import Protocol, MetadataType, Strain, Assay, Line
-from main.signals.solr import UserSearch
+from main.models import Strain, Assay, Line
 from main.tasks import create_ice_connection
 # avoiding loading a ton of names to the module by only loading the namespace to constants
 from . import constants
-from .constants import (EMPTY_RESULTS, NON_STRAINS_CATEGORY, FOUND_PART_NUMBER_DOESNT_MATCH_QUERY,
-                        NON_STRAIN_ICE_ENTRY,
-                        PART_NUMBER_NOT_FOUND, BAD_REQUEST, INTERNAL_SERVER_ERROR, OK, FORBIDDEN,
-                        FORBIDDEN_PART_KEY, GENERIC_ICE_RELATED_ERROR,
-                        IGNORE_ICE_ACCESS_ERRORS_PARAM, ALLOW_DUPLICATE_NAMES_PARAM, NO_INPUT,
-                        DUPLICATE_INPUT_LINE_NAMES, DUPLICATE_INPUT_ASSAY_NAMES, ZERO_REPLICATES,
-                        EXISTING_LINE_NAMES, EXISTING_ASSAY_NAMES, SYSTEMIC_ICE_ACCESS_ERROR_CATEGORY,
-                        INTERNAL_EDD_ERROR_CATEGORY, MISSING_REQUIRED_NAMING_INPUT,
-                        INVALID_RELATED_FIELD_REFERENCE, SINGLE_PART_ACCESS_ERROR_CATEGORY,
-                        NAMING_OVERLAP_CATEGORY, ERROR_PRIORITY_ORDER, WARNING_PRIORITY_ORDER,
-                        UNPREDICTED_ERROR,
-                        BAD_GENERIC_INPUT_CATEGORY, DRY_RUN_PARAM, STRAINS_REQUIRED_FOR_NAMES)
+from .constants import (
+    ALLOW_DUPLICATE_NAMES_PARAM,
+    BAD_GENERIC_INPUT_CATEGORY,
+    BAD_REQUEST,
+    DRY_RUN_PARAM,
+    DUPLICATE_INPUT_ASSAY_NAMES,
+    DUPLICATE_INPUT_LINE_NAMES,
+    EMPTY_RESULTS,
+    ERROR_PRIORITY_ORDER,
+    EXISTING_ASSAY_NAMES,
+    EXISTING_LINE_NAMES,
+    FORBIDDEN,
+    FORBIDDEN_PART_KEY,
+    FOUND_PART_NUMBER_DOESNT_MATCH_QUERY,
+    GENERIC_ICE_RELATED_ERROR,
+    IGNORE_ICE_ACCESS_ERRORS_PARAM,
+    INTERNAL_EDD_ERROR_CATEGORY,
+    INTERNAL_SERVER_ERROR,
+    MISSING_REQUIRED_NAMING_INPUT,
+    NAMING_OVERLAP_CATEGORY,
+    NON_STRAINS_CATEGORY,
+    NON_STRAIN_ICE_ENTRY,
+    NO_INPUT,
+    OK,
+    PART_NUMBER_NOT_FOUND,
+    SINGLE_PART_ACCESS_ERROR_CATEGORY,
+    STRAINS_REQUIRED_FOR_NAMES,
+    SYSTEMIC_ICE_ACCESS_ERROR_CATEGORY,
+    UNPREDICTED_ERROR,
+    WARNING_PRIORITY_ORDER,
+    ZERO_REPLICATES,
+)
 from .parsers import ExperimentDescFileParser, JsonInputParser, _ExperimentDescriptionFileRow
-from .utilities import (CombinatorialCreationPerformance, ExperimentDescriptionContext,
-                        find_existing_strains, ALLOWED_RELATED_OBJECT_FIELDS)
+from .utilities import (
+    ALLOWED_RELATED_OBJECT_FIELDS,
+    CombinatorialCreationPerformance,
+    ExperimentDescriptionContext,
+    find_existing_strains,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -391,7 +412,10 @@ class IcePartResolver(object):
                 part_id_to_part[part_id] = found_entry
 
                 if fail_for_non_strains and not isinstance(found_entry, IceStrain):
-                    importer.add_error(NON_STRAINS_CATEGORY, NON_STRAIN_ICE_ENTRY, found_entry.part_id)
+                    importer.add_error(
+                        NON_STRAINS_CATEGORY, NON_STRAIN_ICE_ENTRY,
+                        found_entry.part_id
+                    )
 
                 # double-check for a coding error that occurred during testing. initial test
                 # parts had "JBX_*" part numbers that matched their numeric ID, but this isn't
@@ -470,17 +494,14 @@ class IcePartResolver(object):
                 unique_part_number_count = len(part_numbers)
                 if found_entries_count:
                     percent_found = 100 * (float(found_entries_count) / unique_part_number_count)
-                    warn_msg = ("Lines were added to your study, but some won't be associated with "
-                                "ICE strains. %(found)d of %(total)d unique strains (%(percent)0.2f) "
-                                "were found before the error occurred. The rest will need to be "
-                                "added later after the problem is fixed. EDD administrators have "
-                                "been notified of the problem." % {
-                                    'found': found_entries_count,
-                                    'total': unique_part_number_count,
-                                    'percent': percent_found,
-                                })
-                    importer.add_warning(SYSTEMIC_ICE_ACCESS_ERROR_CATEGORY, GENERIC_ICE_RELATED_ERROR,
-                                         warn_msg)
+                    importer.add_warning(
+                        SYSTEMIC_ICE_ACCESS_ERROR_CATEGORY, GENERIC_ICE_RELATED_ERROR,
+                        "Lines were added to your study, but some will not be associated with "
+                        f"ICE strains. {found_entries_count} of {unique_part_number_count} "
+                        f"unique strains ({percent_found:.2f}%) were found before the error "
+                        "occurred. The rest will need to be added later after the problem is "
+                        "fixed. EDD administrators have been notified of the problem."
+                    )
 
     def _notify_admins_of_systemic_ice_access_errors(self, options, unique_part_numbers,
                                                      ice_parts_by_number):
@@ -769,16 +790,15 @@ class CombinatorialCreationImporter(object):
 
                 if len(found_context) != len(required_value_ids):
                     missing_pks = [str(pk) for pk in required_value_ids if pk not in found_context]
-                    logger.error('Unable to locate %(missing)d of %(required)s required inputs '
-                                 'for metadata %(type)s' % {
-                                    'missing': len(missing_pks),
-                                    'required': len(required_value_ids),
-                                    'type': line_meta_type.type_name,
-                    })
-                    self.add_error(INTERNAL_EDD_ERROR_CATEGORY, MISSING_REQUIRED_NAMING_INPUT,
-                                   '%(meta_type)s: %(pks)s' % {
-                                       'meta_type': line_meta_type.type_name,
-                                       'pks': ', '.join(missing_pks)})
+                    logger.error(
+                        f'Unable to locate {len(missing_pks)} of {len(required_value_ids)} '
+                        f'required inputs for metadata {line_meta_type.type_name}'
+                    )
+                    pk_str = ', '.join(missing_pks)
+                    self.add_error(
+                        INTERNAL_EDD_ERROR_CATEGORY, MISSING_REQUIRED_NAMING_INPUT,
+                        f'{line_meta_type.type_name}: {pk_str}'
+                    )
 
             logger.debug('Found related object values: %s' % related_objects)
 
