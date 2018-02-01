@@ -23,7 +23,6 @@ from rest_framework.reverse import reverse
 from rest_framework.test import APITestCase
 from threadlocals.threadlocals import set_thread_variable
 
-from jbei.rest.clients.edd import constants
 from main import models
 
 logger = logging.getLogger(__name__)

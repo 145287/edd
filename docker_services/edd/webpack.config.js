@@ -14,6 +14,7 @@ var css_extract = new ExtractTextPlugin({
 
 module.exports = {
   entry: {
+    Admin: "./code/typescript/src/Admin.ts",
     Cytometry: "./code/typescript/src/Cytometry.ts",
     ExperimentDescHelp: "./code/typescript/src/Experiment-Desc-Help.ts",
     Export: "./code/typescript/src/Export.ts",
@@ -24,6 +25,7 @@ module.exports = {
     Skyline_Convert: "./code/typescript/src/Skyline_Convert.ts",
     StudyData: "./code/typescript/src/Study-Data.ts",
     StudyLines: "./code/typescript/src/Study-Lines.ts",
+    StudyLinesAddCombos: "./code/typescript/src/Study-Lines-Add-Combos.ts",
     StudyOverview: "./code/typescript/src/Study-Overview.ts",
     vendor: [
       "bootstrap",

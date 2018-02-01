@@ -141,7 +141,9 @@ module EDDTableImport {
                 $.extend(ATData, data.ATData);
                 $.extend(EDDData, data.EDDData);
                 EDDTableImport.onReferenceRecordsLoad();
-            }
+            },
+            // pass along extra parameter "active"
+            "data": { "active": true }
         }).fail(function(x, s, e) {
             alert(s);
         });
@@ -1143,6 +1145,9 @@ module EDDTableImport {
         uniqueLineNames: any[];
         uniqueAssayNames: string[];
         uniqueMeasurementNames: any[];
+        uniqueUniprot: string[];
+        uniquePubchem: string[];
+        uniqueGenbank: string[];
         uniqueMetadataNames: any[];
         // A flag to indicate whether we have seen any timestamps specified in the import data
         seenAnyTimestamps: boolean;
@@ -1199,6 +1204,9 @@ module EDDTableImport {
             this.uniqueLineNames = [];
             this.uniqueAssayNames = [];
             this.uniqueMeasurementNames = [];
+            this.uniqueUniprot = [];
+            this.uniquePubchem = [];
+            this.uniqueGenbank = [];
             this.uniqueMetadataNames = [];
             // A flag to indicate whether we have seen any timestamps specified in the import data
             this.seenAnyTimestamps = false;
@@ -1823,6 +1831,9 @@ module EDDTableImport {
             this.uniqueLineNames = [];
             this.uniqueAssayNames = [];
             this.uniqueMeasurementNames = [];
+            this.uniqueUniprot = [];
+            this.uniquePubchem = [];
+            this.uniqueGenbank = [];
             this.uniqueMetadataNames = [];
             this.seenAnyTimestamps = false;
 
@@ -1887,13 +1898,17 @@ module EDDTableImport {
                     // Validate the provided set of time/value points
                     rawSet.data.forEach((xy: any[]): void => {
                         var time: number, value: number;
-                        if (!JSNumber.isFinite(xy[0])) {
+                        if (xy[0] === null) {
+                            // keep explicit null values
+                            time = null;
+                        } else if (!JSNumber.isFinite(xy[0])) {
                             // Sometimes people - or Excel docs - drop commas into large numbers.
                             time = parseFloat((xy[0] || '0').replace(/,/g, ''));
                         } else {
                             time = <number>xy[0];
                         }
-                        // If we can't get a usable timestamp, discard this point.
+                        // If we can't parse a usable timestamp, discard this point.
+                        // NOTE: JSNumber.isNaN(null) === false
                         if (JSNumber.isNaN(time)) {
                             return;
                         }
@@ -1906,20 +1921,15 @@ module EDDTableImport {
                         } else {
                             value = <number>xy[1];
                         }
-                        if (!times[time]) {
+                        if (times[time] === undefined) {
                             times[time] = value;
                             uniqueTimes.push(time);
-                            this.seenAnyTimestamps = true;
+                            this.seenAnyTimestamps = time !== null;
                         }
                     });
                     uniqueTimes.sort((a, b) => a - b).forEach((time: number): void => {
                         reassembledData.push([time, times[time]]);
                     });
-
-                    // Only save if we accumulated some data or metadata
-                    if (!uniqueTimes.length && !foundMeta) {
-                        return;
-                    }
 
                     set = {
                         // Copy across the fields from the RawImportSet record
@@ -2030,11 +2040,17 @@ module EDDTableImport {
                             return;
                         }
                         switch (pulldown) {
+                            case TypeEnum.Pubchem_Name:
+                                hint = 'm';
+                                this.uniquePubchem.push(m_name);
+                                break;
                             case TypeEnum.Protein_Name:
                                 hint = 'p';
+                                this.uniqueUniprot.push(m_name);
                                 break;
                             case TypeEnum.Gene_Name:
                                 hint = 'g';
+                                this.uniqueGenbank.push(m_name);
                                 break;
                             default:
                                 hint = null;
@@ -2107,6 +2123,7 @@ module EDDTableImport {
                         if (value) {
                             set.hint = 'g';
                             set.measurement_name = value;
+                            this.uniqueGenbank.push(value);
                         }
                         return;
                     } else if (pulldown === TypeEnum.Timestamp) {
@@ -2282,34 +2299,17 @@ module EDDTableImport {
         }
 
         requiredInputsProvided(): boolean {
-            var mode: any, hadInput: boolean;
-            var mode = this.selectMajorKindStep.interpretationMode;
-
-            // if the current mode doesn't require input from this step, just return true
-            // if the previous step had input
-            if (IdentifyStructuresStep.MODES_WITH_DATA_TABLE.indexOf(mode) < 0) {
-                return this.rawInputStep.haveInputData;
-            }
-
-            // otherwise, require user input for every non-ignored row
-            for(let row in this.pulldownObjects) {
-                var rowInactivated = !this.activeRowFlags[row];
-
-                if(rowInactivated) {
-                    continue;
-                }
-                var inputSelector = this.pulldownObjects[row];
-                var comboBox = $(inputSelector);
-                if (comboBox.val() == IdentifyStructuresStep.DEFAULT_PULLDOWN_VALUE) {
-                    // NOTE: typecomparison breaks it!
-                    $('#missingStep3InputDiv').removeClass('off');
+            var needPulldownSet: boolean;
+            // require user input for every non-ignored row
+            needPulldownSet = this.pulldownObjects.some((p: HTMLElement, row: number): boolean => {
+                if (!this.activeRowFlags[row]) {
                     return false;
+                } else {
+                    return $(p).val() == IdentifyStructuresStep.DEFAULT_PULLDOWN_VALUE;
                 }
-            }
-
-            $('#missingStep3InputDiv').addClass('off');
-
-            return this.parsedSets.length > 0;
+            });
+            $('#missingStep3InputDiv').toggleClass('off', !needPulldownSet);
+            return !needPulldownSet && this.parsedSets.length > 0;
         }
     }
 
@@ -2510,9 +2510,7 @@ module EDDTableImport {
 
         disableInputDuringProcessing():void {
             var hasRequiredInitialInputs = this.identifyStructuresStep.requiredInputsProvided();
-            if(hasRequiredInitialInputs) {
-                $('#emptyDisambiguationLabel').addClass('off');
-            }
+            $('#emptyDisambiguationLabel').toggleClass('off', hasRequiredInitialInputs);
             $('#processingStep3Label').toggleClass('off', !hasRequiredInitialInputs);
             this.setAllInputsEnabled(false);
         }
@@ -2521,13 +2519,13 @@ module EDDTableImport {
         // where the user can fill out additional information for the pasted table.
         reconfigure(): void {
             var mode: string,
-                parsedSets: RawImportSet[],
                 seenAnyTimestamps: boolean,
                 hideMasterTimestamp: boolean,
                 hasRequiredInitialInput: boolean;
 
             mode = this.selectMajorKindStep.interpretationMode;
             seenAnyTimestamps = this.identifyStructuresStep.seenAnyTimestamps;
+            hasRequiredInitialInput = this.identifyStructuresStep.requiredInputsProvided();
 
             // Hide all the subsections by default
             $('#masterTimestampDiv').addClass('off');
@@ -2546,12 +2544,9 @@ module EDDTableImport {
             $('.' + TypeDisambiguationStep.STEP_4_TOGGLE_SUBSECTION_CLASS).remove();
             $('.' + TypeDisambiguationStep.STEP_4_SUBSECTION_REQUIRED_CLASS).remove();
 
-            hasRequiredInitialInput = this.identifyStructuresStep.requiredInputsProvided();
-
             // If parsed data exists, but we haven't seen a single timestamp, show the "master
             // timestamp" input.
-            hideMasterTimestamp = (!hasRequiredInitialInput) || seenAnyTimestamps ||
-                (this.identifyStructuresStep.parsedSets.length === 0);
+            hideMasterTimestamp = !hasRequiredInitialInput || seenAnyTimestamps;
             $('#masterTimestampDiv').toggleClass('off', hideMasterTimestamp);
             // Call subroutines for each of the major sections
             if (mode === "biolector") {
@@ -2865,7 +2860,7 @@ module EDDTableImport {
             parentDiv = $('#disambiguateMeasurementsSection')
 
             parentDiv.addClass('off');
-            $('#masterMTypeDiv').addClass('off');
+            $('#masterMTypeDiv, #masterCompDiv, #masterUnitDiv').addClass('off');
 
             bodyJq = $('#disambiguateMeasurementsTable tbody');
             bodyJq.children().detach();
@@ -2883,32 +2878,45 @@ module EDDTableImport {
                 return;
             }
 
-            // No measurements for disambiguation, have timestamp data:  That means we need to
-            // choose one measurement. You might think that we should display this even without
-            // timestamp data, to handle the case where we're importing a single measurement type
-            // for a single timestamp...  But that would be a 1-dimensional import, since there
-            // is only one other object with multiple types to work with (lines/assays).  We're
-            // not going to bother supporting that.
-            if (hasRequiredInitialInput
-                    && uniqueMeasurementNames.length === 0
-                    && seenAnyTimestamps) {
-                $('#masterMTypeDiv').removeClass('off');
-                return;
+            // If using the implicit IDs for measurements, need to specify units
+            var needUnits: boolean = this.identifyStructuresStep.uniquePubchem.length > 0 ||
+                    this.identifyStructuresStep.uniqueUniprot.length > 0 ||
+                    this.identifyStructuresStep.uniqueGenbank.length > 0;
+            // If using pubchem IDs, need to specify compartment
+            var needComp: boolean = this.identifyStructuresStep.uniquePubchem.length > 0;
+            if (hasRequiredInitialInput) {
+                if (needUnits) {
+                    $('#masterUnitDiv').removeClass('off')
+                        .find('[name=masterUnits]')
+                            .addClass(TypeDisambiguationStep.STEP_4_USER_INPUT_CLASS)
+                        .end()
+                        .find('[name=masterUnitsValue]')
+                            .addClass(TypeDisambiguationStep.STEP_4_REQUIRED_INPUT_CLASS)
+                        .end();
+                    if (needComp) {
+                        $('#masterCompDiv').removeClass('off')
+                            .find('[name=masterComp]')
+                                .addClass(TypeDisambiguationStep.STEP_4_USER_INPUT_CLASS)
+                            .end()
+                            .find('[name=masterCompValue]')
+                                .addClass(TypeDisambiguationStep.STEP_4_REQUIRED_INPUT_CLASS)
+                            .end();
+                    }
+                    return;
+                } else if (uniqueMeasurementNames.length === 0 && seenAnyTimestamps) {
+                    // No measurements for disambiguation, have timestamp data: That means we
+                    // need to choose one measurement. You might think that we should display
+                    // this even without timestamp data, to handle the case where we are
+                    // importing a single measurement type  for a single timestamp... But
+                    // that would be a 1-dimensional import, since there is only one other
+                    // object with multiple types to work with (lines/assays). We are not
+                    // going to bother supporting that.
+                    $('#masterMTypeDiv').removeClass('off');
+                    return;
+                }
             }
 
-            // If in Skyline mode, need to specify the units to import
-            if (mode === 'skyline') {
-                $('#masterUnitDiv').removeClass('off')
-                    .find('[name=masterUnits]')
-                        .addClass(TypeDisambiguationStep.STEP_4_USER_INPUT_CLASS)
-                    .end()
-                    .find('[name=masterUnitsValue]')
-                        .addClass(TypeDisambiguationStep.STEP_4_REQUIRED_INPUT_CLASS)
-                    .end()
-                return;
-            }
-
-            if(uniqueMeasurementNames.length > this.TOGGLE_ALL_THREASHOLD) {
+            if (uniqueMeasurementNames.length > this.TOGGLE_ALL_THREASHOLD) {
                 this.makeToggleAllButton('Measurement Types')
                     .insertBefore($('#disambiguateMeasurementsTable'));
             }
@@ -3142,7 +3150,8 @@ module EDDTableImport {
                 masterMType: any,
                 masterMComp: any,
                 masterMUnits: any,
-                masterUnits: any;
+                masterUnits: any,
+                masterComp: any;
             this.errorMessages = [];
             this.warningMessages = [];
 
@@ -3163,6 +3172,8 @@ module EDDTableImport {
             masterMType = $('#masterMTypeValue').val();
             masterMComp = $('#masterMCompValue').val();
             masterMUnits = $('#masterMUnitsValue').val();
+            masterComp = $('#masterCompValue').val();
+            masterUnits = $('#masterUnitsValue').val();
 
             resolvedSets = [];
             droppedDatasetsForMissingTime = 0;
@@ -3189,17 +3200,22 @@ module EDDTableImport {
                 lineId = 'new';    // A convenient default
                 assay_id = 'named_or_new';
 
+                // In modes where we resolve measurement types in the client UI, go with the
+                // master values by default.
                 measurementTypeId = null;
                 compartmentId = null;
                 unitsId = null;
-                // In modes where we resolve measurement types in the client UI, go with the
-                // master values by default.
-                if (mode === "biolector" || mode === "std" || mode === "mdv" || mode === "hplc") {
+                if (this.identifyStructuresStep.uniquePubchem.length > 0 ||
+                        this.identifyStructuresStep.uniqueUniprot.length > 0 ||
+                        this.identifyStructuresStep.uniqueGenbank.length > 0) {
+                    unitsId = masterUnits;
+                    if (this.identifyStructuresStep.uniquePubchem.length > 0) {
+                        compartmentId = masterComp;
+                    }
+                } else if (this.identifyStructuresStep.uniqueMeasurementNames.length === 0) {
                     measurementTypeId = masterMType;
                     compartmentId = masterMComp;
                     unitsId = masterMUnits;
-                } else if (mode === 'skyline') {
-                    unitsId = masterUnits;
                 }
 
                 metaDataPresent = false;
@@ -3249,19 +3265,15 @@ module EDDTableImport {
 
                 // Same for measurement name, but resolve all three measurement fields if we find
                 // a match, and only if we are resolving measurement types client-side.
-                if (mode === "biolector" || mode === "std" || mode === "mdv" || mode === 'hplc') {
-                    if (set.measurement_name !== null) {
-                        measDisam = this.measurementObjSets[set.measurement_name];
-                        if (measDisam) {
-                            measurementTypeId = measDisam.typeAuto.val();
-                            compartmentId = measDisam.compAuto.val() || "0";
-                            unitsId = measDisam.unitsAuto.val() || "1";
-                            // If we've disabled import for measurements of this type, skip adding
-                            // this measurement to the list
-                            if (measDisam.typeAuto.hiddenInput.is(':disabled')) {
-                                return;  // continue to the next loop iteration parsedSets.forEach
-                            }
-                        }
+                measDisam = this.measurementObjSets[set.measurement_name];
+                if (measDisam) {
+                    measurementTypeId = measDisam.typeAuto.val();
+                    compartmentId = measDisam.compAuto.val() || "0";
+                    unitsId = measDisam.unitsAuto.val() || "1";
+                    // If we've disabled import for measurements of this type, skip adding
+                    // this measurement to the list
+                    if (measDisam.typeAuto.hiddenInput.is(':disabled')) {
+                        return;  // continue to the next loop iteration parsedSets.forEach
                     }
                 }
 
@@ -3544,13 +3556,19 @@ module EDDTableImport {
 
         appendLineAutoselect(parentElement:JQuery, defaultSelection): void {
             // create a text input to gather user input
-            var lineInputId = 'disamLineInput' + this.visibleIndex;
+            var lineInputId: string = 'disamLineInput' + this.visibleIndex,
+                autoOptions: EDDAuto.AutocompleteOptions;
 
-            this.lineAuto = new EDDAuto.StudyLine({
-                container:parentElement,
-                hiddenValue:defaultSelection.lineID,
-                emptyCreatesNew:true,
-                nonEmptyRequired:false
+            autoOptions = {
+                "container": parentElement,
+                "hiddenValue": defaultSelection.lineID,
+                "emptyCreatesNew": true,
+                "nonEmptyRequired": false
+            };
+            // passes extra "active" parameter to line search
+            this.lineAuto = new EDDAuto.StudyLine(autoOptions, {
+                "active": 'true',
+                "study": '' + EDDData.currentStudyID
             });
 
             //if there is a line name, auto fill line.
@@ -3582,7 +3600,7 @@ module EDDTableImport {
             // ATData.existingAssays is type {[index: string]: number[]}
             protocol = EDDTableImport.selectMajorKindStep.masterProtocol;
             assays = ATData.existingAssays[protocol] || [];
-            assays.every((id: number, i: number): boolean => {
+            assays.every((id: number): boolean => {
                 var assay: AssayRecord = EDDData.Assays[id];
                 if (assayOrLine.toLowerCase() === assay.name.toLowerCase()) {
                     // The full Assay name, even case-insensitive, is the best match
@@ -3593,12 +3611,12 @@ module EDDTableImport {
             });
             // Now we repeat the practice, separately, for the Line pulldown.
             highest = 0;
-            // ATData.existingLines is type {id: number; n: string;}[]
+            // ATData.existingLines is type {id: number; name: string;}[]
             (ATData.existingLines || []).every((line: any): boolean => {
-                if (assayOrLine.toLowerCase() === line.n.toLowerCase()) {
+                if (assayOrLine.toLowerCase() === line.name.toLowerCase()) {
                     // The Line name, case-insensitive, is the best match
                     selections.lineID = line.id;
-                    selections.name = line.n;
+                    selections.name = line.name;
                     return false;  // do not need to continue
                 }
                 return true;

@@ -9,6 +9,7 @@ import re
 from builtins import str
 from django.conf import settings
 from django.contrib import messages
+from django.contrib.postgres.aggregates import ArrayAgg
 from django.core.exceptions import PermissionDenied, SuspiciousOperation, ValidationError
 from django.core.urlresolvers import reverse
 from django.db import transaction
@@ -27,15 +28,18 @@ from rest_framework.exceptions import MethodNotAllowed
 
 from main.importer.experiment_desc.constants import (
     ALLOW_DUPLICATE_NAMES_PARAM,
+    ALLOW_NON_STRAIN_PARTS,
     BAD_FILE_CATEGORY,
     DRY_RUN_PARAM,
-    IGNORE_ICE_RELATED_ERRORS_PARAM,
+    IGNORE_ICE_ACCESS_ERRORS_PARAM,
     INTERNAL_EDD_ERROR_CATEGORY,
     INTERNAL_SERVER_ERROR,
+    OMIT_STRAINS,
     UNPREDICTED_ERROR,
     UNSUPPORTED_FILE_TYPE,
 )
-from main.importer.experiment_desc.importer import _build_response_content, ImportErrorSummary
+from main.importer.experiment_desc.importer import (_build_response_content, ImportErrorSummary,
+                                                    ExperimentDescriptionOptions)
 from . import autocomplete, models as edd_models, redis
 from .export.forms import ExportOptionForm, ExportSelectionForm, WorklistForm
 from .export.sbml import SbmlExport
@@ -47,6 +51,7 @@ from .importer.parser import find_parser
 from .models import (Assay, Attachment, Line, Measurement, MeasurementType, MeasurementValue,
                      Metabolite, MetaboliteSpecies, MetadataType, Protocol, SBMLTemplate, Study,
                      StudyPermission, Update, )
+from .models.common import qfilter
 from .solr import StudySearch
 from .tasks import import_table_task
 from .utilities import (
@@ -62,7 +67,10 @@ from edd import utilities
 
 logger = logging.getLogger(__name__)
 
-FILE_TYPE_HEADER = 'HTTP_X_EDD_FILE_TYPE'
+EXCEL_TYPES = [
+        'application/vnd.ms-excel',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ]
 
 
 @register.filter(name='lookup')
@@ -385,6 +393,21 @@ class ExperimentDescriptionHelp(generic.TemplateView):
     template_name = 'main/experiment_description_help.html'
 
 
+class AddLineCombos(StudyObjectMixin, generic.DetailView):
+    template_name = 'main/study-lines-add-combos.html'
+
+    def get(self, request, *args, **kwargs):
+        # load study to enforce permissions check... permissions should also be checked by back end
+        # during user attempt to create the lines, but better to identify permissions errors before
+        # loading the form
+        pk = kwargs.get('pk')
+        slug = kwargs.get('slug')
+        load_study(request, pk=pk, slug=slug, permission_type=StudyPermission.CAN_EDIT)
+
+        # render the template
+        return super(AddLineCombos, self).get(request, *args, **kwargs)
+
+
 class StudyOverviewView(StudyDetailBaseView):
     """
     Study overview page, displays study name, description, comments, attachments, permissions.
@@ -555,6 +578,12 @@ class StudyLinesView(StudyDetailBaseView):
                 count = details[Line._meta.label]
             else:
                 count = form.selection.lines.update(active=active)
+                # cascade deactivation to assays and measurements
+                # NOTE: ExportSelectionForm already filters out deactivated elements, so this will
+                #   _NOT_ re-activate objects from previously deactivated lines.
+                form.selection.assays.update(active=active)
+                form.selection.measurements.update(active=active)
+
             messages.success(
                 request,
                 _('%(action)s %(count)d Lines') % {
@@ -1205,14 +1234,18 @@ def study_edddata(request, pk=None, slug=None):
 def study_assay_table_data(request, pk=None, slug=None):
     """ Request information on assays associated with a study. """
     model = load_study(request, pk=pk, slug=slug)
-    # FIXME filter protocols?
-    protocols = Protocol.objects.all()
-    lines = model.line_set.all()
+    active_param = request.GET.get('active', None)
+    active_value = 'true' == active_param if active_param in ('true', 'false') else None
+    active = qfilter(value=active_value, fields=['active'])
+    existingLines = model.line_set.filter(active)
+    existingAssays = edd_models.Assay.objects.filter(active, line__study=model)
     return JsonResponse({
         "ATData": {
-            "existingProtocols": {p.id: p.name for p in protocols},
-            "existingLines": [{"n": l.name, "id": l.id} for l in lines],
-            "existingAssays": model.get_assays_by_protocol(),
+            "existingLines": list(existingLines.values('name', 'id')),
+            "existingAssays": {
+                assays['protocol_id']: assays['ids']
+                for assays in existingAssays.values('protocol_id').annotate(ids=ArrayAgg('id'))
+            },
         },
         "EDDData": get_edddata_study(model),
     }, encoder=utilities.JSONEncoder)
@@ -1380,43 +1413,36 @@ def study_describe_experiment(request, pk=None, slug=None):
     user = request.user
     dry_run = request.GET.get(DRY_RUN_PARAM, False)
     allow_duplicate_names = request.GET.get(ALLOW_DUPLICATE_NAMES_PARAM, False)
-    ignore_ice_related_errors = request.GET.get(IGNORE_ICE_RELATED_ERRORS_PARAM, False)
+    ignore_ice_access_errors = request.GET.get(IGNORE_ICE_ACCESS_ERRORS_PARAM, False)
+    allow_non_strains = request.GET.get(ALLOW_NON_STRAIN_PARTS, False)
+    omit_strains = request.GET.get(OMIT_STRAINS, False)
 
     # detect the input format
+    stream = request
     file = request.FILES.get('file', None)
-    # TODO update API of CombinatorialCreationImporter.do_import() to not require a string
-    #   filename to switch between Excel and JSON modes
-    EXCEL_TYPES = [
-        'application/vnd.ms-excel',
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    ]
-    if file and file.content_type in EXCEL_TYPES:
-        filename = file.name
-    elif file and file.content_type == 'application/json':
-        filename = None
-    elif file:
-        summary = ImportErrorSummary(BAD_FILE_CATEGORY, UNSUPPORTED_FILE_TYPE)
-        summary.add_occurrence(file.content_type)
-        errors = {BAD_FILE_CATEGORY: {UNSUPPORTED_FILE_TYPE: summary}}
-        return JsonResponse(_build_response_content(errors, {}), status=codes.bad_request)
-    else:
-        summary = ImportErrorSummary(BAD_FILE_CATEGORY, "File missing")
-        errors = {BAD_FILE_CATEGORY: {"File missing": summary}}
-        return JsonResponse(_build_response_content(errors, {}), status=codes.bad_request)
+    file_name = None
+    print('file = %s, content_type=%s' % (file, file.content_type if file else None))
+    if file:
+        stream = file
+        file_name = file.name
+        if file.content_type not in EXCEL_TYPES:
+            summary = ImportErrorSummary(BAD_FILE_CATEGORY, UNSUPPORTED_FILE_TYPE)
+            summary.add_occurrence(file.content_type)
+            errors = {BAD_FILE_CATEGORY: {UNSUPPORTED_FILE_TYPE: summary}}
+            return JsonResponse(_build_response_content(errors, {}), status=codes.bad_request)
 
-    logger.info('Parsing file')
+    options = ExperimentDescriptionOptions(allow_duplicate_names=allow_duplicate_names,
+                                           allow_non_strains=allow_non_strains, dry_run=dry_run,
+                                           ignore_ice_access_errors=ignore_ice_access_errors,
+                                           use_ice_part_numbers=file_name,
+                                           omit_strains=omit_strains)
 
     # attempt the import
     importer = CombinatorialCreationImporter(study, user)
     try:
         with transaction.atomic(savepoint=False):
-            status_code, reply_content = importer.do_import(
-                file,
-                allow_duplicate_names,
-                dry_run,
-                ignore_ice_related_errors,
-                excel_filename=filename
-            )
+            status_code, reply_content = (
+                importer.do_import(stream, options, excel_filename=file_name))
         logger.debug('Reply content: %s' % json.dumps(reply_content))
         return JsonResponse(reply_content, status=status_code)
 
@@ -1428,7 +1454,7 @@ def study_describe_experiment(request, pk=None, slug=None):
         logger.exception('Unpredicted exception occurred during experiment description processing')
 
         importer.send_unexpected_err_email(dry_run,
-                                           ignore_ice_related_errors,
+                                           ignore_ice_access_errors,
                                            allow_duplicate_names)
 
         return JsonResponse(
@@ -1696,10 +1722,15 @@ AUTOCOMPLETE_VIEW_LOOKUP = {
 # /search/<model_name>/
 def model_search(request, model_name):
     searcher = AUTOCOMPLETE_VIEW_LOOKUP.get(model_name, None)
-    if searcher:
-        return searcher(request)
-    elif meta_pattern.match(model_name):
-        match = meta_pattern.match(model_name)
-        return autocomplete.search_metadata(request, match.group(1))
-    else:
-        return autocomplete.search_generic(request, model_name)
+
+    try:
+        if searcher:
+            return searcher(request)
+        elif meta_pattern.match(model_name):
+            match = meta_pattern.match(model_name)
+            return autocomplete.search_metadata(request, match.group(1))
+        else:
+            return autocomplete.search_generic(request, model_name)
+
+    except ValidationError as v:
+        return JsonResponse(v.message, status=400)
