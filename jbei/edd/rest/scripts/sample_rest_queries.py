@@ -589,7 +589,7 @@ def parse_search_settings(args):
     if hasattr(args, _STUDY_SLUG_ARG):
         global_search_params.study_slug = args.study_slug
 
-        if args.study_slug and hasattr(args, _STUDY_ID_ARG):
+        if args.study_slug and getattr(args, _STUDY_ID_ARG, None):
             logger.warning('Ignoring %(id)s argument, which is overridden by %(slug)s' % {
                                 'id': _STUDY_ID_ARG,
                                 'slug': _STUDY_SLUG_ARG, })
