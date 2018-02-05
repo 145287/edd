@@ -646,8 +646,8 @@ def authenticate_with_apis(args, user_input):
     ######################################################################################
     # If not already provided, prompt terminal user for credentials and log into EDD
     ######################################################################################
-    logger.info('Logging into EDD at %s...' % settings.EDD_URL)
-    edd_login_details = session_login(EddSessionAuth, settings.EDD_URL, 'EDD',
+    logger.info('Logging into EDD at %s...' % edd_url)
+    edd_login_details = session_login(EddSessionAuth, edd_url, 'EDD',
                                       username_arg=username,
                                       password_arg=password,
                                       user_input=user_input,
@@ -657,7 +657,7 @@ def authenticate_with_apis(args, user_input):
     edd_session_auth = edd_login_details.session_auth
 
     # instantiate and configure an EddApi client instance
-    edd = EddApi(base_url=settings.EDD_URL, auth=edd_session_auth,
+    edd = EddApi(base_url=edd_url, auth=edd_session_auth,
                  result_limit=settings.EDD_PAGE_SIZE)
     edd.timeout = settings.EDD_REQUEST_TIMEOUT
 
@@ -671,7 +671,7 @@ def authenticate_with_apis(args, user_input):
     ice_login_details = None
     try:
         login_application = 'ICE'
-        ice_login_details = session_login(IceSessionAuth, settings.ICE_URL, login_application,
+        ice_login_details = session_login(IceSessionAuth, ice_url, login_application,
                                           username_arg=edd_login_details.username,
                                           password_arg=edd_login_details.password,
                                           print_result=False,
@@ -680,7 +680,7 @@ def authenticate_with_apis(args, user_input):
                                           verify_ssl_cert=settings.VERIFY_ICE_CERT)
 
         ice_session_auth = ice_login_details.session_auth
-        ice = IceApi(ice_session_auth, settings.ICE_URL, result_limit=settings.ICE_PAGE_SIZE,
+        ice = IceApi(ice_session_auth, ice_url, result_limit=settings.ICE_PAGE_SIZE,
                      verify_ssl_cert=settings.VERIFY_ICE_CERT)
         ice.timeout = settings.ICE_REQUEST_TIMEOUT
 
